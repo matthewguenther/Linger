@@ -66,9 +66,9 @@ task fails its acceptance criteria twice.
   milestone check passes: a forced mid-stream disconnect resumes with **no gaps
   and no duplicates**, asserted by sequence accounting over real sockets
   (`tests/gateway.rs`).
-- ⬜ **M3 … M9** — queued below. **Next up: T-301.** M0 is closed, so M3 is
-  clear to start; run the apt line in T-002 first so `pnpm tauri dev` works
-  while building it.
+- ⬜ **M3 … M9** — queued below. **Next up: T-006 (the vocabulary change), then
+  T-301.** M0 is closed, so M3 is clear to start; run the apt line in T-002
+  first so `pnpm tauri dev` works while building it.
 
 Two decisions M5/M7 no longer have to make: **use `oklch()` directly** (WebKitGTK
 2.52.3 supports it, T-002), and **T-503's Win32 backend is a known quantity**
@@ -199,6 +199,50 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   down eyes clap hundred sparkles`. Confirm or edit *before* M3 renders them;
   changing keys after messages exist means a migration.
   *Done 2026-08-19: Matt confirmed the set as-is. AGPL-3.0 license also confirmed.*
+
+## Vocabulary change — **run this before T-301**
+
+- [ ] **T-006 · Drop the coined vocabulary** — effort: **medium** *(Opus 5: high)*
+  **Decided by Matt 2026-08-19:** the invented words go. The product is Linger;
+  an instance is a *server*. Doing this before M3 is deliberate — M3 writes the
+  UI copy and component names, and renaming after it lands costs several times
+  more.
+
+  This is one atomic change: AGENTS.md requires docs and behavior to move in the
+  same commit, so SPEC/PROTOCOL/ARCHITECTURE/README/code/tests all go together.
+  There are no real deployments, so **edit `0001_init.sql` in place** rather than
+  adding a migration; delete any local `data/linger.db` afterwards.
+
+  | Old | New | Notes |
+  |---|---|---|
+  | a stoop | **a server** | "One person runs a Linger server." |
+  | `GET/PATCH /stoop` | `/server` | breaking, but no client ships yet |
+  | `StoopInfo` / `UpdateStoopRequest` | `ServerInfo` / `UpdateServerRequest` | |
+  | `stoop_config` table | `server_config` | |
+  | `stoop_name` (setup, invite preview) | `server_name` | |
+  | the shelf | **media** | `/shelf` → `/media`, `ShelfItem` → `MediaItem` |
+  | their sign | **status** | `Sign` → `UserStatus`, `user_sign` → `user_status`, `User.sign` → `User.status` |
+  | sitting in | **in the room** | see the call below |
+  | a room, the host | *unchanged* | already plain English |
+
+  **The one judgment call — presence naming.** `PresenceState::Sitting` and the
+  client op `room.sit` both encode "sitting". Recommended: state `sitting` →
+  **`in_room`**, client op `room.sit` → **`room.focus`** (it fires on focus, and
+  `null` still means "left"). Do *not* reuse `room.enter` for the client op — it
+  already exists as a server→client event that triggers entrance sounds. Rename
+  `Gateway::apply_sit` → `apply_room_focus` to match. If any of this reads badly
+  in context, pick better and change the docs in the same commit.
+
+  **Do not rename:** the `linger-server` crate/process, `LINGER_*` env vars, or
+  the repo. Watch for accidental "linger-server server" phrasings and for
+  `spawn_stoop`/`TestStoop`/`stoop_with_room` in `tests/common/mod.rs`, which the
+  whole suite calls.
+
+  *Accept:* `grep -ri "stoop\|shelf\|sitting in" --exclude-dir=target
+  --exclude-dir=node_modules --exclude-dir=.git .` returns nothing outside a
+  historical note; `cargo test --workspace`, `cargo fmt --all --check`, and
+  `cd client && pnpm check` green; CI green after push. SPEC §1's vocabulary
+  table and AGENTS.md hard rule 6 must describe the *new* words, not the old.
 
 ## M1 — server REST: auth, invites, rooms, messages
 
