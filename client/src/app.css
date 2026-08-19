@@ -1,0 +1,93 @@
+/* Console frame: [rail | stream | roster] over a permanent status bar.
+   Panels butt against each other via 1px hairlines; nothing floats. */
+
+.frame {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(var(--stream-min-w), 1fr) var(--roster-w);
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "rail stream roster"
+    "status status status";
+  height: 100%;
+}
+
+.rail {
+  grid-area: rail;
+  background: var(--surface-1);
+  border-right: 1px solid var(--hairline);
+  padding: var(--gutter);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gutter) * 1.5);
+}
+
+.stream {
+  grid-area: stream;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stream-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px var(--gutter);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.room-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.stream-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--gutter);
+}
+
+.composer {
+  padding: var(--gutter);
+  border-top: 1px solid var(--hairline);
+}
+
+.composer-input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.composer-input::placeholder {
+  color: var(--text-faint);
+}
+
+.roster {
+  grid-area: roster;
+  background: var(--surface-1);
+  border-left: 1px solid var(--hairline);
+  padding: var(--gutter);
+}
+
+.status-bar {
+  grid-area: status;
+  display: flex;
+  justify-content: space-between;
+  padding: 4px var(--gutter);
+  background: var(--surface-1);
+  border-top: 1px solid var(--hairline);
+}
+
+.placeholder {
+  color: var(--text-faint);
+  margin-top: 8px;
+  user-select: none;
+}
+
+.rail-rooms {
+  flex: 1;
+}

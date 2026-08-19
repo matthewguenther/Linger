@@ -1,0 +1,78 @@
+/*
+ * Design tokens for "Console" (SPEC §5). All theming flows through these custom
+ * properties — density modes and time-of-day warmth are one variable swap, never
+ * a second stylesheet.
+ *
+ * The 16-color name palette is NOT defined here by hand: M7 generates it from
+ * linger-core::PALETTE (the single source of truth) into palette.generated.css.
+ */
+
+:root {
+  /* --- color: cool neutral gray, dark is primary (SPEC §5.3) --- */
+  --surface-0: #16181c; /* app bg */
+  --surface-1: #1a1d22; /* rails */
+  --surface-2: #21252b; /* raised */
+  --hairline: #2a2e35;
+  --hairline-strong: #363b44;
+  --text-primary: #e4e7ec;
+  --text-secondary: #8b929e;
+  --text-muted: #5c636f;
+  --text-faint: #4a515c;
+  /* Accent is used for exactly four things: the "you left off here" line,
+     focus rings, the active-room rule, and the send affordance. Nowhere else. */
+  --accent: #6e9bff;
+
+  /* --- typography (SPEC §5.2): sans for content, mono for metadata ONLY --- */
+  --font-ui: "Geist Sans", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  --text-body-size: 13.5px;
+  --text-body-leading: 1.6;
+  --text-label-size: 12px;
+  --text-meta-size: 11px;
+
+  /* --- layout metrics (SPEC §5.5) --- */
+  --rail-w: 200px;
+  --roster-w: 240px;
+  --stream-min-w: 420px;
+  --gutter: 14px;
+  --group-gap: 14px;
+  --radius-control: 4px;
+  --radius-media: 6px;
+  /* panels have radius 0 — there is no --radius-panel on purpose */
+
+  /* --- motion (SPEC §5.6): 120–160ms ease-out; no spring, no bounce --- */
+  --motion-fast: 120ms ease-out;
+  --motion-base: 160ms ease-out;
+
+  /* --- message aging (SPEC §5.6): body only, floor 78% --- */
+  --age-fresh: 1;
+  --age-day: 0.88;
+  --age-old: 0.78;
+}
+
+[data-theme="light"] {
+  --surface-0: #f7f8f9;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --hairline: #e3e5e9;
+  --hairline-strong: #cfd3da;
+  --text-primary: #16181c;
+  --text-secondary: #5c636f;
+  --text-muted: #8b929e;
+  --text-faint: #a8aeb8;
+  --accent: #2563c9;
+}
+
+/* Density modes (SPEC §5.6). IRC mode's mono body is set in the mode itself —
+   the one sanctioned exception to "mono is metadata-only". */
+[data-density="compact"] {
+  --text-body-size: 13px;
+  --text-body-leading: 1.45;
+  --group-gap: 10px;
+}
+[data-density="irc"] {
+  --text-body-size: 12.5px;
+  --text-body-leading: 1.4;
+  --group-gap: 0px;
+  --font-ui: var(--font-mono);
+}

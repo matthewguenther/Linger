@@ -1,0 +1,49 @@
+/*
+ * Base surface rules for "Console" (SPEC §5.1). The hard visual rules live here
+ * as structure so they're hard to violate by accident:
+ * no shadows (except focus rings), no rounded panels, no gradients on surfaces,
+ * panel separation is 1px hairlines, full-bleed.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Mono is metadata-only: timestamps, status bar, numerals, file sizes, code. */
+.meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  color: var(--text-muted);
+}
+
+.panel-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
