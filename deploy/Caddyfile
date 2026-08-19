@@ -1,0 +1,14 @@
+# Replace linger.example.com with your domain (both blocks).
+# Caddy fetches and renews TLS certificates automatically — no certbot, ever.
+
+linger.example.com {
+	reverse_proxy linger:8420
+}
+
+# Uploads are served from a separate origin so hostile files can't touch app
+# sessions (ARCHITECTURE §7). M6 activates this; the DNS record for it can be
+# created now (point cdn.linger.example.com at the same machine).
+#
+# cdn.linger.example.com {
+# 	reverse_proxy linger:8420
+# }

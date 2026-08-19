@@ -1,0 +1,33 @@
+# A stoop in two containers: linger itself and Caddy for automatic TLS.
+# Target: a non-expert friend gets this running in under 15 minutes.
+#
+#   1. Point your domain's DNS at this machine.
+#   2. Set LINGER_DOMAIN below (and in Caddyfile) to that domain.
+#   3. docker compose up -d
+#   4. docker compose logs linger   ← prints the one-time host-setup URL
+#
+# Backup = ./data/linger.db + ./data/objects/. That's the whole stoop.
+
+services:
+  linger:
+    image: ghcr.io/matthewguenther/linger:latest
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    environment:
+      LINGER_DOMAIN: linger.example.com
+      LINGER_DATA_DIR: /data
+      LINGER_STORAGE: local
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+
+volumes:
+  caddy_data: {}

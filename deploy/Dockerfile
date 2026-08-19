@@ -1,0 +1,23 @@
+# Build a static-ish linger-server binary, then ship it on a slim base.
+# Build context is the repository root:  docker build -f deploy/Dockerfile .
+
+FROM rust:1.93-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo ./.cargo
+COPY crates ./crates
+COPY registry ./registry
+RUN cargo build --release -p linger-server
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --home /data linger
+COPY --from=build /src/target/release/linger-server /usr/local/bin/linger-server
+
+USER linger
+ENV LINGER_DATA_DIR=/data
+VOLUME /data
+EXPOSE 8420
+ENTRYPOINT ["linger-server"]
