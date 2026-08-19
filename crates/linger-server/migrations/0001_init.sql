@@ -122,12 +122,15 @@ CREATE TABLE invites (
 CREATE TABLE refresh_tokens (
   id              BLOB PRIMARY KEY,
   user_id         BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  family_id       BLOB NOT NULL,               -- login lineage: rotation keeps it,
+                                               -- reuse of a rotated token revokes it
   token_hash      TEXT NOT NULL,               -- sha256 of the token
   device_label    TEXT,
   expires_at      INTEGER NOT NULL,
   revoked_at      INTEGER,
   created_at      INTEGER NOT NULL
 );
+CREATE INDEX idx_refresh_hash ON refresh_tokens(token_hash);
 
 CREATE TABLE stoop_config (
   key             TEXT PRIMARY KEY,

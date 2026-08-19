@@ -237,6 +237,8 @@ CREATE TABLE invites (
 CREATE TABLE refresh_tokens (
   id              BLOB PRIMARY KEY,
   user_id         BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  family_id       BLOB NOT NULL,               -- login lineage: rotation keeps it,
+                                               -- reuse of a rotated token revokes it
   token_hash      TEXT NOT NULL,               -- sha256 of the token
   device_label    TEXT,
   expires_at      INTEGER NOT NULL,

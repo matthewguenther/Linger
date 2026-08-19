@@ -80,6 +80,15 @@ impl Registry {
         })
     }
 
+    /// Look up an entry by its stable id. Used server-side to resolve a
+    /// client-reported registry id into label + kind for `PresenceEntry` —
+    /// an id the server doesn't know resolves to no activity (default deny
+    /// holds on both ends).
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&RegistryApp> {
+        self.apps.iter().find(|a| a.id == id)
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.apps.len()

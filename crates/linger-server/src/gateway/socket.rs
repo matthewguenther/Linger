@@ -1,0 +1,232 @@
+//! The WebSocket side of the gateway: handshake (hello → identify|resume →
+//! ready|resumed), the reader loop, and heartbeat liveness.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::State;
+use axum::response::Response;
+use futures_util::{SinkExt, StreamExt};
+use linger_core::gateway::{ClientFrame, ReadyData, ServerEvent, ServerFrame};
+use linger_core::limits::{HEARTBEAT_INTERVAL_MS, RATE_TYPING_PER_ROOM};
+use linger_core::UserId;
+use tokio::sync::mpsc;
+
+use super::{spawn_session, Ctl, SessionHandle};
+use crate::db::now_ms;
+use crate::repo;
+use crate::state::AppState;
+
+/// How long the client has to send identify/resume after hello.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Reader liveness: 2.5× the heartbeat interval with no traffic ⇒ dead peer.
+const LIVENESS_TIMEOUT: Duration = Duration::from_millis(HEARTBEAT_INTERVAL_MS * 5 / 2);
+
+pub async fn ws_route(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn send_control(sink: &mpsc::Sender<String>, event: ServerEvent) {
+    if let Ok(json) = serde_json::to_string(&ServerFrame::control(event)) {
+        let _ = sink.send(json).await;
+    }
+}
+
+async fn handle_socket(socket: WebSocket, state: AppState) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    // Writer task: everything outbound funnels through one queue so the
+    // handler, the session task, and heartbeat acks can't interleave frames.
+    let (sink, mut sink_rx) = mpsc::channel::<String>(256);
+    let writer = tokio::spawn(async move {
+        while let Some(json) = sink_rx.recv().await {
+            if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    send_control(&sink, ServerEvent::Hello { heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS }).await;
+
+    // First frame decides the path: identify (new session) or resume.
+    let user_id = match handshake(&state, &sink, &mut ws_rx).await {
+        Some(user_id) => user_id,
+        None => {
+            drop(sink);
+            let _ = writer.await;
+            return;
+        }
+    };
+
+    state.gateway.connection_opened(user_id);
+    let _ = sqlx::query("UPDATE users SET last_seen_at = ? WHERE id = ?")
+        .bind(now_ms())
+        .bind(user_id.to_vec())
+        .execute(&state.db.write)
+        .await;
+
+    // Reader loop until close, error, or liveness timeout.
+    loop {
+        let received = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()).await;
+        let frame = match received {
+            Err(_) | Ok(None) | Ok(Some(Err(_))) => break,
+            Ok(Some(Ok(Message::Close(_)))) => break,
+            Ok(Some(Ok(Message::Text(text)))) => text,
+            Ok(Some(Ok(_))) => continue, // binary/ping/pong: nothing for us
+        };
+        // Unknown ops and malformed frames are ignored, per PROTOCOL §9.
+        let Ok(frame) = serde_json::from_str::<ClientFrame>(frame.as_str()) else {
+            continue;
+        };
+        handle_client_frame(&state, user_id, frame, &sink).await;
+    }
+
+    // Socket gone. The session task survives for the resume window.
+    if let Some(entry) = find_session_for_cleanup(&state, user_id) {
+        let _ = entry.send(Ctl::Detach).await;
+    }
+    state.gateway.connection_closed(user_id);
+    let _ = sqlx::query("UPDATE users SET last_seen_at = ? WHERE id = ?")
+        .bind(now_ms())
+        .bind(user_id.to_vec())
+        .execute(&state.db.write)
+        .await;
+    drop(sink);
+    let _ = writer.await;
+}
+
+/// The session this socket was attached to. Sessions are per-socket in
+/// practice; matching by user is enough at stoop scale because a stale Detach
+/// to an already-detached session is a no-op.
+fn find_session_for_cleanup(state: &AppState, user_id: UserId) -> Option<mpsc::Sender<Ctl>> {
+    state
+        .gateway
+        .sessions
+        .iter()
+        .find(|e| e.value().user_id == user_id)
+        .map(|e| e.value().ctl.clone())
+}
+
+/// Run the handshake; `Some(user_id)` once a session is attached.
+async fn handshake(
+    state: &AppState,
+    sink: &mpsc::Sender<String>,
+    ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
+) -> Option<UserId> {
+    let first = tokio::time::timeout(HANDSHAKE_TIMEOUT, ws_rx.next()).await.ok()??;
+    let Ok(Message::Text(text)) = first else { return None };
+    let Ok(frame) = serde_json::from_str::<ClientFrame>(text.as_str()) else {
+        return None;
+    };
+
+    match frame {
+        ClientFrame::Identify { token, client: _ } => {
+            let Ok(user_id) = state.jwt.verify(&token) else {
+                send_control(
+                    sink,
+                    ServerEvent::InvalidSession { reason: "unauthenticated".into() },
+                )
+                .await;
+                return None;
+            };
+            let Ok(user) = repo::users::expect(&state.db.read, user_id).await else {
+                send_control(sink, ServerEvent::InvalidSession { reason: "unknown user".into() })
+                    .await;
+                return None;
+            };
+
+            let session_id = uuid::Uuid::now_v7().as_simple().to_string();
+            let ctl = spawn_session(Arc::clone(&state.gateway), session_id.clone(), user_id);
+            state
+                .gateway
+                .sessions
+                .insert(session_id.clone(), SessionHandle { user_id, ctl: ctl.clone() });
+
+            // Snapshot after the session subscribed to the bus: anything that
+            // lands in between is both in the snapshot and replayed as
+            // idempotent state, never lost.
+            let users = repo::users::all(&state.db.read).await.ok()?;
+            let rooms = repo::rooms::all(&state.db.read).await.ok()?;
+            let ready = ReadyData {
+                session_id,
+                user,
+                users,
+                rooms,
+                presence: state.gateway.presence_snapshot(),
+            };
+            let frame = ServerFrame::sequenced(ServerEvent::Ready(ready), 0);
+            sink.send(serde_json::to_string(&frame).ok()?).await.ok()?;
+
+            ctl.send(Ctl::Attach { sink: sink.clone(), resume_from: 0, is_resume: false })
+                .await
+                .ok()?;
+            Some(user_id)
+        }
+        ClientFrame::Resume { session_id, token, s } => {
+            let Ok(user_id) = state.jwt.verify(&token) else {
+                send_control(
+                    sink,
+                    ServerEvent::InvalidSession { reason: "unauthenticated".into() },
+                )
+                .await;
+                return None;
+            };
+            let ctl = state
+                .gateway
+                .sessions
+                .get(&session_id)
+                .filter(|e| e.value().user_id == user_id)
+                .map(|e| e.value().ctl.clone());
+            let Some(ctl) = ctl else {
+                send_control(sink, ServerEvent::InvalidSession { reason: "expired".into() }).await;
+                return None;
+            };
+            ctl.send(Ctl::Attach { sink: sink.clone(), resume_from: s, is_resume: true })
+                .await
+                .ok()?;
+            Some(user_id)
+        }
+        _ => None,
+    }
+}
+
+async fn handle_client_frame(
+    state: &AppState,
+    user_id: UserId,
+    frame: ClientFrame,
+    sink: &mpsc::Sender<String>,
+) {
+    match frame {
+        ClientFrame::Heartbeat { s: _ } => {
+            send_control(sink, ServerEvent::HeartbeatAck).await;
+        }
+        ClientFrame::PresenceUpdate { state: presence_state, activity, away_message } => {
+            let entry = state.gateway.apply_presence(
+                user_id,
+                presence_state,
+                activity.as_deref(),
+                away_message,
+            );
+            state.gateway.publish(ServerEvent::PresenceUpdate(entry));
+        }
+        ClientFrame::RoomSit { room_id } => {
+            let entrance_sound: Option<String> =
+                sqlx::query_scalar("SELECT sound_key FROM entrance_sounds WHERE user_id = ?")
+                    .bind(user_id.to_vec())
+                    .fetch_optional(&state.db.read)
+                    .await
+                    .ok()
+                    .flatten();
+            state.gateway.apply_sit(user_id, room_id, entrance_sound);
+        }
+        ClientFrame::TypingStart { room_id } => {
+            let key = format!("typing:{user_id}:{room_id}");
+            if state.limiter.check(&key, RATE_TYPING_PER_ROOM).is_ok() {
+                state.gateway.publish(ServerEvent::Typing { room_id, user_id });
+            }
+        }
+        // Handshake ops after the handshake: ignore.
+        ClientFrame::Identify { .. } | ClientFrame::Resume { .. } => {}
+    }
+}
