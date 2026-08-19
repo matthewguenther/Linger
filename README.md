@@ -1,3 +1,6 @@
+<center><img src="assets/logo/linger_logo.png" width="600px"></center>
+<br>
+
 # Linger
 
 **A small, self-hosted place for a group of friends to hang out.**
