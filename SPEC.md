@@ -488,7 +488,6 @@ first two are the system defaults.
 - DMs and group DMs
 - Search
 - Knock (§4.9)
-- Local AI features and the agent surface — see §8
 - Mobile client
 
 ### V3 or never
@@ -497,6 +496,17 @@ first two are the system defaults.
 - Sandboxed client scripting (the real mIRC nostalgia answer; also a real security
   surface)
 - Custom emoji
+
+### Last, on purpose — local AI and the agent surface (§8)
+
+Deliberately sequenced behind everything above. **Nothing in §8 starts until V1 has
+shipped as a real, working, signed release that people are actually using.**
+
+This is not doubt about the features — §8 makes the case for them. It is a statement
+about what Linger is. The product has to stand on its own as a place friends hang out,
+with no model in the loop, before anything is layered on top. Building the AI layer
+early would also mean designing the core around it, which is exactly the mistake §8.1
+is about.
 
 ---
 
@@ -529,10 +539,15 @@ that is the differentiation. Do not fork them, but do not re-derive solved probl
 
 ---
 
-## 8. AI — where it belongs and where it does not (V2)
+## 8. AI — where it belongs and where it does not (last phase)
 
 The position: **no AI in the conversation. Yes to local AI features and an
-agent-accessible architecture.**
+agent-accessible architecture — after everything else ships.**
+
+Sequencing note: this whole section is the **last** phase of the roadmap (§6). It is
+written out in full now so the architecture does not paint itself into a corner, not
+because any of it is coming soon. Nothing here begins until V1 has shipped as a real,
+working, signed release.
 
 ### 8.1 Why not in the conversation
 

@@ -90,10 +90,14 @@ Other privacy properties that *are* guaranteed:
 ## 🤖 The AI stance
 
 **No AI in the conversation.** No AI participants, no suggested replies, no sentiment
-analysis — ever. Planned V2 features (semantic search over history and media, catch-up
+analysis — ever. The planned features (semantic search over history and media, catch-up
 summaries, transcription/alt-text) run **only against a host-configured local endpoint**
 (Ollama-compatible). No cloud default, no cloud fallback; if no endpoint is configured,
 the features don't appear at all.
+
+They are also **the last thing on the roadmap**, on purpose. Nothing here gets built
+until Linger has shipped as a real, working release. A chat app that needs AI to be
+worth using is a chat app that failed at being a chat app.
 
 A self-hosted Linger server can run all of this on the box. A hosted competitor
 structurally cannot — their version requires shipping your friends' conversations to
@@ -135,26 +139,52 @@ Read first, in order: [SPEC.md](SPEC.md) → [ARCHITECTURE.md](ARCHITECTURE.md) 
 
 ```bash
 # server + core + activity (no GUI deps needed)
-cargo test
+cargo test --workspace
 
 # frontend
 cd client && pnpm install && pnpm check
 
 # desktop client (needs system webview deps; on Debian/Ubuntu:
-#   libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev)
+#   sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
+#                    libayatana-appindicator3-dev librsvg2-dev)
 cd client && pnpm tauri dev
 ```
 
-Wire types are defined once in `linger-core` and exported to TypeScript via `ts-rs`
-(`client/src/generated/`). Never hand-write a type that crosses the wire.
+Before you push, run what CI runs — it gates on all of it:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cd client && pnpm check && pnpm exec vite build
+```
+
+Things that surprise people the first time:
+
+- **Wire types are generated, not written.** They're defined once in `linger-core` and
+  exported to TypeScript by `ts-rs` into `client/src/generated/`. `cargo test -p
+  linger-core` regenerates them. The output is committed, and CI fails if it drifts from
+  the Rust source — so commit the regenerated files with your change. Never hand-write a
+  type that crosses the wire.
+- **Renaming a wire type leaves an orphan.** `ts-rs` writes files but never deletes them,
+  so the old `.ts` file stays behind and the drift check won't catch it. Delete it by hand.
+- **`client/src-tauri` is not in the root cargo workspace.** It links against system
+  webview libraries that CI and server boxes don't have. Build it with `pnpm tauri`, not
+  `cargo`.
+- **pnpm comes from corepack** and the version is pinned in `client/package.json`. Run
+  pnpm commands from inside the repo so it picks up the pin.
 
 Current work queue lives in [TASKS.md](TASKS.md).
 
 ## 🗺️ Roadmap
 
 - **V1** — replaces the text half of Discord for one friend group (see [SPEC.md §6](SPEC.md))
-- **V2** — voice rooms, ambient voice, DMs, search, knock, local-AI features, mobile
+- **V2** — voice rooms, ambient voice, DMs, search, knock, mobile
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
+- **Last, on purpose** — local-AI features and the agent surface
+  ([SPEC.md §8](SPEC.md)). Deliberately behind everything else: none of it starts
+  until Linger has shipped as a real, working, signed release that people are
+  actually using. The core product has to stand on its own first.
 
 ## 📜 License
 

@@ -40,9 +40,9 @@ pass.
 8. **Palette and font keys are validated server-side** against `linger-core::PALETTE`
    and `linger-core::FONTS`. Client-side validation alone is a defect.
 9. **Never claim end-to-end encryption** in code comments, UI copy, or README.
-10. **No scope creep.** If a change requires a feature from the V2/V3 lists or the
-    anti-goals list, stop and ask. Do not build roles, threads, federation, or a
-    permission matrix.
+10. **No scope creep.** If a change requires a feature from the V2, V3, or post-release
+    AI lists, or from the anti-goals list, stop and ask. Do not build roles, threads,
+    federation, or a permission matrix.
 11. **Design system is "Console" (SPEC §5).** No chat bubbles. No avatars. No shadows
     except focus rings. No gradients on surfaces. No rounded panels. No colored icon
     squares in the rail. Monospace is metadata-only — mono in a message body is a defect.
@@ -50,7 +50,8 @@ pass.
     database. The 16-color palette is defined once in `linger-core::PALETTE`.
 13. **No AI in the conversation.** No AI participants, no suggested replies, no drafting,
     no sentiment analysis. Local-model features only, opt-in, host-configured endpoint,
-    no cloud fallback (SPEC §8).
+    no cloud fallback (SPEC §8). They are also the **last** thing built: nothing in
+    SPEC §8 starts until V1 has shipped as a real, working, signed release.
 14. **Agent actions are always attributed to the delegating human and visibly marked**
     (`matt (via agent)`), in a style that cannot be disabled. An agent must never be
     renderable as indistinguishable from a person.
@@ -90,6 +91,31 @@ pass.
 **Commits**
 - Conventional-ish: `feat(gateway): resume with sequence replay`
 - One logical change per commit. Docs updated in the same commit as the behavior change.
+
+**The README**
+
+`README.md` is the front door. It is not Matt's personal notes — other people are
+contributing to this project, and the README is how they figure out what Linger is and
+how to get it running. A stale README costs a new contributor an afternoon.
+
+Update it **in the same commit** as the change whenever you touch:
+
+- **How to run or build anything** — new command, changed command, a new system
+  dependency, a renamed script, a different setup step. If you had to figure something
+  out to get it working locally, the next person will too. Write it down.
+- **The repo layout** — a new crate or top-level directory, or one that moved.
+- **What the product does or refuses to do** — the V1 feature list, the "never" list,
+  the privacy claims, the roadmap phases.
+- **The vocabulary table**, which must match `SPEC.md` §1 exactly.
+- **Anything a reader would now find wrong** if they followed the README as written.
+
+You do not need to touch it for internal refactors, test changes, or anything invisible
+from outside the repo.
+
+Two failure modes to watch for. First, a build step that "everyone knows" — the dev-box
+quirks in `CLAUDE.md` exist because they were not written down the first time. Second,
+the README promising something the code no longer does; that is worse than saying
+nothing, so when a feature moves or gets cut, fix the README in the same commit.
 
 ---
 
