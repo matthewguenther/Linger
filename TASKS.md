@@ -32,9 +32,20 @@ document: check tasks off, add discoveries, and keep it truthful.
   `resource_class="code", pid → /proc/<pid>/exe` with zero title exposure.
   The working recipe is documented in `crates/linger-activity/src/backend.rs`.
 - ⬜ **SPIKE (Windows)** — T-004. Needs a Windows machine; documented-easy path.
-- 🟨 **M0** — scaffold complete and green locally (68 Rust tests incl. the palette
-  contrast property test; frontend typechecks and builds). Remaining: T-001–T-003.
-- ⬜ M1 … M9 — queued below.
+- 🟨 **M0** — scaffold complete and green locally (frontend typechecks and
+  builds; palette contrast property test in CI). Remaining: T-001–T-003.
+- ✅ **M1 — server REST** (2026-08-19): auth (argon2id, EdDSA JWT, rotating
+  refresh with family-reuse revocation), first-run setup, invites, stoop/rooms,
+  messages/reactions/read markers, users/styling/signs, rate limiting. Every
+  endpoint has an integration test driving real HTTP (T-101…T-107 below).
+- ✅ **M2 — gateway** (2026-08-19): WS with hello/identify/ready, heartbeat,
+  per-session sequence numbers, presence + sitting + occupancy + entrance-sound
+  fan-out, typing limits, and resume via a 500-frame/120s session ring. The
+  milestone check passes: a forced mid-stream disconnect resumes with **no gaps
+  and no duplicates**, asserted by sequence accounting over real sockets
+  (`tests/gateway.rs`).
+- ⬜ **M3 … M9** — queued below. M3 is next; it wants T-002 (WebKitGTK install)
+  done first so `pnpm tauri dev` runs.
 
 What already exists (do not rebuild): workspace + CI; `linger-core` with typed
 UUIDv7 ids, the full REST + gateway wire contract, palette/fonts/reactions/limits,
@@ -86,7 +97,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
 *Milestone check: integration test suite drives the full REST surface with real
 HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
 
-- [ ] **T-101 · Auth foundation** — effort: **high**
+- [x] **T-101 · Auth foundation** — effort: **high**
   PROTOCOL §2, ARCHITECTURE §7. Add to `linger-server`: `argon2` (argon2id,
   `m=19456, t=2, p=1` minimum), `jsonwebtoken` (EdDSA — generate the Ed25519
   keypair at first boot, store under the data dir, 0600), `rand`, `sha2`.
@@ -100,7 +111,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   refresh rotation + **reuse-revokes-family** + rate limit envelope
   (`RATE_LIMITED` + `retry_after_ms`).
 
-- [ ] **T-102 · First-run host setup** — effort: **medium**
+- [x] **T-102 · First-run host setup** — effort: **medium**
   ARCHITECTURE §9. On boot with zero users: generate a one-time setup token,
   print `http://<domain-or-bind>/setup?token=…` to stdout, expose endpoints to
   create the host account + name the stoop (writes `stoop_config`). Token dies on
@@ -108,7 +119,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   *Accept:* integration test boots a fresh stoop, completes setup, second attempt
   fails, `GET /stoop` returns the name.
 
-- [ ] **T-103 · Invites** — effort: **medium**
+- [x] **T-103 · Invites** — effort: **medium**
   PROTOCOL §7 + §2. CRUD per protocol; codes 12 chars base32 from a CSPRNG,
   single-use default; unauthenticated preview endpoint; register consumes a use
   atomically (single-writer pool makes this easy — one UPDATE … WHERE guards).
@@ -116,7 +127,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   *Accept:* tests for expiry, max_uses exhaustion, revocation, preview of each
   state, and the register-through-invite flow.
 
-- [ ] **T-104 · Stoop + rooms endpoints** — effort: **medium**
+- [x] **T-104 · Stoop + rooms endpoints** — effort: **medium**
   PROTOCOL §3. `GET/PATCH /stoop` (PATCH host-only; `accent_key` validated
   against `linger-core::PALETTE`). Rooms CRUD: create/patch/archive host-only,
   slug `[a-z0-9-]{1,32}` unique, `position` ordering, `last_message_id` filled
@@ -124,7 +135,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   *Accept:* tests incl. non-host 403s (`FORBIDDEN`), bad slug (`VALIDATION_FAILED`),
   bad palette key rejected.
 
-- [ ] **T-105 · Messages, reactions, read markers** — effort: **high**
+- [x] **T-105 · Messages, reactions, read markers** — effort: **high**
   PROTOCOL §4. Create/edit(author-only)/delete(author-or-host → tombstone: body
   `""`, `deleted_at` set, row kept)/pin/unpin. Pagination: `before`/`after` are
   message ids; UUIDv7 blob comparison gives the range scan; `limit` 1..100,
@@ -137,7 +148,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   before+after), tombstone reply chains, reaction validation, marker idempotency,
   author/host permission matrix.
 
-- [ ] **T-106 · Users, styling, signs** — effort: **medium**
+- [x] **T-106 · Users, styling, signs** — effort: **medium**
   PROTOCOL §5. `GET /users`, `GET /users/:id`, `GET /me`, `PATCH /me`
   (display_name 1–32; `style` — **server-side validation** of `font_key`/
   `msg_font_key` ∈ `FONTS`, fill color keys ∈ `PALETTE`, weight ∈ {400,500,700};
@@ -147,7 +158,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   *Accept:* tests proving every invalid key is rejected server-side with
   `VALIDATION_FAILED`; style round-trips into `user_style` columns and back.
 
-- [ ] **T-107 · Rate-limit plumbing** — effort: **medium**
+- [x] **T-107 · Rate-limit plumbing** — effort: **medium**
   One reusable keyed token-bucket (in-memory, `DashMap`) used by T-101/103/105
   constants in `linger-core::limits`. 429 envelope with `retry_after_ms` set.
   *Accept:* unit tests for bucket math + one integration test per limited surface.
@@ -158,7 +169,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
 replays without gaps or duplicates. This is a flagged "you will be wrong" area:
 test with real disconnects, not mocks.*
 
-- [ ] **T-201 · WS gateway core** — effort: **high**
+- [x] **T-201 · WS gateway core** — effort: **high**
   PROTOCOL §8. Upgrade at `/api/v1/gateway`; `hello` (30000ms) → `identify`
   (JWT) → `ready` (full `ReadyData`). Heartbeat/ack; two missed acks server-side
   → drop. Presence lives in `DashMap<UserId, PresenceEntry>` — **never persisted**.
@@ -168,14 +179,14 @@ test with real disconnects, not mocks.*
   *Accept:* integration test connects two clients, sends a message over REST,
   both receive `message.create` with correct `s` ordering.
 
-- [ ] **T-202 · Resume** — effort: **high**
+- [x] **T-202 · Resume** — effort: **high**
   Per-session ring buffer (500 frames, 120s post-disconnect retention), `resume`
   → `resumed {replayed}` + replay, else `invalid_session` → client re-identifies.
   *Accept:* the AGENTS.md-mandated test: force-drop the socket mid-stream while
   messages keep flowing, resume, assert **no gaps and no duplicates** by sequence
   number; second test exceeds the window and asserts `invalid_session`.
 
-- [ ] **T-203 · Presence ops + rooms occupancy** — effort: **medium**
+- [x] **T-203 · Presence ops + rooms occupancy** — effort: **medium**
   `presence.update` (client), `room.sit`/stand, `room.occupancy`, `room.enter`
   (with entrance_sound key, only to sitters), `room.leave`, `typing` (1/4s/room
   server-enforced), `user.update`/`room.*` fan-out from REST mutations.
