@@ -1,0 +1,5 @@
+# ts-rs writes generated TypeScript bindings here (relative to workspace root).
+# `cargo test -p linger-core` regenerates them; they are committed, and CI fails
+# on drift. The frontend never hand-writes a wire type.
+[env]
+TS_RS_EXPORT_DIR = { value = "client/src/generated", relative = true }

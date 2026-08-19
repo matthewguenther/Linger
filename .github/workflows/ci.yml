@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # AGENTS.md: deny(warnings) in CI. Local builds stay permissive on purpose.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        # Advisory until T-001 formats the tree with a rustfmt-equipped toolchain
+        # and removes this line — then it gates.
+        continue-on-error: true
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+      - name: generated bindings are current
+        # cargo test just regenerated client/src/generated; a diff means someone
+        # changed a wire type without committing the regenerated bindings.
+        run: git diff --exit-code client/src/generated
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: enable pnpm
+        run: corepack enable
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: typecheck
+        run: pnpm check
+      - name: build
+        run: pnpm exec vite build
+
+  tauri-shell:
+    # Compile-checks the desktop shell against real WebKitGTK. Full bundles and
+    # signing are M8; this only proves the shell still builds.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: system webview deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client/src-tauri
+      - name: cargo check (shell)
+        run: |
+          mkdir -p client/dist
+          cargo check --manifest-path client/src-tauri/Cargo.toml
