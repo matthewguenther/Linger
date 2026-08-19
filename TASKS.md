@@ -6,22 +6,35 @@ document: check tasks off, add discoveries, and keep it truthful.
 
 ## How to run a task
 
-1. Open a fresh session on Opus 5 with the **effort level** the task states.
-2. Paste/point at one task. Read `AGENTS.md` in full, then the spec sections the
-   task references. State the current milestone before writing code.
+**Model: Claude Opus 5** for every task below. One task per fresh session — a
+clean context follows the task spec better and costs less than a long-running
+one. The prompt that works: *"Read AGENTS.md and TASKS.md, then do task T-xxx.
+State the current milestone first."*
+
+1. Set the session's **effort** from the task's label using the mapping below.
+2. Read `AGENTS.md` in full, then the spec sections the task references. State
+   the current milestone before writing code.
 3. Do not start a milestone until the previous one passes its check
    (`ARCHITECTURE.md` §10). Do not pull work from a later milestone "while you're
    in there."
 4. When done: all listed acceptance criteria pass, `cargo test --workspace` and
-   `cd client && pnpm check` are green, the task is checked off here, and any
-   surprises are noted under the task.
+   `cd client && pnpm check` are green, CI is green after push, the task is
+   checked off here, and any surprises are noted under the task.
 5. **Never add AI attribution anywhere** — commits, comments, metadata. Author is
    Matt Guenther. No exceptions.
 
-**Effort levels** (pick the stated one; when a task straddles, round up):
-- **low** — mechanical or tightly specified; single area; the spec text is the design
-- **medium** — a real feature across a few files with tests; design is settled, judgment needed in the details
-- **high** — realtime/stateful/platform code, cross-cutting design, or anything AGENTS.md §"Where you will be wrong" flags
+**Effort mapping (task label → Opus 5 effort setting):**
+
+| Task label | Opus 5 effort | Why |
+|---|---|---|
+| **low** | **medium** | Mechanical, tightly specified; high effort just burns credits re-deriving what the task text already decides |
+| **medium** | **high** | Real features with judgment in the details; high is the sweet spot |
+| **high** | **high**, except the four below | Cross-cutting but well-scaffolded — the architecture docs carry a lot of the load |
+| T-302, T-501, T-601, T-801+T-802 | **xhigh** | The genuinely treacherous ones: realtime client resume, Wayland/KWin, resumable uploads + media pipeline, signing/notarization — AGENTS.md §"Where you will be wrong" territory |
+
+Running everything at xhigh is not better — it's slower, pricier, and prone to
+overbuilding simple tasks. Match the effort to the label and escalate only if a
+task fails its acceptance criteria twice.
 
 ---
 
@@ -32,8 +45,13 @@ document: check tasks off, add discoveries, and keep it truthful.
   `resource_class="code", pid → /proc/<pid>/exe` with zero title exposure.
   The working recipe is documented in `crates/linger-activity/src/backend.rs`.
 - ⬜ **SPIKE (Windows)** — T-004. Needs a Windows machine; documented-easy path.
-- 🟨 **M0** — scaffold complete and green locally (frontend typechecks and
-  builds; palette contrast property test in CI). Remaining: T-001–T-003.
+- 🟨 **M0** — scaffold complete, CI fully green (fmt gated, clippy -D warnings,
+  96 tests, bindings drift check, web build, WebKitGTK shell check). Remaining:
+  T-002 (Matt's machine: apt deps + `pnpm tauri dev` + oklch gate) and
+  T-003/T-004 (Windows/macOS hardware).
+- ✅ **Real-binary smoke test** (2026-08-19): booted `linger-server` from a clean
+  data dir; the printed setup URL created the host, login → room → message all
+  worked over curl, and the setup link died after use (404).
 - ✅ **M1 — server REST** (2026-08-19): auth (argon2id, EdDSA JWT, rotating
   refresh with family-reuse revocation), first-run setup, invites, stoop/rooms,
   messages/reactions/read markers, users/styling/signs, rate limiting. Every
@@ -44,8 +62,9 @@ document: check tasks off, add discoveries, and keep it truthful.
   milestone check passes: a forced mid-stream disconnect resumes with **no gaps
   and no duplicates**, asserted by sequence accounting over real sockets
   (`tests/gateway.rs`).
-- ⬜ **M3 … M9** — queued below. M3 is next; it wants T-002 (WebKitGTK install)
-  done first so `pnpm tauri dev` runs.
+- ⬜ **M3 … M9** — queued below. **Next up: T-002 (five minutes, Matt's machine),
+  then M3 starting with T-301.** M3's milestone check needs the Tauri shell
+  running, so T-002 blocks it.
 
 What already exists (do not rebuild): workspace + CI; `linger-core` with typed
 UUIDv7 ids, the full REST + gateway wire contract, palette/fonts/reactions/limits,
@@ -61,13 +80,17 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
 
 ## M0 wrap-up
 
-- [ ] **T-001 · First CI run goes green** — effort: **low**
+- [x] **T-001 · First CI run goes green** — effort: **low**
   Push to GitHub, watch `ci.yml`. Fix anything `clippy --workspace --all-targets
   -- -D warnings` finds (none expected to be structural). Run `cargo fmt --all`
   from a rustfmt-equipped toolchain (dev box has none — CI's does; a devcontainer
   or `rustup component add rustfmt` on any machine works), commit the formatting,
   then delete the `continue-on-error: true` line from the fmt step so it gates.
   *Accept:* all three CI jobs green with fmt gating.
+  *Done 2026-08-19: all three jobs green, fmt gating, clippy -D warnings clean
+  (fixed 4 type_complexity findings). Tree formatted with rustfmt 1.9.0-stable.
+  Note: the dev box has no rustfmt — a scratchpad rustup toolchain was used;
+  future formatting runs need the same or CI's word is final.*
 
 - [ ] **T-002 · Shell opens on Linux + `oklch()` gate** — effort: **low** *(Matt's machine)*
   `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
