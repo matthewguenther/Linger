@@ -9,7 +9,8 @@
 //!
 //! | Platform          | Approach                                             | Status |
 //! |-------------------|------------------------------------------------------|--------|
-//! | Windows           | GetForegroundWindow → QueryFullProcessImageNameW     | M5     |
+//! | Windows           | GetForegroundWindow → QueryFullProcessImageNameW —   | M5     |
+//! |                   | **spike-verified** 2026-08-19; recipe below          |        |
 //! | macOS             | NSWorkspace.frontmostApplication.bundleIdentifier    | M5     |
 //! | Linux / X11       | _NET_ACTIVE_WINDOW → _NET_WM_PID                     | M5     |
 //! | Linux / KWin      | KWin scripting over D-Bus — **spike-verified** on    | M5     |
@@ -43,6 +44,33 @@
 //!
 //! Note the KWin backend is *event-driven*: it caches the latest report and
 //! answers `foreground_process()` from the cache, rather than polling.
+//!
+//! ## The verified Windows recipe
+//!
+//! `windows = { version = "0.62", features = ["Win32_Foundation",
+//! "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }`
+//!
+//! 1. `GetForegroundWindow()`. Since windows 0.58 handles wrap a pointer, so the
+//!    "nothing focused" check is `hwnd.0.is_null()` — a real state on a locked
+//!    desktop, and it must report `Activity::None`, not an error.
+//! 2. `GetWindowThreadProcessId(hwnd, Some(&mut pid))` — the return value is the
+//!    *thread* id; the process id is the out-param.
+//! 3. `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)`.
+//!    LIMITED_INFORMATION is deliberate: it is the least privilege that still
+//!    permits step 4, and unlike PROCESS_QUERY_INFORMATION it is granted against
+//!    elevated processes, so an admin-run game still resolves.
+//! 4. `QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf), &mut len)`
+//!    into a `MAX_PATH` buffer, then `OsString::from_wide(&buf[..len])`. Close the
+//!    handle whether or not it succeeded.
+//! 5. `file_stem()` lowercased is exactly what [`crate::normalize_exe_name`]
+//!    expects, so registry lookup needs no Windows-specific special casing.
+//!
+//! Verified on a real Windows runner 2026-08-19: resolved the foreground window
+//! to `C:\Program Files\WindowsApps\...\WindowsTerminal.exe` → `"windowsterminal"`,
+//! which is already an `exe` alias on the `terminal` entry in `registry/apps.json`
+//! — the whole pipeline, lookup included, works unmodified.
+//!
+//! There is no `GetWindowTextW` in that list, and there must never be one.
 
 use crate::{ActivityBackend, BackendError, ProcessIdent};
 

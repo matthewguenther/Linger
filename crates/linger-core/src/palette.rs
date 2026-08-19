@@ -204,6 +204,11 @@ mod tests {
     /// ≥4.5:1 against its theme background. If this fails, a palette value was
     /// changed in a way that breaks structural contrast safety — fix the value,
     /// never this test.
+    ///
+    /// The ratios here are only as trustworthy as [`PaletteColor::hex`], so that
+    /// conversion was checked against a real engine during T-002: all 16 keys ×
+    /// 2 themes were rendered as `oklch()` by WebKitGTK 2.52.3 and read back
+    /// from a canvas, agreeing with this code exactly (0/255 per channel).
     #[test]
     fn all_16_keys_hold_contrast_in_both_themes() {
         for color in &PALETTE {

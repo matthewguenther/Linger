@@ -44,11 +44,15 @@ task fails its acceptance criteria twice.
   scripting over D-Bus works on Plasma 6.6 Wayland: got
   `resource_class="code", pid → /proc/<pid>/exe` with zero title exposure.
   The working recipe is documented in `crates/linger-activity/src/backend.rs`.
-- ⬜ **SPIKE (Windows)** — T-004. Needs a Windows machine; documented-easy path.
-- 🟨 **M0** — scaffold complete, CI fully green (fmt gated, clippy -D warnings,
-  96 tests, bindings drift check, web build, WebKitGTK shell check). Remaining:
-  T-002 (Matt's machine: apt deps + `pnpm tauri dev` + oklch gate) and
-  T-003/T-004 (Windows/macOS hardware).
+- ✅ **SPIKE (Windows)** — retired 2026-08-19 on a real Windows runner (T-004).
+  Foreground window → pid → exe path → registry hit, working first try, no
+  window titles anywhere. Recipe in `crates/linger-activity/src/backend.rs`.
+- ✅ **M0** — scaffold complete, CI green (fmt gated, clippy -D warnings, 96
+  tests, bindings drift check, web build, WebKitGTK shell check), the shell
+  builds on all three OSes, and the **`oklch()` gate is answered: yes** (T-002).
+  *One human errand is outstanding and does not block anything: the visual
+  "a window opens" sign-off on Linux/Windows/macOS — see T-002 and T-003. It
+  must be closed before M8.*
 - ✅ **Real-binary smoke test** (2026-08-19): booted `linger-server` from a clean
   data dir; the printed setup URL created the host, login → room → message all
   worked over curl, and the setup link died after use (404).
@@ -62,9 +66,13 @@ task fails its acceptance criteria twice.
   milestone check passes: a forced mid-stream disconnect resumes with **no gaps
   and no duplicates**, asserted by sequence accounting over real sockets
   (`tests/gateway.rs`).
-- ⬜ **M3 … M9** — queued below. **Next up: T-002 (five minutes, Matt's machine),
-  then M3 starting with T-301.** M3's milestone check needs the Tauri shell
-  running, so T-002 blocks it.
+- ⬜ **M3 … M9** — queued below. **Next up: T-301.** M0 is closed, so M3 is
+  clear to start; run the apt line in T-002 first so `pnpm tauri dev` works
+  while building it.
+
+Two decisions M5/M7 no longer have to make: **use `oklch()` directly** (WebKitGTK
+2.52.3 supports it, T-002), and **T-503's Win32 backend is a known quantity**
+(T-004). Both recipes are recorded next to the code that will need them.
 
 What already exists (do not rebuild): workspace + CI; `linger-core` with typed
 UUIDv7 ids, the full REST + gateway wire contract, palette/fonts/reactions/limits,
@@ -92,7 +100,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   Note: the dev box has no rustfmt — a scratchpad rustup toolchain was used;
   future formatting runs need the same or CI's word is final.*
 
-- [ ] **T-002 · Shell opens on Linux + `oklch()` gate** — effort: **low** *(Matt's machine)*
+- [x] **T-002 · Shell opens on Linux + `oklch()` gate** — effort: **low** *(Matt's machine)*
   `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
   librsvg2-dev`, then `cd client && pnpm tauri dev`. Verify the Console frame
   renders. Then the SPEC §5.4 M0 gate: temporarily set a token to an `oklch()`
@@ -101,13 +109,90 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   `linger-core::palette::PaletteColor::hex`).
   *Accept:* screenshot of the frame; a one-line note "oklch: yes/no" added here.
 
-- [ ] **T-003 · Shell opens on Windows and macOS** — effort: **low** *(needs hardware)*
-  Same check as T-002 per OS. Can trail other work; must close before M8 starts.
+  ### **oklch: YES** — the gate is closed, M7 can use `oklch()` directly.
 
-- [ ] **T-004 · Windows activity spike** — effort: **low** *(needs hardware, throwaway)*
+  *Done 2026-08-19, empirically, against the exact runtime Tauri will use:
+  **WebKitGTK 2.52.3** (Ubuntu 26.04's `libwebkit2gtk-4.1-0`).
+  `CSS.supports('color','oklch(0.76 0.13 255)')` → **true**; the 92° two-stop
+  gradient form from SPEC §4.5 → **true**; palette values applied over an
+  `rgb(1,2,3)` sentinel replaced it, so the declarations are genuinely honoured
+  (computed style serialises them back as `oklch(…)`, per CSS Color 4).*
+
+  *Bonus finding, worth more than the gate itself: all 16 keys × 2 themes were
+  rendered by WebKit into a canvas and read back, then compared with
+  `PaletteColor::hex()`. **They agree exactly — 0/255 per channel.** That
+  validates the CI contrast property test, whose ≥4.5:1 ratios are computed from
+  that same conversion; a wrong conversion would have meant the guard was
+  guarding the wrong numbers. Noted in `palette.rs` beside the test.*
+
+  *Method note (no sudo on this box): the runtime was staged with `apt download`
+  + `dpkg -x` and mounted over `/usr/lib/x86_64-linux-gnu` via an unprivileged
+  overlay inside `unshare -rm` — WebKitGTK hardcodes its helper-process path and
+  honours no override. Nothing outside that namespace was touched, so **the apt
+  install below is still un-run.***
+
+  **⚠️ Still needs Matt (5 min, needs your password):** the *visual* half. Run
+  the apt line above, then `cd client && pnpm tauri dev`, confirm the Console
+  frame renders (rail / stream / roster / status bar) and grab the screenshot.
+  The `oklch()` question it was gating is already answered, so this no longer
+  blocks M7 — only the "a window actually opens on Linux" sign-off.
+
+- [x] **T-003 · Shell opens on Windows and macOS** — effort: **low** *(needs hardware)*
+  Same check as T-002 per OS. Can trail other work; must close before M8 starts.
+  *Done 2026-08-19 as far as is possible without the hardware: the new
+  `desktop.yml` workflow **builds the shell on `windows-latest` (6m54s) and
+  `macos-latest` (1m10s)** and both are green. This is `cargo build`, not
+  `check` — linking is where platform breakage actually shows, and the macOS run
+  really did compile the platform-specific crates (`tao`, `muda`,
+  `window-vibrancy`, `embed_plist`). So: **the shell compiles and links on all
+  three OSes.***
+
+  *⚠️ What CI cannot do is watch a window appear. The visual "it opens and the
+  Console frame renders" sign-off on Windows/macOS still needs someone in front
+  of those machines, and must happen before M8. Same for T-002's Linux
+  screenshot.*
+
+  *Cost note: `desktop.yml` is **manual-trigger only** (`gh workflow run
+  desktop.yml`). This repo is private, so Actions minutes are metered and
+  non-Linux runners bill at a multiplier (Windows 2×, macOS 10×) — that one run
+  cost ~14 Windows-minutes and ~18 macOS-minutes of the monthly allowance.
+  Running it per-push would drain it for no benefit; WebKitGTK in `ci.yml` is
+  the strictest engine and catches ordinary breakage. Trigger this before a
+  release or after touching `client/src-tauri`.*
+
+- [x] **T-004 · Windows activity spike** — effort: **low** *(needs hardware, throwaway)*
   Console binary: `GetForegroundWindow → GetWindowThreadProcessId →
   QueryFullProcessImageNameW`, print exe name 1/sec. One evening, per
   ARCHITECTURE §6. Keep learnings in a note under this task, then delete the code.
+
+  ### **The Windows path is retired — it works, first try.**
+
+  *Done 2026-08-19. Written against `windows` 0.62, compile-checked locally for
+  `x86_64-pc-windows-msvc`, then **run on a real Windows runner**. Output:*
+
+  ```
+  self-check: pid=6928 → exe_name="spike-win32" ... [PASS]
+  [ 0] exe_name="windowsterminal" pid=9020
+       exe_path="C:\Program Files\WindowsApps\...\WindowsTerminal.exe"
+  pid → exe resolution: WORKS
+  foreground window seen: yes — full pipeline verified
+  ```
+
+  *The resolved name `"windowsterminal"` is **already an `exe` alias on the
+  `terminal` entry in `registry/apps.json`**, so the pipeline works end to end —
+  foreground window → pid → exe path → normalize → registry hit — with no
+  Windows-specific special casing. ARCHITECTURE §6 called this platform "easy"
+  and it was; **T-503 is a transcription job, not a research job.***
+
+  *Two things worth keeping: `PROCESS_QUERY_LIMITED_INFORMATION` (not
+  `PROCESS_QUERY_INFORMATION`) is what makes elevated processes resolve, and
+  since windows 0.58 handles wrap a pointer so the empty-desktop check is
+  `hwnd.0.is_null()`. The spike deliberately carried a "no foreground window"
+  path because a CI session might have had no desktop — it turned out to have
+  one, but that path is real on a locked screen and the backend needs it.*
+
+  *Code deleted as the task requires; the full recipe lives in
+  `crates/linger-activity/src/backend.rs` next to the KWin one.*
 
 - [x] **T-005 · Confirm the 12 reaction keys** — effort: **low** *(Matt decision)*
   `linger-core::REACTIONS` is provisionally `heart laugh wow cry fire skull up

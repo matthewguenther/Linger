@@ -8,11 +8,6 @@ name: desktop
 # Run this before a release, or after touching client/src-tauri.
 on:
   workflow_dispatch:
-    inputs:
-      run_spike:
-        description: "Also run the throwaway Win32 activity spike (T-004)"
-        type: boolean
-        default: false
 
 jobs:
   shell-windows:
@@ -58,16 +53,3 @@ jobs:
       - name: build shell
         run: cargo build --manifest-path client/src-tauri/Cargo.toml
 
-  spike-windows:
-    name: Win32 activity spike (throwaway)
-    if: inputs.run_spike
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      # Prints the foreground app once per second. A CI runner may have no
-      # interactive desktop, so the spike also resolves its own pid to an exe
-      # path — that half of the pipeline is provable anywhere, and the run
-      # fails only if it breaks.
-      - name: run spike
-        run: cargo run --manifest-path spike/win32/Cargo.toml -- 5
