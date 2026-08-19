@@ -131,11 +131,21 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   honours no override. Nothing outside that namespace was touched, so **the apt
   install below is still un-run.***
 
-  **⚠️ Still needs Matt (5 min, needs your password):** the *visual* half. Run
-  the apt line above, then `cd client && pnpm tauri dev`, confirm the Console
-  frame renders (rail / stream / roster / status bar) and grab the screenshot.
-  The `oklch()` question it was gating is already answered, so this no longer
-  blocks M7 — only the "a window actually opens on Linux" sign-off.
+  **Visual half also done** (Matt ran the apt line 2026-08-19; deps confirmed
+  present at webkit2gtk-4.1 **2.52.3**, the same build the gate was tested
+  against). `pnpm tauri dev` compiled the shell in 1m35s and the window opened;
+  screenshot at [`docs/m0-shell-linux.png`](docs/m0-shell-linux.png). The frame
+  matches SPEC §5: three hairline-separated panels, cool neutral grays, mono
+  confined to metadata (panel labels, status bar) with sans body text, no
+  avatars, no bubbles, no rounded panels, permanent status bar.
+
+  *Gotcha worth remembering: there is no standalone `pnpm` on this box — it
+  comes from Ubuntu's corepack. A shim now exists at `~/.local/bin/pnpm`
+  (created with `corepack enable --install-directory ~/.local/bin`), which
+  `~/.profile` puts on PATH for **new** shells. It only works **inside the
+  repo**, where `package.json` pins pnpm 9.15.9; run bare `pnpm` from `$HOME`
+  and corepack fetches pnpm 11, which Ubuntu's corepack cannot execute
+  (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`). Not a project bug.*
 
 - [x] **T-003 · Shell opens on Windows and macOS** — effort: **low** *(needs hardware)*
   Same check as T-002 per OS. Can trail other work; must close before M8 starts.

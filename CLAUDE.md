@@ -25,9 +25,21 @@ non-negotiable. Docs (`SPEC.md`, `ARCHITECTURE.md`, `PROTOCOL.md`) win over code
 cargo test --workspace          # core + server + activity; also regenerates TS bindings
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cd client && pnpm check         # typecheck frontend
-cd client && pnpm tauri dev     # needs system deps: libwebkit2gtk-4.1-dev libgtk-3-dev
-                                # libayatana-appindicator3-dev librsvg2-dev
+cd client && pnpm tauri dev     # system deps are installed on Matt's box
 ```
+
+Environment quirks on the dev box, all already worked around — don't re-diagnose:
+
+- **`pnpm` only works inside the repo.** It is a corepack shim at
+  `~/.local/bin/pnpm`; `client/package.json` pins pnpm 9.15.9. Run it from
+  `$HOME` and corepack fetches pnpm 11, which Ubuntu's corepack cannot execute.
+  In a non-login shell, prefix with `PATH="$HOME/.local/bin:$PATH"` or call
+  `corepack pnpm`.
+- **No `rustfmt`, `clippy`, or `rustup`** in the system toolchain. CI is the
+  authority for lints; for local formatting, install a rustup toolchain into the
+  session scratchpad (never system-wide).
+- **`pkill -f "tauri dev"` kills your own shell** — the pattern matches the
+  agent's command line. Kill by exact PID, or `pkill -x linger-client`.
 
 `client/src-tauri` is deliberately **not** in the root cargo workspace — it needs GUI
 system libs that CI and server boxes don't have. Build it via `pnpm tauri`.
