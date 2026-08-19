@@ -52,6 +52,26 @@ GET  /auth/invite/:code → { valid, stoop_name, expires_at }   # unauthenticate
 `display_name`: 1–32 chars, mutable.
 `password`: minimum 12 characters. Do not impose composition rules.
 
+Refresh-token reuse (presenting an already-rotated token) revokes the token's whole
+family — every token descended from the same login — and forces re-login on that
+device chain. Logout likewise revokes the presented token's family.
+
+### 2.1 First-run setup
+
+On boot with zero users, the server generates a one-time setup token and prints a
+setup URL to stdout (ARCHITECTURE §9). The token dies on use or restart. There are
+no env-var bootstrap credentials.
+
+```
+GET  /setup/:token      → { valid }                            # unauthenticated
+POST /setup             { token, stoop_name, username,
+                          display_name, password }
+                     →  { access_token, refresh_token, expires_in, user }
+```
+
+`POST /setup` creates the host account (`is_host: true`), names the stoop, and
+consumes the token. Once any user exists, both endpoints return `NOT_FOUND`.
+
 ---
 
 ## 3. Linger and rooms
@@ -91,6 +111,10 @@ DELETE /messages/:id/reactions/:key                              → 204
 
 `before`/`after` are message IDs, not timestamps. UUIDv7 sorts chronologically, so
 pagination is a range scan. Results are always newest-first.
+
+`body` is 1–8000 chars after trimming (`linger-core::limits::MAX_MESSAGE_CHARS`);
+empty or oversize bodies are `VALIDATION_FAILED`. `reply_to` must reference a
+message in the same room. Pin/unpin is any member; there is no pin hierarchy.
 
 ```ts
 type Message = {
@@ -138,6 +162,10 @@ GET  /me/notify-rules     → NotifyRule[]
 PUT  /me/notify-rules     { target_user_id, room_id | null }   → 204
 DELETE /me/notify-rules   { target_user_id, room_id | null }   → 204
 ```
+
+`PATCH /me` semantics: absent fields are unchanged; `style` and `sign` replace the
+whole object when present. `entrance_sound: ""` clears the sound (bundled keys are
+validated against `linger-core::ENTRANCE_SOUNDS` until custom uploads land in M4).
 
 ```ts
 type User = {

@@ -21,6 +21,13 @@ pub const MAX_SIGN_LINE_CHARS: usize = 240;
 pub const MAX_SIGN_FIELD_CHARS: usize = 80;
 pub const MAX_SIGN_IMAGE_BYTES: u64 = 512 * 1024;
 
+/// Message body cap, chars after trim (PROTOCOL §4).
+pub const MAX_MESSAGE_CHARS: usize = 8_000;
+
+/// Access tokens are short-lived JWTs; refresh tokens rotate (ARCHITECTURE §7).
+pub const ACCESS_TOKEN_TTL_SECS: u64 = 15 * 60;
+pub const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
+
 /// Identity fields (PROTOCOL §2).
 pub const USERNAME_PATTERN: &str = "^[a-z0-9_]{2,24}$";
 pub const ROOM_SLUG_PATTERN: &str = "^[a-z0-9-]{1,32}$";

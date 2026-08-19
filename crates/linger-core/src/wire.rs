@@ -206,6 +206,41 @@ pub struct RefreshResponse {
     pub expires_in: u64,
 }
 
+/// First-run setup (PROTOCOL §2.1): creates the host account and names the stoop.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SetupRequest {
+    pub token: String,
+    pub stoop_name: String,
+    pub username: String,
+    pub display_name: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SetupPreview {
+    pub valid: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// `PATCH /me`: absent fields unchanged; `style`/`sign` replace whole objects;
+/// `entrance_sound: ""` clears the sound (PROTOCOL §5).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateMeRequest {
+    pub display_name: Option<String>,
+    pub style: Option<Style>,
+    pub sign: Option<Sign>,
+    pub entrance_sound: Option<String>,
+}
+
 /// Unauthenticated invite preview (`GET /auth/invite/:code`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -229,6 +264,30 @@ pub struct StoopInfo {
     pub member_count: u32,
     #[ts(type = "number")]
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateRoomRequest {
+    pub slug: String,
+    pub name: String,
+    pub topic: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateRoomRequest {
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub position: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateStoopRequest {
+    pub name: Option<String>,
+    pub accent_key: Option<ColorKey>,
+    pub icon_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

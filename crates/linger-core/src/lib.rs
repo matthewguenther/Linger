@@ -42,9 +42,33 @@ pub const REACTIONS: [&str; 12] = [
     "hundred", "sparkles",
 ];
 
+/// Bundled entrance-sound keys (SPEC §4.1). Provisional until T-408 curates the
+/// actual audio; the keys are chosen to match the curation directions so files
+/// can land without a contract change. Custom uploads (M4) use object keys and
+/// are validated separately.
+pub const ENTRANCE_SOUNDS: [&str; 12] = [
+    "woodblock",
+    "rimshot",
+    "brush",
+    "marimba",
+    "vibraphone",
+    "typewriter-ding",
+    "latch-click",
+    "cassette-clunk",
+    "soft-blip",
+    "small-chime",
+    "screen-door",
+    "double-knock",
+];
+
 /// Whether `key` names a bundled font.
 pub fn is_valid_font_key(key: &str) -> bool {
     FONTS.contains(&key)
+}
+
+/// Whether `key` names a bundled entrance sound.
+pub fn is_valid_entrance_sound_key(key: &str) -> bool {
+    ENTRANCE_SOUNDS.contains(&key)
 }
 
 /// Whether `key` names one of the 12 fixed reactions.
