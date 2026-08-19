@@ -1,5 +1,6 @@
-<center><img src="assets/logo/linger_logo.png" width="600px"></center>
-<br>
+<div align="center">
+<img src="assets/logo/linger_logo.png" width="600px">
+</div>
 
 # Linger
 
