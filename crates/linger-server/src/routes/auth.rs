@@ -213,8 +213,8 @@ async fn invite_preview(
         None => (false, None),
     };
 
-    let stoop_name: Option<String> = if valid {
-        sqlx::query_scalar("SELECT value FROM stoop_config WHERE key = 'name'")
+    let server_name: Option<String> = if valid {
+        sqlx::query_scalar("SELECT value FROM server_config WHERE key = 'name'")
             .fetch_optional(&state.db.read)
             .await?
     } else {
@@ -223,7 +223,7 @@ async fn invite_preview(
 
     Ok(Json(InvitePreview {
         valid,
-        stoop_name,
+        server_name,
         expires_at,
     }))
 }

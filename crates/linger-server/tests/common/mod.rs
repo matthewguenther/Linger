@@ -6,13 +6,13 @@ use linger_core::wire::{AuthResponse, Invite};
 use linger_server::config::{Config, Storage};
 use linger_server::{db, AppState};
 
-pub struct TestStoop {
+pub struct TestServer {
     pub base: String,
     pub state: AppState,
     _dir: tempfile::TempDir,
 }
 
-impl TestStoop {
+impl TestServer {
     #[must_use]
     pub fn url(&self, path: &str) -> String {
         format!("{}/api/v1{path}", self.base)
@@ -26,7 +26,7 @@ impl TestStoop {
 }
 
 /// Boot a fully wired server on an ephemeral port.
-pub async fn spawn_stoop() -> TestStoop {
+pub async fn spawn_server() -> TestServer {
     let dir = tempfile::tempdir().expect("tempdir");
     let config = Config {
         data_dir: dir.path().to_path_buf(),
@@ -48,25 +48,25 @@ pub async fn spawn_stoop() -> TestStoop {
         .await
         .unwrap();
     });
-    TestStoop {
+    TestServer {
         base: format!("http://{addr}"),
         state,
         _dir: dir,
     }
 }
 
-/// Complete first-run setup: creates the host account and names the stoop.
-pub async fn bootstrap_host(stoop: &TestStoop) -> AuthResponse {
-    let token = stoop
+/// Complete first-run setup: creates the host account and names the server.
+pub async fn bootstrap_host(server: &TestServer) -> AuthResponse {
+    let token = server
         .state
         .setup
         .peek()
-        .expect("fresh stoop has a setup token");
+        .expect("fresh server has a setup token");
     let resp = reqwest::Client::new()
-        .post(stoop.url("/setup"))
+        .post(server.url("/setup"))
         .json(&serde_json::json!({
             "token": token,
-            "stoop_name": "test stoop",
+            "server_name": "test server",
             "username": "matt",
             "display_name": "Matt",
             "password": "correct horse battery",
@@ -84,10 +84,10 @@ pub async fn bootstrap_host(stoop: &TestStoop) -> AuthResponse {
 }
 
 /// Invite + register a member, via the real endpoints.
-pub async fn join_member(stoop: &TestStoop, host_access: &str, username: &str) -> AuthResponse {
+pub async fn join_member(server: &TestServer, host_access: &str, username: &str) -> AuthResponse {
     let client = reqwest::Client::new();
     let invite: Invite = client
-        .post(stoop.url("/invites"))
+        .post(server.url("/invites"))
         .bearer_auth(host_access)
         .json(&serde_json::json!({}))
         .send()
@@ -97,7 +97,7 @@ pub async fn join_member(stoop: &TestStoop, host_access: &str, username: &str) -
         .await
         .unwrap();
     let resp = client
-        .post(stoop.url("/auth/register"))
+        .post(server.url("/auth/register"))
         .json(&serde_json::json!({
             "invite_code": invite.code,
             "username": username,
@@ -117,11 +117,11 @@ pub async fn join_member(stoop: &TestStoop, host_access: &str, username: &str) -
 }
 
 /// Host + one room, the most common fixture.
-pub async fn stoop_with_room(slug: &str) -> (TestStoop, AuthResponse, linger_core::wire::Room) {
-    let stoop = spawn_stoop().await;
-    let host = bootstrap_host(&stoop).await;
+pub async fn server_with_room(slug: &str) -> (TestServer, AuthResponse, linger_core::wire::Room) {
+    let server = spawn_server().await;
+    let host = bootstrap_host(&server).await;
     let room: linger_core::wire::Room = reqwest::Client::new()
-        .post(stoop.url("/rooms"))
+        .post(server.url("/rooms"))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "slug": slug, "name": format!("#{slug}") }))
         .send()
@@ -130,5 +130,5 @@ pub async fn stoop_with_room(slug: &str) -> (TestStoop, AuthResponse, linger_cor
         .json()
         .await
         .unwrap();
-    (stoop, host, room)
+    (server, host, room)
 }

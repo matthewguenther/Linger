@@ -1,19 +1,19 @@
-//! Stoop + rooms (PROTOCOL §3): host-only mutations, slug validation,
+//! Server + rooms (PROTOCOL §3): host-only mutations, slug validation,
 //! palette-key validation, ordering.
 
 mod common;
 
-use linger_core::wire::{ErrorCode, ErrorEnvelope, Room, StoopInfo};
+use linger_core::wire::{ErrorCode, ErrorEnvelope, Room, ServerInfo};
 
 #[tokio::test]
 async fn host_creates_rooms_members_do_not() {
-    let stoop = common::spawn_stoop().await;
-    let host = common::bootstrap_host(&stoop).await;
-    let member = common::join_member(&stoop, &host.access_token, "callie").await;
+    let server = common::spawn_server().await;
+    let host = common::bootstrap_host(&server).await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
     let client = reqwest::Client::new();
 
     let created: Room = client
-        .post(stoop.url("/rooms"))
+        .post(server.url("/rooms"))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "slug": "garage", "name": "#garage", "topic": "projects" }))
         .send()
@@ -27,7 +27,7 @@ async fn host_creates_rooms_members_do_not() {
     assert!(created.last_message_id.is_none());
 
     let denied = client
-        .post(stoop.url("/rooms"))
+        .post(server.url("/rooms"))
         .bearer_auth(&member.access_token)
         .json(&serde_json::json!({ "slug": "shed", "name": "#shed" }))
         .send()
@@ -39,7 +39,7 @@ async fn host_creates_rooms_members_do_not() {
 
     // Members can still see the rooms.
     let rooms: Vec<Room> = client
-        .get(stoop.url("/rooms"))
+        .get(server.url("/rooms"))
         .bearer_auth(&member.access_token)
         .send()
         .await
@@ -52,8 +52,8 @@ async fn host_creates_rooms_members_do_not() {
 
 #[tokio::test]
 async fn slug_rules_and_uniqueness() {
-    let stoop = common::spawn_stoop().await;
-    let host = common::bootstrap_host(&stoop).await;
+    let server = common::spawn_server().await;
+    let host = common::bootstrap_host(&server).await;
     let client = reqwest::Client::new();
 
     for bad_slug in [
@@ -63,7 +63,7 @@ async fn slug_rules_and_uniqueness() {
         "way-too-long-for-a-slug-way-too-long",
     ] {
         let resp = client
-            .post(stoop.url("/rooms"))
+            .post(server.url("/rooms"))
             .bearer_auth(&host.access_token)
             .json(&serde_json::json!({ "slug": bad_slug, "name": "x" }))
             .send()
@@ -73,7 +73,7 @@ async fn slug_rules_and_uniqueness() {
     }
 
     let ok = client
-        .post(stoop.url("/rooms"))
+        .post(server.url("/rooms"))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "slug": "porch", "name": "#porch" }))
         .send()
@@ -82,7 +82,7 @@ async fn slug_rules_and_uniqueness() {
     assert_eq!(ok.status(), 200);
 
     let dup = client
-        .post(stoop.url("/rooms"))
+        .post(server.url("/rooms"))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "slug": "porch", "name": "#porch again" }))
         .send()
@@ -93,11 +93,11 @@ async fn slug_rules_and_uniqueness() {
 
 #[tokio::test]
 async fn patch_and_archive() {
-    let (stoop, host, room) = common::stoop_with_room("garage").await;
+    let (server, host, room) = common::server_with_room("garage").await;
     let client = reqwest::Client::new();
 
     let updated: Room = client
-        .patch(stoop.url(&format!("/rooms/{}", room.id)))
+        .patch(server.url(&format!("/rooms/{}", room.id)))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "topic": "drives and drivers", "position": 3 }))
         .send()
@@ -110,7 +110,7 @@ async fn patch_and_archive() {
     assert_eq!(updated.position, 3);
 
     let archived: Room = client
-        .post(stoop.url(&format!("/rooms/{}/archive", room.id)))
+        .post(server.url(&format!("/rooms/{}/archive", room.id)))
         .bearer_auth(&host.access_token)
         .send()
         .await
@@ -122,14 +122,14 @@ async fn patch_and_archive() {
 }
 
 #[tokio::test]
-async fn stoop_patch_validates_the_palette_key() {
-    let stoop = common::spawn_stoop().await;
-    let host = common::bootstrap_host(&stoop).await;
+async fn server_patch_validates_the_palette_key() {
+    let server = common::spawn_server().await;
+    let host = common::bootstrap_host(&server).await;
     let client = reqwest::Client::new();
 
     // Hex is exactly what the palette rule forbids on the wire.
     let bad = client
-        .patch(stoop.url("/stoop"))
+        .patch(server.url("/server"))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "accent_key": "#6E9BFF" }))
         .send()
@@ -137,8 +137,8 @@ async fn stoop_patch_validates_the_palette_key() {
         .unwrap();
     assert_eq!(bad.status(), 422);
 
-    let good: StoopInfo = client
-        .patch(stoop.url("/stoop"))
+    let good: ServerInfo = client
+        .patch(server.url("/server"))
         .bearer_auth(&host.access_token)
         .json(&serde_json::json!({ "accent_key": "azure", "name": "the garage" }))
         .send()

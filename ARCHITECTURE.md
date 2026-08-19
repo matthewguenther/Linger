@@ -43,7 +43,7 @@ Deployment is one binary plus one data directory, or one Docker image.
 | Choice | Reason | When to revisit |
 |---|---|---|
 | **Rust server (axum + tokio)** | A single static binary is a dramatically better self-host story than "install Node, install pnpm, run migrations." Also lets client and server share types. | Never for V1. |
-| **SQLite (WAL), not Postgres** | 20 friends, a few hundred messages a day. Postgres is ceremony at this scale. One file to back up. | Only if a stoop exceeds ~2k users or needs multi-node. A `Repository` trait keeps the swap cheap. |
+| **SQLite (WAL), not Postgres** | 20 friends, a few hundred messages a day. Postgres is ceremony at this scale. One file to back up. | Only if a server exceeds ~2k users or needs multi-node. A `Repository` trait keeps the swap cheap. |
 | **Tauri 2, not Electron** | ~5–15 MB bundle vs ~150 MB; ~100 MB idle RAM vs ~400 MB; first-class Rust for native OS access, which the activity detector requires. | Only if WebKitGTK rendering on Linux becomes untenable. |
 | **TypeScript + React frontend** | Largest ecosystem for virtualized lists and rich text; fastest to iterate. | — |
 | **Object store adapter, not blobs in DB** | 500 MB files must never traverse the app server. | — |
@@ -140,8 +140,8 @@ CREATE TABLE user_style (
   msg_font_key    TEXT
 );
 
--- the "sign"; see SPEC §4.6
-CREATE TABLE user_sign (
+-- the user status card; see SPEC §4.6
+CREATE TABLE user_status (
   user_id         BLOB PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   line            TEXT,                        -- 240 chars
   reading         TEXT,
@@ -199,7 +199,7 @@ CREATE TABLE attachments (
   state           TEXT NOT NULL,               -- pending | complete | failed
   created_at      INTEGER NOT NULL
 );
-CREATE INDEX idx_attachments_shelf ON attachments(created_at DESC) WHERE state='complete';
+CREATE INDEX idx_attachments_media ON attachments(created_at DESC) WHERE state='complete';
 
 CREATE TABLE reactions (
   message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -246,7 +246,7 @@ CREATE TABLE refresh_tokens (
   created_at      INTEGER NOT NULL
 );
 
-CREATE TABLE stoop_config (
+CREATE TABLE server_config (
   key             TEXT PRIMARY KEY,
   value           TEXT NOT NULL
 );
@@ -350,8 +350,8 @@ Poll at 3s while focused, 15s while unfocused. Debounce: an app must be foregrou
 ### Threat model, stated plainly — publish this verbatim in the README
 
 > Messages and files are encrypted in transit (TLS) and at rest on the host's disk.
-> **The person running the stoop can read everything on it.** There is no
-> end-to-end encryption. Run your own stoop, or trust the person who runs the one
+> **The person running the server can read everything on it.** There is no
+> end-to-end encryption. Run your own server, or trust the person who runs the one
 > you're on. If you need cryptographic guarantees against your host, use Signal.
 
 **Do not implement partial E2EE.** Real E2EE with multi-device, searchable history, and
@@ -419,7 +419,7 @@ you on egress.
 
 ## 9. Deployment
 
-Target: a non-expert friend gets a working stoop in under 15 minutes.
+Target: a non-expert friend gets a working server in under 15 minutes.
 
 ```yaml
 # deploy/compose.yaml
@@ -446,10 +446,10 @@ Caddy is bundled specifically so TLS certificates are automatic. A self-hoster s
 never have to think about certbot.
 
 **First-run flow:** binary starts, finds no config, prints a one-time host-setup URL with
-a token to stdout. Host opens it, creates their account, names the stoop. No env-var
+a token to stdout. Host opens it, creates their account, names the server. No env-var
 bootstrap credentials.
 
-**Backup:** the entire stoop is `data/linger.db` plus `data/objects/`. Document
+**Backup:** the entire server is `data/linger.db` plus `data/objects/`. Document
 `sqlite3 linger.db ".backup"` and a cron one-liner in the README. Do not build a backup
 feature.
 
@@ -466,10 +466,10 @@ passes its check.
 | **M1** | Server: auth, invites, rooms, messages | Integration test suite drives the full REST surface with `reqwest`. No UI yet. | 2–3 days |
 | **M2** | Gateway: WS, heartbeat, sequence numbers, resume | Test client survives a forced disconnect mid-stream and replays without gaps or duplicates | 2 days |
 | **M3** | Client: message list, composer, session grouping, aging, density modes | Two clients on one machine exchange messages in real time | 4–5 days |
-| **M4** | Presence + roster + sitting-in + entrance sounds | Roster updates live across two clients; sounds play and respect mutes | 3 days |
+| **M4** | Presence + roster + in-room state + entrance sounds | Roster updates live across two clients; sounds play and respect mutes | 3 days |
 | **M5** | Activity detection: Windows, X11, KDE/Wayland, macOS | Foreground app appears in the roster on Kubuntu/Plasma 6 Wayland and on Windows | 3–5 days |
-| **M6** | Uploads, media pipeline, the shelf | 400 MB video uploads, resumes after a killed connection, appears in the shelf | 3 days |
-| **M7** | Styling: names, signs, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
+| **M6** | Uploads, media pipeline, the media collection | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
+| **M7** | Styling: names, statuses, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
 | **M8** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
 | **M9** | Export | One archive contains every message and file, and it opens | 1 day |
 

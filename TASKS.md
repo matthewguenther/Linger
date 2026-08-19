@@ -57,18 +57,20 @@ task fails its acceptance criteria twice.
   data dir; the printed setup URL created the host, login → room → message all
   worked over curl, and the setup link died after use (404).
 - ✅ **M1 — server REST** (2026-08-19): auth (argon2id, EdDSA JWT, rotating
-  refresh with family-reuse revocation), first-run setup, invites, stoop/rooms,
-  messages/reactions/read markers, users/styling/signs, rate limiting. Every
+  refresh with family-reuse revocation), first-run setup, invites, server/rooms,
+  messages/reactions/read markers, users/styling/statuses, rate limiting. Every
   endpoint has an integration test driving real HTTP (T-101…T-107 below).
 - ✅ **M2 — gateway** (2026-08-19): WS with hello/identify/ready, heartbeat,
-  per-session sequence numbers, presence + sitting + occupancy + entrance-sound
+  per-session sequence numbers, presence + room focus + occupancy + entrance-sound
   fan-out, typing limits, and resume via a 500-frame/120s session ring. The
   milestone check passes: a forced mid-stream disconnect resumes with **no gaps
   and no duplicates**, asserted by sequence accounting over real sockets
   (`tests/gateway.rs`).
-- ⬜ **M3 … M9** — queued below. **Next up: T-006 (the vocabulary change), then
-  T-301.** M0 is closed, so M3 is clear to start; run the apt line in T-002
-  first so `pnpm tauri dev` works while building it.
+- ✅ **T-006 — the vocabulary change** (2026-08-19): the coined words are gone,
+  ahead of M3 writing any UI copy. Full mapping and the presence-naming call are
+  recorded under the task below.
+- ⬜ **M3 … M9** — queued below. **Next up: T-301.** M0 and T-006 are closed, so
+  M3 is clear to start.
 
 Two decisions M5/M7 no longer have to make: **use `oklch()` directly** (WebKitGTK
 2.52.3 supports it, T-002), and **T-503's Win32 backend is a known quantity**
@@ -80,7 +82,7 @@ ts-rs export to `client/src/generated/` (committed, drift-checked in CI);
 `linger-server` with config/env, WAL SQLite with **single-writer pool discipline**
 (`db.write` is a 1-connection pool — keep it that way), migrations (full §5 schema),
 error envelope, health route, integration-test harness pattern
-(`crates/linger-server/tests/health.rs` — copy its `spawn_stoop` shape);
+(`crates/linger-server/tests/health.rs` — copy its `spawn_server` shape);
 `linger-activity` with the resolution pipeline, registry loader (+41 seed entries),
 backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
 
@@ -210,9 +212,9 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   changing keys after messages exist means a migration.
   *Done 2026-08-19: Matt confirmed the set as-is. AGPL-3.0 license also confirmed.*
 
-## Vocabulary change — **run this before T-301**
+## Vocabulary change — **done, ahead of T-301**
 
-- [ ] **T-006 · Drop the coined vocabulary** — effort: **medium** *(Opus 5: high)*
+- [x] **T-006 · Drop the coined vocabulary** — effort: **medium** *(Opus 5: high)*
   **Decided by Matt 2026-08-19:** the invented words go. The product is Linger;
   an instance is a *server*. Doing this before M3 is deliberate — M3 writes the
   UI copy and component names, and renaming after it lands costs several times
@@ -254,6 +256,39 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   `cd client && pnpm check` green; CI green after push. SPEC §1's vocabulary
   table and AGENTS.md hard rule 6 must describe the *new* words, not the old.
 
+  ### **Done 2026-08-19.** Every rename above landed as specified.
+
+  *The recommended presence naming was taken as-is: `PresenceState::Sitting` →
+  `InRoom` (wire `"in_room"`), `ClientFrame::RoomSit` → `RoomFocus` (op
+  `room.focus`), `Gateway::apply_sit` → `apply_room_focus`. `InRoom` needed an
+  explicit `#[serde(rename = "in_room")]` — the enum's `rename_all =
+  "lowercase"` would have emitted `"inroom"`, which no doc anywhere describes.
+  That is the one spot in this change where a silent wrong answer was possible;
+  `tests/gateway.rs` now asserts the wire string.*
+
+  *`0001_init.sql` was edited in place per the task (`stoop_config` →
+  `server_config`, `user_sign` → `user_status`, and the incidental
+  `idx_attachments_shelf` → `idx_attachments_media`). There was no local
+  `data/linger.db` to delete — `.gitignore` covers `data/`, and the dev box's
+  copy was already gone. **Anyone holding a database created before this commit
+  must delete it**; there is no migration path and won't be one.*
+
+  *Two judgment calls beyond the spec, both recorded in the docs they touch:*
+  - *`ShelfItem`'s file `client/src/generated/ShelfItem.ts` (and `Sign.ts`,
+    `StoopInfo.ts`, `UpdateStoopRequest.ts`) had to be deleted by hand — **ts-rs
+    only writes, it never removes stale exports**, so a rename leaves the old
+    binding on disk and CI's drift check would not have caught it. Worth
+    remembering for any future wire-type rename.*
+  - *SPEC §1 previously argued *for* the coined words; it now records that they
+    were dropped and why, rather than silently deleting the paragraph. AGENTS.md
+    rule 6 lists each retired word against its replacement so the rule is
+    enforceable by grep.*
+
+  *`linger-server`, the `LINGER_*` env vars, and the repo name are untouched, as
+  required. The `linger-server` doc comment now reads "the server process" to
+  keep the binary distinct from the instance it hosts, and SPEC §1 states that
+  distinction explicitly.*
+
 ## M1 — server REST: auth, invites, rooms, messages
 
 *Milestone check: integration test suite drives the full REST surface with real
@@ -276,10 +311,10 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
 - [x] **T-102 · First-run host setup** — effort: **medium**
   ARCHITECTURE §9. On boot with zero users: generate a one-time setup token,
   print `http://<domain-or-bind>/setup?token=…` to stdout, expose endpoints to
-  create the host account + name the stoop (writes `stoop_config`). Token dies on
+  create the host account + name the server (writes `server_config`). Token dies on
   use or restart. No env-var bootstrap credentials.
-  *Accept:* integration test boots a fresh stoop, completes setup, second attempt
-  fails, `GET /stoop` returns the name.
+  *Accept:* integration test boots a fresh server, completes setup, second attempt
+  fails, `GET /server` returns the name.
 
 - [x] **T-103 · Invites** — effort: **medium**
   PROTOCOL §7 + §2. CRUD per protocol; codes 12 chars base32 from a CSPRNG,
@@ -289,8 +324,8 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   *Accept:* tests for expiry, max_uses exhaustion, revocation, preview of each
   state, and the register-through-invite flow.
 
-- [x] **T-104 · Stoop + rooms endpoints** — effort: **medium**
-  PROTOCOL §3. `GET/PATCH /stoop` (PATCH host-only; `accent_key` validated
+- [x] **T-104 · Server + rooms endpoints** — effort: **medium**
+  PROTOCOL §3. `GET/PATCH /server` (PATCH host-only; `accent_key` validated
   against `linger-core::PALETTE`). Rooms CRUD: create/patch/archive host-only,
   slug `[a-z0-9-]{1,32}` unique, `position` ordering, `last_message_id` filled
   from a join. Vocabulary check: it's `RoomId` and "room" in every string.
@@ -310,7 +345,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   before+after), tombstone reply chains, reaction validation, marker idempotency,
   author/host permission matrix.
 
-- [x] **T-106 · Users, styling, signs** — effort: **medium**
+- [x] **T-106 · Users, styling, statuses** — effort: **medium**
   PROTOCOL §5. `GET /users`, `GET /users/:id`, `GET /me`, `PATCH /me`
   (display_name 1–32; `style` — **server-side validation** of `font_key`/
   `msg_font_key` ∈ `FONTS`, fill color keys ∈ `PALETTE`, weight ∈ {400,500,700};
@@ -349,11 +384,11 @@ test with real disconnects, not mocks.*
   number; second test exceeds the window and asserts `invalid_session`.
 
 - [x] **T-203 · Presence ops + rooms occupancy** — effort: **medium**
-  `presence.update` (client), `room.sit`/stand, `room.occupancy`, `room.enter`
-  (with entrance_sound key, only to sitters), `room.leave`, `typing` (1/4s/room
+  `presence.update` (client), `room.focus`, `room.occupancy`, `room.enter`
+  (with entrance_sound key, only to those in the room), `room.leave`, `typing` (1/4s/room
   server-enforced), `user.update`/`room.*` fan-out from REST mutations.
-  *Accept:* two-client test: A sits, B sitting in same room receives `room.enter`;
-  B in another room does not. Disconnect marks offline.
+  *Accept:* two-client test: A focuses a room, B in that same room receives
+  `room.enter`; B in another room does not. Disconnect marks offline.
 
 ## M3 — client: message stream
 
@@ -405,21 +440,23 @@ test with real disconnects, not mocks.*
 
 - [ ] **T-401 · The roster** — effort: **high**
   SPEC §3. Card stack, not a name list: styled name, presence dot, room, activity
-  line, sign (expanded), last-seen + away message for offline. Narrow window →
+  line, status (expanded), last-seen + away message for offline. Narrow window →
   horizontal strip above composer (never hidden). This panel is the product
   thesis — spend the polish here.
-- [ ] **T-402 · Sitting-in mechanics** — effort: **medium**
-  Focus = sit (send `room.sit`), background/idle >90s = stand, input-idle >10min
-  = `idle` state. Header occupancy `#garage · Matt, Callie`; sidebar mini-stacks.
+- [ ] **T-402 · In-room mechanics** — effort: **medium**
+  Focus = in the room (send `room.focus`), background/idle >90s = leave it
+  (`room.focus` with `null`), input-idle >10min = `idle` state. Header occupancy
+  `#garage · Matt, Callie`; sidebar mini-stacks.
 - [ ] **T-403 · Entrance sound playback** — effort: **medium**
-  SPEC §4.1. Play on `room.enter` for sitters; per-user cooldown 5min/listener;
+  SPEC §4.1. Play on `room.enter` for those in the room; per-user cooldown
+  5min/listener;
   global + per-user mute; quiet hours 22:00–08:00 listener-local default-on;
   picker UI for bundled sounds.
 - [ ] **T-404 · Custom sound upload** — effort: **medium**
   Server: accept ≤2s/≤200KB, transcode to Opus + loudness-normalize (−16 LUFS),
   **reject long files, never truncate**. Needs ffmpeg in the Docker image — add it.
-- [ ] **T-405 · Signs + away UI** — effort: **medium**
-  SPEC §4.6. Sign editor (line 240, three labeled fields, image ≤512KB at
+- [ ] **T-405 · Statuses + away UI** — effort: **medium**
+  SPEC §4.6. Status editor (line 240, three labeled fields, image ≤512KB at
   400×200), away message supersedes; roster + popover rendering.
 - [ ] **T-408 · Curate the bundled sounds** — effort: **low** *(Matt-assisted, taste required)*
   12–16 sounds per `assets/sounds/README.md` rules; `ffmpeg -af loudnorm=I=-16`
@@ -452,13 +489,13 @@ test with real disconnects, not mocks.*
   Top games (Steam appids), browsers, creative, editors, media. Local override
   file in the client config dir; **never synced to the server**.
 - [ ] **T-507 · Sharing controls UI** — effort: **medium**
-  SPEC §4.3: global one-click off (roster), per-stoop off, per-app hide,
+  SPEC §4.3: global one-click off (roster), per-server off, per-app hide,
   idle-only mode, **persistent visible indicator** + status bar `sharing: <app>`.
   Default off overall.
 
-## M6 — uploads, media pipeline, the shelf
+## M6 — uploads, media pipeline, the media grid
 
-*Milestone check: a 400 MB video uploads, resumes after a killed connection, appears in the shelf.*
+*Milestone check: a 400 MB video uploads, resumes after a killed connection, appears in the media grid.*
 
 - [ ] **T-601 · Upload pipeline (local backend)** — effort: **high**
   ARCHITECTURE §8 + PROTOCOL §6. Slot creation validates size/quota/MIME
@@ -475,14 +512,14 @@ test with real disconnects, not mocks.*
   ARCHITECTURE §7: serve objects on the cdn host; `Content-Disposition:
   attachment` + `nosniff` off-allowlist; activate the Caddyfile block; strict CSP
   on the app origin.
-- [ ] **T-604 · The shelf UI + link cards** — effort: **medium**
+- [ ] **T-604 · The media UI + link cards** — effort: **medium**
   SPEC §4.4: grid, filter by person/type/date, stars (starred never expire),
   each item links to its message/moment. Restrained link embeds (favicon, title,
   domain — one line): server-side metadata fetch **with SSRF guard** (deny
   private ranges, cap size/time), cached.
 - [ ] **T-605 · Expiry + storage accounting** — effort: **medium**
   365-day expiry of non-starred/non-pinned (host-configurable/off), background
-  task; storage-used figure for the status bar and `GET /stoop`.
+  task; storage-used figure for the status bar and `GET /server`.
 
 ## M7 — styling: names, palette, themes, fonts
 
@@ -529,8 +566,8 @@ current vendor docs, not memory (AGENTS.md).*
 - [ ] **T-901 · Full export** — effort: **medium**
   SPEC §4.11, PROTOCOL §7: any member, 1/hour; background job → zip: per-room
   markdown (readable layout: dividers, names, timestamps), `media/` tree,
-  `shelf.md` index. Job progress endpoint; download via the media origin.
-  *Accept:* export a seeded stoop, unzip, spot-check messages/media; second
+  `media.md` index. Job progress endpoint; download via the media origin.
+  *Accept:* export a seeded server, unzip, spot-check messages/media; second
   request within the hour gets `RATE_LIMITED`.
 
 ---
@@ -538,7 +575,7 @@ current vendor docs, not memory (AGENTS.md).*
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M8 is painful.
-- `ShelfItem` wire shape is minimal (attachment + message/room link) — revisit
+- `MediaItem` wire shape is minimal (attachment + message/room link) — revisit
   when T-604 starts if the grid needs more.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
   member's). Confirm this trade-off is intended before T-604.

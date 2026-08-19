@@ -10,7 +10,8 @@ non-negotiable. Docs (`SPEC.md`, `ARCHITECTURE.md`, `PROTOCOL.md`) win over code
   default commit-trailer behavior.
 - Never transmit, store, or log a window title. `ProcessIdent` has no title field.
 - No unread counts, no telemetry, no `@everyone`, no E2EE claims.
-- Vocabulary: stoop / room / sitting in / host / shelf / sign. `RoomId`, not `ChannelId`.
+- Vocabulary: server / room / in the room / host / media / status. `RoomId`, not
+  `ChannelId`. The coined words (stoop, shelf, sign, sitting in) were dropped in T-006.
 - Wire types live in `crates/linger-core`, exported via `ts-rs`. Never hand-write one.
 
 ## Workflow

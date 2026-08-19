@@ -1,4 +1,4 @@
-//! Server configuration. Environment variables only — a stoop is configured by
+//! Server configuration. Environment variables only — a server is configured by
 //! its compose file, not a config-file format to document and version.
 
 use std::net::SocketAddr;
@@ -19,7 +19,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// `LINGER_BIND` — default `0.0.0.0:8420` (the reverse proxy terminates TLS).
     pub bind: SocketAddr,
-    /// `LINGER_DOMAIN` — public domain of this stoop; used in absolute URLs.
+    /// `LINGER_DOMAIN` — public domain of this server; used in absolute URLs.
     pub domain: Option<String>,
     /// `LINGER_STORAGE` — `local` (default) or `s3`.
     pub storage: Storage,
@@ -57,7 +57,7 @@ impl Config {
         })
     }
 
-    /// Path of the one SQLite file that (with `objects/`) is the entire stoop.
+    /// Path of the one SQLite file that (with `objects/`) is the entire server.
     #[must_use]
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("linger.db")

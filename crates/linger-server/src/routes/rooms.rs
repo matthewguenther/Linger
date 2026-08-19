@@ -1,4 +1,4 @@
-//! Rooms (PROTOCOL §3). Creation and reshaping are host-only; sitting in them
+//! Rooms (PROTOCOL §3). Creation and reshaping are host-only; being in them
 //! is everyone's business (and the gateway's).
 
 use axum::extract::{Path, State};

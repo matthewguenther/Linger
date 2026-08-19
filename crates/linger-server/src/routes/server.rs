@@ -1,34 +1,34 @@
-//! The stoop itself (PROTOCOL §3): its name, accent, and headline numbers.
+//! The server itself (PROTOCOL §3): its name, accent, and headline numbers.
 
 use std::collections::HashMap;
 
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
-use linger_core::wire::{ColorKey, StoopInfo, UpdateStoopRequest};
+use linger_core::wire::{ColorKey, ServerInfo, UpdateServerRequest};
 
 use crate::auth::{AuthedUser, HostUser};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/stoop", get(info).patch(update))
+    Router::new().route("/server", get(info).patch(update))
 }
 
 async fn read_config(state: &AppState) -> Result<HashMap<String, String>, ApiError> {
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM stoop_config")
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM server_config")
         .fetch_all(&state.db.read)
         .await?;
     Ok(rows.into_iter().collect())
 }
 
-async fn build_info(state: &AppState) -> Result<StoopInfo, ApiError> {
+async fn build_info(state: &AppState) -> Result<ServerInfo, ApiError> {
     let config = read_config(state).await?;
     let (member_count,): (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM users WHERE deactivated_at IS NULL")
             .fetch_one(&state.db.read)
             .await?;
-    Ok(StoopInfo {
+    Ok(ServerInfo {
         name: config.get("name").cloned().unwrap_or_default(),
         accent_key: config.get("accent_key").cloned().map(ColorKey),
         icon_key: config.get("icon_key").cloned(),
@@ -43,19 +43,19 @@ async fn build_info(state: &AppState) -> Result<StoopInfo, ApiError> {
 async fn info(
     State(state): State<AppState>,
     _auth: AuthedUser,
-) -> Result<Json<StoopInfo>, ApiError> {
+) -> Result<Json<ServerInfo>, ApiError> {
     build_info(&state).await.map(Json)
 }
 
 async fn update(
     State(state): State<AppState>,
     _host: HostUser,
-    Json(req): Json<UpdateStoopRequest>,
-) -> Result<Json<StoopInfo>, ApiError> {
+    Json(req): Json<UpdateServerRequest>,
+) -> Result<Json<ServerInfo>, ApiError> {
     if let Some(name) = &req.name {
         let trimmed = name.trim();
         if trimmed.is_empty() || trimmed.chars().count() > 48 {
-            return Err(ApiError::validation("Stoop names are 1–48 characters."));
+            return Err(ApiError::validation("Server names are 1–48 characters."));
         }
     }
     if let Some(accent) = &req.accent_key {
@@ -75,7 +75,7 @@ async fn update(
     for (key, value) in pairs {
         if let Some(value) = value {
             sqlx::query(
-                "INSERT INTO stoop_config (key, value) VALUES (?, ?)
+                "INSERT INTO server_config (key, value) VALUES (?, ?)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             )
             .bind(key)

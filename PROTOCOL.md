@@ -45,7 +45,7 @@ POST /auth/refresh      { refresh_token }
 
 POST /auth/logout       { refresh_token }              → 204
 
-GET  /auth/invite/:code → { valid, stoop_name, expires_at }   # unauthenticated preview
+GET  /auth/invite/:code → { valid, server_name, expires_at }  # unauthenticated preview
 ```
 
 `username`: `[a-z0-9_]{2,24}`, unique, immutable after creation.
@@ -64,21 +64,21 @@ no env-var bootstrap credentials.
 
 ```
 GET  /setup/:token      → { valid }                            # unauthenticated
-POST /setup             { token, stoop_name, username,
+POST /setup             { token, server_name, username,
                           display_name, password }
                      →  { access_token, refresh_token, expires_in, user }
 ```
 
-`POST /setup` creates the host account (`is_host: true`), names the stoop, and
+`POST /setup` creates the host account (`is_host: true`), names the server, and
 consumes the token. Once any user exists, both endpoints return `NOT_FOUND`.
 
 ---
 
-## 3. Linger and rooms
+## 3. The server and rooms
 
 ```
-GET  /stoop              → { name, accent_key, icon_key, member_count, created_at }
-PATCH /stoop             (host only) { name?, accent_key?, icon_key? }   # accent_key from PALETTE
+GET  /server             → { name, accent_key, icon_key, member_count, created_at }
+PATCH /server            (host only) { name?, accent_key?, icon_key? }   # accent_key from PALETTE
 
 GET  /rooms              → Room[]
 POST /rooms              (host only) { slug, name, topic? }         → Room
@@ -149,13 +149,13 @@ returned by the server.** There is no unread-count endpoint and one must not be 
 
 ---
 
-## 5. Users, styling, signs
+## 5. Users, styling, statuses
 
 ```
-GET   /users              → User[]              # all members of this stoop
+GET   /users              → User[]              # all members of this server
 GET   /users/:id          → User
 GET   /me                 → User
-PATCH /me                 { display_name?, style?, sign?, entrance_sound? }  → User
+PATCH /me                 { display_name?, style?, status?, entrance_sound? } → User
 PATCH /me/password        { current_password, new_password }                 → 204
 
 GET  /me/notify-rules     → NotifyRule[]
@@ -163,7 +163,7 @@ PUT  /me/notify-rules     { target_user_id, room_id | null }   → 204
 DELETE /me/notify-rules   { target_user_id, room_id | null }   → 204
 ```
 
-`PATCH /me` semantics: absent fields are unchanged; `style` and `sign` replace the
+`PATCH /me` semantics: absent fields are unchanged; `style` and `status` replace the
 whole object when present. `entrance_sound: ""` clears the sound (bundled keys are
 validated against `linger-core::ENTRANCE_SOUNDS` until custom uploads land in M4).
 
@@ -172,7 +172,7 @@ type User = {
   id: string; username: string; display_name: string;
   is_host: boolean;
   style: Style;
-  sign: Sign | null;
+  status: UserStatus | null;
   entrance_sound: string | null;      // bundled key or object key
   last_seen_at: number | null;
 }
@@ -192,7 +192,7 @@ type Style = {
   msg_font_key: string | null;
 }
 
-type Sign = {
+type UserStatus = {
   line: string | null;                // <= 240 chars
   reading: string | null;             // <= 80
   listening: string | null;           // <= 80
@@ -236,7 +236,7 @@ DELETE /uploads/:id                                         → 204
 Client PUTs bytes **directly to the returned URL**, never through the app server.
 Files over 8 MB use multipart with per-part URLs, which is what makes uploads resumable.
 
-Server rejects at slot creation: `size_bytes > 500 MB`, stoop pool over quota, or a mime
+Server rejects at slot creation: `size_bytes > 500 MB`, server pool over quota, or a mime
 not on the allowlist. Server re-validates real size and sniffs actual MIME at complete —
 never trust the declared values.
 
@@ -251,13 +251,13 @@ type Attachment = {
 }
 ```
 
-**The shelf**
+**Media**
 
 ```
-GET /shelf?kind=image|video|audio|file|link|pin
-          &author=<user_id>&before=<id>&limit=<1..100>   → ShelfItem[]
-PUT    /shelf/:attachment_id/star                        → 204
-DELETE /shelf/:attachment_id/star                        → 204
+GET /media?kind=image|video|audio|file|link|pin
+          &author=<user_id>&before=<id>&limit=<1..100>   → MediaItem[]
+PUT    /media/:attachment_id/star                        → 204
+DELETE /media/:attachment_id/star                        → 204
 ```
 
 ---
@@ -318,7 +318,7 @@ Beyond that, the client must re-identify and refetch.
 | op | payload | notes |
 |---|---|---|
 | `presence.update` | `{ state, activity, away_message? }` | `activity` is the resolved registry id or `null`. **Never a window title.** |
-| `room.sit` | `{ room_id \| null }` | `null` = stood up |
+| `room.focus` | `{ room_id \| null }` | fires on focus; `null` = left the room |
 | `typing.start` | `{ room_id }` | server rate-limits to 1 per 4s per room |
 
 ### Server → client
@@ -333,7 +333,7 @@ Beyond that, the client must re-identify and refetch.
 | `room.occupancy` | `{ room_id, user_ids }` |
 | `room.enter` | `{ room_id, user_id, entrance_sound }` — triggers the sound |
 | `room.leave` | `{ room_id, user_id }` |
-| `user.update` | `User` — display name, style, or sign changed |
+| `user.update` | `User` — display name, style, or status changed |
 | `room.create` / `room.update` | `Room` |
 | `typing` | `{ room_id, user_id }` |
 | `knock` | `{ from_user_id }` (V2) |
@@ -341,7 +341,7 @@ Beyond that, the client must re-identify and refetch.
 ```ts
 type PresenceEntry = {
   user_id: string;
-  state: "sitting" | "around" | "idle" | "away" | "offline";
+  state: "in_room" | "around" | "idle" | "away" | "offline";
   room_id: string | null;
   activity: { registry_id: string; label: string; kind: string; since: number } | null;
   away_message: string | null;
@@ -351,7 +351,7 @@ type PresenceEntry = {
 ### Fan-out rules
 
 - Presence and occupancy go to every connected client. At this scale, no filtering.
-- `room.enter` is sent only to clients currently sitting in that room. The receiving
+- `room.enter` is sent only to clients currently in that room. The receiving
   client applies its own mute rules and quiet hours before playing anything (SPEC §4.1).
 - Message events go to all clients; the client decides what to render. There are no
   per-room permissions in V1, so there is nothing to filter on.

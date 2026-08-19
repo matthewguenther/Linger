@@ -6,12 +6,12 @@
 
 **A small, self-hosted place for a group of friends to hang out.**
 
-Text rooms, presence, and file sharing. One person runs a server — *a stoop* — and
-their friends install a client and connect to it. Not federated. Not a platform. No
-company in the middle.
+Text rooms, presence, and file sharing. One person runs a server and their friends
+install a client and connect to it. Not federated. Not a platform. No company in the
+middle.
 
 > To linger is to stay somewhere with no agenda and no obligation to be doing
-> anything. You linger on someone's stoop.
+> anything. That is the product thesis in one word.
 
 **Status: pre-alpha, under active construction.** See [SPEC.md](SPEC.md) for the full
 product specification.
@@ -34,26 +34,26 @@ These terms are used everywhere — UI, code, docs, error messages:
 
 | Concept | Term |
 |---|---|
-| A server instance | **a stoop** |
+| An instance | **a server** |
 | A text channel | **a room** |
-| Being present in a room | **sitting in** |
+| Being present in a room | **in the room** |
 | The person running it | **the host** |
-| Media/link archive | **the shelf** |
-| A user's status card | **their sign** |
+| Media/link archive | **media** |
+| A user's status card | **their status** |
 
 ## ✨ What it does (V1)
 
-- 🪑 **Rooms you sit in** — focusing a room means you're sitting in it; others see
+- 🪑 **Rooms you're in** — focusing a room means you're in it; others see
   occupancy, and each person has a personal **entrance sound** that plays on arrival
 - 👥 **A roster-forward layout** — people are the primary surface, not a gutter; each
-  friend is a card showing presence, room, activity, and their sign
+  friend is a card showing presence, room, activity, and their status
 - 🔕 **No unread counts** — a "you left off here" line and a subtle label-weight change,
   never a badge; direct person-to-person mentions are the only real notification
 - 🎮 **Ambient activity** — opt-in, default-off sharing of the app you're using,
   resolved against a bundled registry; **window titles are never read or transmitted**
 - ✍️ **Styled names** (the AIM feature) — curated fonts, a named 16-color palette,
-  gradients, shimmer/glow; and **signs** with away messages
-- 🗄️ **The shelf** — everything ever shared, browsable and filterable; star things to
+  gradients, shimmer/glow; and **statuses** with away messages
+- 🗄️ **Media** — everything ever shared, browsable and filterable; star things to
   keep them forever
 - 🎚️ **Reactions by weight** — a fixed palette of 12; six identical reactions render
   denser and larger, not "👍 6"
@@ -75,8 +75,8 @@ The scope discipline is the product.
 Stated plainly:
 
 > Messages and files are encrypted in transit (TLS) and at rest on the host's disk.
-> **The person running the stoop can read everything on it.** There is no
-> end-to-end encryption. Run your own stoop, or trust the person who runs the one
+> **The person running the server can read everything on it.** There is no
+> end-to-end encryption. Run your own server, or trust the person who runs the one
 > you're on. If you need cryptographic guarantees against your host, use Signal.
 
 Other privacy properties that *are* guaranteed:
@@ -90,17 +90,18 @@ Other privacy properties that *are* guaranteed:
 ## 🤖 The AI stance
 
 **No AI in the conversation.** No AI participants, no suggested replies, no sentiment
-analysis — ever. Planned V2 features (semantic search over the shelf, catch-up
+analysis — ever. Planned V2 features (semantic search over history and media, catch-up
 summaries, transcription/alt-text) run **only against a host-configured local endpoint**
 (Ollama-compatible). No cloud default, no cloud fallback; if no endpoint is configured,
 the features don't appear at all.
 
-A self-hosted stoop can run all of this on the box. A hosted competitor structurally
-cannot — their version requires shipping your friends' conversations to a third party.
+A self-hosted Linger server can run all of this on the box. A hosted competitor
+structurally cannot — their version requires shipping your friends' conversations to
+a third party.
 
-## 🚀 Running a stoop
+## 🚀 Running a server
 
-Target: a working stoop in under 15 minutes. One binary plus one data directory, or:
+Target: a working server in under 15 minutes. One binary plus one data directory, or:
 
 ```bash
 cd deploy
@@ -157,5 +158,5 @@ Current work queue lives in [TASKS.md](TASKS.md).
 
 ## 📜 License
 
-[AGPL-3.0](LICENSE). If you run a modified stoop for other people, they get the source.
+[AGPL-3.0](LICENSE). If you run a modified server for other people, they get the source.
 That's the deal.

@@ -22,7 +22,7 @@ pub struct AppState {
 
 impl AppState {
     /// Wire everything up: JWT keys from the data dir, setup armed iff the
-    /// stoop has no users yet.
+    /// server has no users yet.
     pub async fn build(db: Db, config: Config) -> anyhow::Result<Self> {
         let jwt = JwtKeys::load_or_generate(&config.data_dir)?;
         let (user_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")

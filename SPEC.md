@@ -23,24 +23,25 @@ generate revenue.
 **The name.** To linger is to stay somewhere with no agenda and no obligation to be
 doing anything. That is the product thesis in one word.
 
-A single instance is still called **a stoop** — a stoop is a place defined by
-low-obligation presence: you sit on it, people stop by, nobody schedules anything.
-The two words come from the same world and pair cleanly: *you linger on someone's
-stoop.* This is deliberate, not leftover naming.
+An instance is **a server**. Earlier drafts coined a private vocabulary for these
+concepts; it was dropped before any UI was built. Plain words travel further than
+clever ones, and everyone joining a Linger server already knows what a server, a
+room, and a status are.
 
 ### Vocabulary (use these terms everywhere — UI, code, docs, error messages)
 
 | Concept | Term | Never call it |
 |---|---|---|
-| A server instance | **a stoop** | server, guild, workspace, community |
+| An instance | **a server** | stoop, guild, workspace, community |
 | A text channel | **a room** | channel |
-| Being present in a room | **sitting in** | joined, connected |
+| Being present in a room | **in the room** | sitting in, joined, connected |
 | The person running it | **the host** | admin, owner |
-| Media/link archive | **the shelf** | gallery, media tab |
-| A user's status card | **their sign** | bio, status, about me |
+| Media/link archive | **media** | the shelf, gallery |
+| A user's status card | **their status** | their sign, bio, about me |
 
 Language does more design work than features. Hold this vocabulary in the code too:
-`RoomId`, not `ChannelId`.
+`RoomId`, not `ChannelId`. One thing "server" is *not*: the `linger-server` binary is
+the process that hosts an instance, never the instance itself.
 
 ---
 
@@ -58,8 +59,8 @@ mismatch:
 | Infinite scroll, no archive | Everything you shared is functionally destroyed |
 | "Online" member list | Meaningless — everyone is always online |
 
-**Core problem to solve: a quiet Discord server looks abandoned. A quiet stoop with
-four people in it must feel populated.**
+**Core problem to solve: a quiet Discord server looks abandoned. A quiet Linger
+server with four people in it must feel populated.**
 
 ### Three principles
 
@@ -93,8 +94,8 @@ inverts the priority. **People are the primary surface, not a gutter.**
 
 ```
 ┌──────────┬────────────────────────────────────┬─────────────────┐
-│ STOOPS   │  #garage                           │  WHO'S AROUND   │
-│          │  Matt, Callie sitting in           │                 │
+│ SERVERS  │  #garage                           │  WHO'S AROUND   │
+│          │  Matt, Callie in the room          │                 │
 │  ● home  │                                    │ ┌─────────────┐ │
 │  ○ work  │                                    │ │● Callie     │ │
 │  + add   │  ─── Saturday morning ───          │ │ in #garage  │ │
@@ -106,7 +107,7 @@ inverts the priority. **People are the primary surface, not a gutter.**
 │  #garage │  Matt     9:31                     │ │ Blender     │ │
 │  #shop   │  │ yeah, mounting it now           │ │ ♪ Bill Evans│ │
 │          │  │ [img]                           │ └─────────────┘ │
-│  shelf   │                                    │ ┌─────────────┐ │
+│  media   │                                    │ ┌─────────────┐ │
 │          │                                    │ │○ Jen        │ │
 │          │  ┌──────────────────────────────┐  │ │ 2h · "back  │ │
 │          │  │ say something                │  │ │ after work" │ │
@@ -115,9 +116,9 @@ inverts the priority. **People are the primary surface, not a gutter.**
 ```
 
 **The roster (right) is a card stack, not a name list.** Each card shows: name in the
-user's own styling, presence dot, which room they are sitting in, their current
-activity (if shared), and their sign. Offline users show last-seen and their away
-message. This panel is what makes an empty stoop feel like a house with the lights on.
+user's own styling, presence dot, which room they are in, their current activity
+(if shared), and their status. Offline users show last-seen and their away message.
+This panel is what makes an empty server feel like a house with the lights on.
 
 On narrow windows the roster collapses to a horizontal strip above the composer, not
 into a hamburger menu. It is never fully hidden by default.
@@ -126,17 +127,17 @@ into a hamburger menu. It is never fully hidden by default.
 
 ## 4. Feature specifications
 
-### 4.1 Rooms you sit in
+### 4.1 Rooms you are in
 
 A room is a place, not a filing cabinet.
 
-- Focusing the app on a room means you are **sitting in** it. Others see this.
+- Focusing the app on a room means you are **in the room**. Others see this.
 - Room headers show occupancy: `#garage · Matt, Callie`
 - Sidebar rooms show a small stack of who is in them.
-- Backgrounding the app or idling >90 seconds means you stand up.
+- Backgrounding the app or idling >90 seconds takes you out of the room.
 
 **Entrance sounds.** Each user picks a personal sound that plays for others already
-sitting in a room when they arrive. This is the cheapest piece of emotional design
+in a room when they arrive. This is the cheapest piece of emotional design
 available and no modern app does it, because a 50,000-member server can't.
 
 Requirements:
@@ -186,17 +187,17 @@ detection requires a browser extension and is out of scope, permanently.
 
 Controls, all client-side (the server never receives what it is not allowed to show):
 - Global off switch, one click from the roster
-- Per-stoop off switch
+- Per-server off switch
 - Per-app hide list ("never show that I'm in X")
 - Idle-only mode (share presence but not activity)
 - A persistent visible indicator whenever activity sharing is on
 
-Presence states: `sitting` (in a room), `around` (app focused, no room), `idle` (no
+Presence states: `in_room`, `around` (app focused, no room), `idle` (no
 input >10 min), `away` (explicit, with message), `offline`.
 
-### 4.4 The shelf
+### 4.4 Media
 
-Everything shared in a stoop accumulates into a browsable collection: images, video,
+Everything shared on a server accumulates into a browsable collection: images, video,
 audio, links, files, and pinned messages.
 
 - Grid view, filterable by person, type, and date range.
@@ -205,7 +206,7 @@ audio, links, files, and pinned messages.
 - First-class sidebar destination, not a search result.
 
 This fixes the deepest wound: you shared something great eight months ago and it is
-gone. For a friend group, the shelf *is* the relationship.
+gone. For a friend group, that collection *is* the relationship.
 
 ### 4.5 Name styling (the AIM feature)
 
@@ -244,18 +245,18 @@ hot-pink-Comic-Sans-on-black was funny for a week and unreadable forever. Users 
 
 "Normalize everyone" flattens message styling too.
 
-### 4.6 Signs and away messages
+### 4.6 Statuses and away messages
 
 The AIM away message is the most-missed feature of that era — a status, a mood board,
 and a joke delivery mechanism in one field.
 
-A user's **sign** is a small card, not a bio field:
+A user's **status** is a small card, not a bio field:
 - One line of free text (240 chars, rendered in their name styling)
 - Optional: reading / listening to / working on (three labeled short fields)
 - Optional: one image, max 512 KB, displayed at 400×200
-- Optional: an away message that supersedes the sign when set
+- Optional: an away message that supersedes the status when set
 
-Signs appear in the roster card when expanded, and in the user popover.
+Statuses appear in the roster card when expanded, and in the user popover.
 
 ### 4.7 Text presentation
 
@@ -307,7 +308,7 @@ Rate limit: 3 knocks per person per hour.
 ### 4.10 File sharing
 
 - 500 MB per file
-- 50 GB per stoop pool (host-configurable)
+- 50 GB per server pool (host-configurable)
 - Non-starred, non-pinned files expire after 365 days (host-configurable, can be off)
 - Resumable uploads
 - **EXIF stripped from all images on upload, always, no toggle.** Camera photos carry
@@ -317,7 +318,7 @@ Rate limit: 3 knocks per person per hour.
 
 ### 4.11 Export
 
-Any member can export the entire stoop at any time: messages as markdown, media as
+Any member can export the entire server at any time: messages as markdown, media as
 files, in one archive. No gatekeeping, no host approval, one export per hour.
 
 This is a trust feature and an anti-lock-in guarantee. It costs a weekend and it is the
@@ -462,23 +463,23 @@ first two are the system defaults.
 
 | # | Feature | Spec |
 |---|---|---|
-| 1 | Self-hosted stoop: single binary + Docker image | ARCHITECTURE |
+| 1 | Self-hosted server: single binary + Docker image | ARCHITECTURE |
 | 2 | Invite-link registration; host/member roles only | §2 |
-| 3 | Rooms with occupancy and sitting-in presence | §4.1 |
+| 3 | Rooms with occupancy and in-room presence | §4.1 |
 | 4 | Entrance sounds | §4.1 |
 | 5 | Text: markdown, edit, delete, reply | §4.7 |
 | 6 | No unread counts; "left off here" line | §4.2 |
 | 7 | Roster-forward layout | §3 |
 | 8 | Activity detection, default off, app-registry only | §4.3 |
 | 9 | Name styling + message accent color | §4.5 |
-| 10 | Signs and away messages | §4.6 |
+| 10 | Statuses and away messages | §4.6 |
 | 11 | Reactions by weight | §4.8 |
 | 12 | File upload 500 MB, EXIF stripped | §4.10 |
-| 13 | The shelf | §4.4 |
+| 13 | Media collection | §4.4 |
 | 14 | Density modes incl. IRC | §4.7 |
 | 15 | Full export | §4.11 |
 | 16 | Desktop client: Linux, Windows, macOS | ARCHITECTURE |
-| 17 | Multi-stoop list in the client | §3 |
+| 17 | Multi-server list in the client | §3 |
 
 ### V2
 
@@ -553,7 +554,7 @@ autocomplete.
 
 | Feature | Notes |
 |---|---|
-| **Semantic search over history and the shelf** | Highest-value item. "that video of the drive" actually finds it. Local embeddings, stored alongside the SQLite DB. |
+| **Semantic search over history and media** | Highest-value item. "that video of the drive" actually finds it. Local embeddings, stored alongside the SQLite DB. |
 | **Catch-up summaries** | "Since you were gone" (§4.2), summarized. Pulled, never pushed. |
 | **App registry auto-classification** | Classify unknown processes locally so the 200-entry registry isn't hand-maintained forever. Touches zero conversation content. |
 | **Transcription and alt-text** | Accessibility. Local Whisper for voice memos, local vision model for image alt-text. |
@@ -562,9 +563,9 @@ autocomplete.
 (Ollama-compatible). There is no cloud default and no cloud fallback. If no endpoint is
 configured, these features do not appear in the UI at all.
 
-The strategic point, worth stating in the README: a self-hosted stoop can run all of this
-on the box. A hosted competitor structurally cannot — their version requires shipping
-your friends' conversations to a third party.
+The strategic point, worth stating in the README: a self-hosted Linger server can run
+all of this on the box. A hosted competitor structurally cannot — their version
+requires shipping your friends' conversations to a third party.
 
 ### 8.3 The agent surface
 

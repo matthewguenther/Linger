@@ -1,6 +1,6 @@
 [package]
 name = "linger-server"
-description = "The stoop: axum REST + WS gateway, SQLite (WAL), object store adapter — one binary, one data directory"
+description = "The Linger server: axum REST + WS gateway, SQLite (WAL), object store adapter — one binary, one data directory"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

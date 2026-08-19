@@ -1,4 +1,4 @@
-//! The stoop's entry point: read env config, open the database, serve.
+//! The server's entry point: read env config, open the database, serve.
 
 use tracing_subscriber::EnvFilter;
 
@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(token) = state.setup.peek() {
         let host = domain.unwrap_or_else(|| bind.to_string());
         println!("\n  ┌─────────────────────────────────────────────────");
-        println!("  │  This stoop isn't set up yet.");
+        println!("  │  This server isn't set up yet.");
         println!("  │  Open:  http://{host}/setup?token={token}");
         println!("  │  (the link works once, then never again)");
         println!("  └─────────────────────────────────────────────────\n");

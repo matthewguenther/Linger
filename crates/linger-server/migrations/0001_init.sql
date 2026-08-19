@@ -25,8 +25,8 @@ CREATE TABLE user_style (
   msg_font_key    TEXT
 );
 
--- the "sign"; see SPEC §4.6
-CREATE TABLE user_sign (
+-- the user status card; see SPEC §4.6
+CREATE TABLE user_status (
   user_id         BLOB PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   line            TEXT,                        -- 240 chars
   reading         TEXT,
@@ -84,7 +84,7 @@ CREATE TABLE attachments (
   state           TEXT NOT NULL,               -- pending | complete | failed
   created_at      INTEGER NOT NULL
 );
-CREATE INDEX idx_attachments_shelf ON attachments(created_at DESC) WHERE state='complete';
+CREATE INDEX idx_attachments_media ON attachments(created_at DESC) WHERE state='complete';
 
 CREATE TABLE reactions (
   message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -132,7 +132,7 @@ CREATE TABLE refresh_tokens (
 );
 CREATE INDEX idx_refresh_hash ON refresh_tokens(token_hash);
 
-CREATE TABLE stoop_config (
+CREATE TABLE server_config (
   key             TEXT PRIMARY KEY,
   value           TEXT NOT NULL
 );

@@ -3,10 +3,10 @@
 //! so handlers read as straight-line code.
 
 use linger_core::limits::{
-    MAX_DISPLAY_NAME_CHARS, MAX_MESSAGE_CHARS, MAX_SIGN_FIELD_CHARS, MAX_SIGN_LINE_CHARS,
+    MAX_DISPLAY_NAME_CHARS, MAX_MESSAGE_CHARS, MAX_STATUS_FIELD_CHARS, MAX_STATUS_LINE_CHARS,
     MIN_PASSWORD_CHARS,
 };
-use linger_core::wire::{Fill, Sign, Style};
+use linger_core::wire::{Fill, Style, UserStatus};
 
 use crate::error::ApiError;
 
@@ -101,7 +101,7 @@ pub fn style(style: &Style) -> Result<(), ApiError> {
     Ok(())
 }
 
-pub fn sign(sign: &Sign) -> Result<(), ApiError> {
+pub fn status(status: &UserStatus) -> Result<(), ApiError> {
     let cap = |field: &Option<String>, max: usize, what: &str| -> Result<(), ApiError> {
         match field {
             Some(v) if v.chars().count() > max => Err(ApiError::validation(format!(
@@ -110,11 +110,15 @@ pub fn sign(sign: &Sign) -> Result<(), ApiError> {
             _ => Ok(()),
         }
     };
-    cap(&sign.line, MAX_SIGN_LINE_CHARS, "The sign line")?;
-    cap(&sign.reading, MAX_SIGN_FIELD_CHARS, "Reading")?;
-    cap(&sign.listening, MAX_SIGN_FIELD_CHARS, "Listening")?;
-    cap(&sign.working_on, MAX_SIGN_FIELD_CHARS, "Working on")?;
-    cap(&sign.away_message, MAX_SIGN_LINE_CHARS, "The away message")?;
+    cap(&status.line, MAX_STATUS_LINE_CHARS, "The status line")?;
+    cap(&status.reading, MAX_STATUS_FIELD_CHARS, "Reading")?;
+    cap(&status.listening, MAX_STATUS_FIELD_CHARS, "Listening")?;
+    cap(&status.working_on, MAX_STATUS_FIELD_CHARS, "Working on")?;
+    cap(
+        &status.away_message,
+        MAX_STATUS_LINE_CHARS,
+        "The away message",
+    )?;
     Ok(())
 }
 

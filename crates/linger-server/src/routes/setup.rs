@@ -23,7 +23,7 @@ async fn preview(
     Path(token): Path<String>,
 ) -> Result<Json<SetupPreview>, ApiError> {
     if state.setup.peek().is_none() {
-        return Err(ApiError::not_found("This stoop is already set up."));
+        return Err(ApiError::not_found("This server is already set up."));
     }
     Ok(Json(SetupPreview {
         valid: state.setup.matches(&token),
@@ -35,14 +35,14 @@ async fn complete(
     Json(req): Json<SetupRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
     if state.setup.peek().is_none() {
-        return Err(ApiError::not_found("This stoop is already set up."));
+        return Err(ApiError::not_found("This server is already set up."));
     }
     validate::username(&req.username)?;
     validate::display_name(&req.display_name)?;
     validate::password(&req.password)?;
-    let stoop_name = req.stoop_name.trim();
-    if stoop_name.is_empty() || stoop_name.chars().count() > 48 {
-        return Err(ApiError::validation("Stoop names are 1–48 characters."));
+    let server_name = req.server_name.trim();
+    if server_name.is_empty() || server_name.chars().count() > 48 {
+        return Err(ApiError::validation("Server names are 1–48 characters."));
     }
 
     // Validate everything above *before* burning the one-shot token, so a typo
@@ -68,10 +68,10 @@ async fn complete(
     .execute(&mut *tx)
     .await?;
     for (key, value) in [
-        ("name", stoop_name.to_string()),
+        ("name", server_name.to_string()),
         ("created_at", now.to_string()),
     ] {
-        sqlx::query("INSERT INTO stoop_config (key, value) VALUES (?, ?)")
+        sqlx::query("INSERT INTO server_config (key, value) VALUES (?, ?)")
             .bind(key)
             .bind(value)
             .execute(&mut *tx)
@@ -79,6 +79,6 @@ async fn complete(
     }
     tx.commit().await.map_err(ApiError::from)?;
 
-    tracing::info!(stoop = stoop_name, host = req.username, "stoop set up");
+    tracing::info!(server = server_name, host = req.username, "server set up");
     super::auth::auth_response(&state, host_id).await.map(Json)
 }

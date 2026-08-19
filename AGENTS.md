@@ -32,8 +32,9 @@ pass.
 4. **No telemetry, analytics, or crash reporting.** Not opt-in. Not anonymous. None.
 5. **No `@everyone` / `@here`.** Do not implement broadcast mentions.
 6. **Use the vocabulary** from `SPEC.md` §1 in code, UI strings, and errors. `RoomId`,
-   not `ChannelId`. `stoop`, not `server` (except when referring to the HTTP server
-   process, which is `linger-server`).
+   not `ChannelId`. An instance is a `server`, never a `stoop`; a user's status card
+   is a `status`, never a `sign`; the media collection is `media`, never a `shelf`;
+   people are `in` a room, never `sitting in` it.
 7. **Wire types live in `crates/linger-core`** and are exported via `ts-rs`. Never
    hand-write a TypeScript type that crosses the wire.
 8. **Palette and font keys are validated server-side** against `linger-core::PALETTE`
@@ -120,7 +121,7 @@ Do not start a milestone until the previous one passes its check in
 
 ```
 SPIKE → M0 scaffold → M1 server REST → M2 gateway → M3 client shell
-      → M4 presence/roster → M5 activity detection → M6 uploads/shelf
+      → M4 presence/roster → M5 activity detection → M6 uploads/media
       → M7 styling/themes → M8 packaging → M9 export
 ```
 

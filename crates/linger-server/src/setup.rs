@@ -11,7 +11,7 @@ pub struct SetupState {
 }
 
 impl SetupState {
-    /// Armed with a fresh token when the stoop has no users yet.
+    /// Armed with a fresh token when the server has no users yet.
     #[must_use]
     pub fn new(needs_setup: bool) -> Self {
         let token = needs_setup.then(|| {

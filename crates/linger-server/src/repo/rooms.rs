@@ -48,5 +48,5 @@ pub async fn by_id(db: &SqlitePool, id: RoomId) -> Result<Option<Room>, ApiError
 pub async fn expect(db: &SqlitePool, id: RoomId) -> Result<Room, ApiError> {
     by_id(db, id)
         .await?
-        .ok_or_else(|| ApiError::not_found("No such room on this stoop."))
+        .ok_or_else(|| ApiError::not_found("No such room on this server."))
 }

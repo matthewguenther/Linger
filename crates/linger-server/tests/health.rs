@@ -7,8 +7,8 @@ use linger_core::wire::{ErrorCode, ErrorEnvelope};
 
 #[tokio::test]
 async fn health_reports_ok_with_a_live_database() {
-    let stoop = common::spawn_stoop().await;
-    let body: serde_json::Value = reqwest::get(stoop.url("/health"))
+    let server = common::spawn_server().await;
+    let body: serde_json::Value = reqwest::get(server.url("/health"))
         .await
         .unwrap()
         .json()
@@ -20,8 +20,8 @@ async fn health_reports_ok_with_a_live_database() {
 
 #[tokio::test]
 async fn unknown_api_paths_return_the_protocol_error_envelope() {
-    let stoop = common::spawn_stoop().await;
-    let resp = reqwest::get(stoop.url("/definitely-not-a-route"))
+    let server = common::spawn_server().await;
+    let resp = reqwest::get(server.url("/definitely-not-a-route"))
         .await
         .unwrap();
     assert_eq!(resp.status(), 404);
@@ -32,16 +32,16 @@ async fn unknown_api_paths_return_the_protocol_error_envelope() {
 
 #[tokio::test]
 async fn protected_routes_reject_missing_and_garbage_tokens() {
-    let stoop = common::spawn_stoop().await;
+    let server = common::spawn_server().await;
     let client = reqwest::Client::new();
 
-    let bare = client.get(stoop.url("/users")).send().await.unwrap();
+    let bare = client.get(server.url("/users")).send().await.unwrap();
     assert_eq!(bare.status(), 401);
     let env: ErrorEnvelope = bare.json().await.unwrap();
     assert_eq!(env.error.code, ErrorCode::Unauthenticated);
 
     let garbage = client
-        .get(stoop.url("/users"))
+        .get(server.url("/users"))
         .bearer_auth("not-a-jwt")
         .send()
         .await

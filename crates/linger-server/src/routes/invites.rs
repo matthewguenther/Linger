@@ -1,4 +1,4 @@
-//! Invites (PROTOCOL §7). Any member can invite a friend — that's what a stoop
+//! Invites (PROTOCOL §7). Any member can invite a friend — that's what a server
 //! is for — rate-limited to 10/day. Codes are 12 chars of CSPRNG base32.
 
 use axum::extract::{Path, State};

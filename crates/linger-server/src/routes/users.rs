@@ -1,4 +1,4 @@
-//! Users, styling, signs, notify rules (PROTOCOL §5).
+//! Users, styling, statuses, notify rules (PROTOCOL §5).
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -59,8 +59,8 @@ async fn patch_me(
     if let Some(style) = &req.style {
         validate::style(style)?;
     }
-    if let Some(sign) = &req.sign {
-        validate::sign(sign)?;
+    if let Some(status) = &req.status {
+        validate::status(status)?;
     }
     if let Some(sound) = &req.entrance_sound {
         if !sound.is_empty() && !linger_core::is_valid_entrance_sound_key(sound) {
@@ -113,21 +113,21 @@ async fn patch_me(
         .await?;
     }
 
-    if let Some(sign) = &req.sign {
+    if let Some(status) = &req.status {
         // `away_since` is server-owned: stamped when an away message appears or
         // changes, cleared with it.
         let prev_away: Option<(Option<String>, Option<i64>)> =
-            sqlx::query_as("SELECT away_message, away_since FROM user_sign WHERE user_id = ?")
+            sqlx::query_as("SELECT away_message, away_since FROM user_status WHERE user_id = ?")
                 .bind(auth.id.to_vec())
                 .fetch_optional(&mut *tx)
                 .await?;
-        let away_since = match (&sign.away_message, prev_away) {
+        let away_since = match (&status.away_message, prev_away) {
             (None, _) => None,
             (Some(new), Some((Some(old), Some(since)))) if new == &old => Some(since),
             (Some(_), _) => Some(now_ms()),
         };
         sqlx::query(
-            "INSERT INTO user_sign
+            "INSERT INTO user_status
                (user_id, line, reading, listening, working_on, image_key,
                 away_message, away_since, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -138,12 +138,12 @@ async fn patch_me(
                away_since = excluded.away_since, updated_at = excluded.updated_at",
         )
         .bind(auth.id.to_vec())
-        .bind(&sign.line)
-        .bind(&sign.reading)
-        .bind(&sign.listening)
-        .bind(&sign.working_on)
-        .bind(&sign.image_key)
-        .bind(&sign.away_message)
+        .bind(&status.line)
+        .bind(&status.reading)
+        .bind(&status.listening)
+        .bind(&status.working_on)
+        .bind(&status.image_key)
+        .bind(&status.away_message)
         .bind(away_since)
         .bind(now_ms())
         .execute(&mut *tx)

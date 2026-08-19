@@ -68,7 +68,7 @@ impl ApiError {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorCode::Internal,
-            "Something went wrong on the stoop.",
+            "Something went wrong on the server.",
         )
     }
 }

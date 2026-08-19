@@ -60,8 +60,8 @@ async fn send_json(ws: &mut Ws, value: Value) {
 }
 
 /// Full handshake: hello → identify → ready. Returns the socket + session id.
-async fn connect_ready(stoop: &common::TestStoop, token: &str) -> (Ws, String) {
-    let (mut ws, _) = connect_async(stoop.gateway_url())
+async fn connect_ready(server: &common::TestServer, token: &str) -> (Ws, String) {
+    let (mut ws, _) = connect_async(server.gateway_url())
         .await
         .expect("ws connect");
     let hello = recv_json(&mut ws).await;
@@ -83,9 +83,9 @@ async fn connect_ready(stoop: &common::TestStoop, token: &str) -> (Ws, String) {
     (ws, session_id)
 }
 
-async fn rest_send(stoop: &common::TestStoop, token: &str, room: &str, body: &str) {
+async fn rest_send(server: &common::TestServer, token: &str, room: &str, body: &str) {
     let resp = reqwest::Client::new()
-        .post(stoop.url(&format!("/rooms/{room}/messages")))
+        .post(server.url(&format!("/rooms/{room}/messages")))
         .bearer_auth(token)
         .json(&json!({ "body": body }))
         .send()
@@ -96,18 +96,18 @@ async fn rest_send(stoop: &common::TestStoop, token: &str, room: &str, body: &st
 
 #[tokio::test]
 async fn ready_snapshot_heartbeat_and_message_fanout() {
-    let (stoop, host, room) = common::stoop_with_room("garage").await;
-    let member = common::join_member(&stoop, &host.access_token, "callie").await;
+    let (server, host, room) = common::server_with_room("garage").await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
 
-    let (mut a, _) = connect_ready(&stoop, &host.access_token).await;
-    let (mut b, _) = connect_ready(&stoop, &member.access_token).await;
+    let (mut a, _) = connect_ready(&server, &host.access_token).await;
+    let (mut b, _) = connect_ready(&server, &member.access_token).await;
 
     // B's ready snapshot knows the world: both users, the room.
     // (Cheapest cross-check: re-connect a probe and inspect its ready.)
-    let (mut probe, _) = connect_ready(&stoop, &member.access_token).await;
+    let (mut probe, _) = connect_ready(&server, &member.access_token).await;
     // A message sent over REST reaches every connected client.
     rest_send(
-        &stoop,
+        &server,
         &member.access_token,
         &room.id.to_string(),
         "anyone around?",
@@ -126,19 +126,19 @@ async fn ready_snapshot_heartbeat_and_message_fanout() {
 }
 
 #[tokio::test]
-async fn sitting_enter_leave_occupancy_and_typing_limits() {
-    let (stoop, host, room) = common::stoop_with_room("garage").await;
-    let member = common::join_member(&stoop, &host.access_token, "callie").await;
+async fn room_focus_enter_leave_occupancy_and_typing_limits() {
+    let (server, host, room) = common::server_with_room("garage").await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
     let room_id = room.id.to_string();
 
-    let (mut a, _) = connect_ready(&stoop, &host.access_token).await;
-    let (mut b, _) = connect_ready(&stoop, &member.access_token).await;
+    let (mut a, _) = connect_ready(&server, &host.access_token).await;
+    let (mut b, _) = connect_ready(&server, &member.access_token).await;
 
     // A sits. Everyone gets occupancy + presence; only sitters get room.enter —
     // which includes A itself (the client filters its own entrance at playback).
     send_json(
         &mut a,
-        json!({ "op": "room.sit", "d": { "room_id": room_id } }),
+        json!({ "op": "room.focus", "d": { "room_id": room_id } }),
     )
     .await;
     let (own_enter, _) = wait_for(&mut a, "room.enter").await;
@@ -151,16 +151,16 @@ async fn sitting_enter_leave_occupancy_and_typing_limits() {
         json!([host.user.id.to_string()])
     );
     let (presence, skipped) = wait_for(&mut b, "presence.update").await;
-    assert_eq!(presence["d"]["state"], "sitting");
+    assert_eq!(presence["d"]["state"], "in_room");
     assert!(
         !skipped.iter().any(|f| f["op"] == "room.enter"),
-        "B is not sitting in the room and must not hear the entrance"
+        "B is not in the room and must not hear the entrance"
     );
 
     // B sits too: A (a sitter) hears B enter.
     send_json(
         &mut b,
-        json!({ "op": "room.sit", "d": { "room_id": room_id } }),
+        json!({ "op": "room.focus", "d": { "room_id": room_id } }),
     )
     .await;
     let (enter, _) = wait_for(&mut a, "room.enter").await;
@@ -189,7 +189,7 @@ async fn sitting_enter_leave_occupancy_and_typing_limits() {
     // B stands up: A hears the leave and the shrunken occupancy.
     send_json(
         &mut b,
-        json!({ "op": "room.sit", "d": { "room_id": null } }),
+        json!({ "op": "room.focus", "d": { "room_id": null } }),
     )
     .await;
     let (leave, _) = wait_for(&mut a, "room.leave").await;
@@ -205,11 +205,11 @@ async fn sitting_enter_leave_occupancy_and_typing_limits() {
 /// then resume replays without gaps or duplicates.
 #[tokio::test]
 async fn forced_disconnect_then_resume_replays_with_no_gaps_no_duplicates() {
-    let (stoop, host, room) = common::stoop_with_room("garage").await;
-    let member = common::join_member(&stoop, &host.access_token, "callie").await;
+    let (server, host, room) = common::server_with_room("garage").await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
     let room_id = room.id.to_string();
 
-    let (mut ws, session_id) = connect_ready(&stoop, &member.access_token).await;
+    let (mut ws, session_id) = connect_ready(&server, &member.access_token).await;
 
     let mut seen_seqs: Vec<u64> = Vec::new();
     let mut seen_bodies: Vec<String> = Vec::new();
@@ -224,7 +224,7 @@ async fn forced_disconnect_then_resume_replays_with_no_gaps_no_duplicates() {
 
     // Phase 1: four messages arrive live.
     for i in 0..4 {
-        rest_send(&stoop, &host.access_token, &room_id, &format!("live {i}")).await;
+        rest_send(&server, &host.access_token, &room_id, &format!("live {i}")).await;
     }
     while seen_bodies.len() < 4 {
         let frame = recv_json(&mut ws).await;
@@ -236,7 +236,7 @@ async fn forced_disconnect_then_resume_replays_with_no_gaps_no_duplicates() {
     drop(ws);
     for i in 4..8 {
         rest_send(
-            &stoop,
+            &server,
             &host.access_token,
             &room_id,
             &format!("offline {i}"),
@@ -247,7 +247,9 @@ async fn forced_disconnect_then_resume_replays_with_no_gaps_no_duplicates() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Phase 3: resume from the last sequence we actually processed.
-    let (mut ws, _) = connect_async(stoop.gateway_url()).await.expect("reconnect");
+    let (mut ws, _) = connect_async(server.gateway_url())
+        .await
+        .expect("reconnect");
     let hello = recv_json(&mut ws).await;
     assert_eq!(hello["op"], "hello");
     send_json(
@@ -293,11 +295,11 @@ async fn forced_disconnect_then_resume_replays_with_no_gaps_no_duplicates() {
 
 #[tokio::test]
 async fn resume_of_unknown_session_and_bad_identify_are_rejected() {
-    let stoop = common::spawn_stoop().await;
-    let host = common::bootstrap_host(&stoop).await;
+    let server = common::spawn_server().await;
+    let host = common::bootstrap_host(&server).await;
 
     // Unknown session id ⇒ invalid_session: expired ⇒ client re-identifies.
-    let (mut ws, _) = connect_async(stoop.gateway_url()).await.unwrap();
+    let (mut ws, _) = connect_async(server.gateway_url()).await.unwrap();
     let _hello = recv_json(&mut ws).await;
     send_json(
         &mut ws,
@@ -311,7 +313,7 @@ async fn resume_of_unknown_session_and_bad_identify_are_rejected() {
     assert_eq!(invalid["d"]["reason"], "expired");
 
     // Garbage identify token ⇒ invalid_session: unauthenticated.
-    let (mut ws, _) = connect_async(stoop.gateway_url()).await.unwrap();
+    let (mut ws, _) = connect_async(server.gateway_url()).await.unwrap();
     let _hello = recv_json(&mut ws).await;
     send_json(
         &mut ws,

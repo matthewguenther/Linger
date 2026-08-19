@@ -22,7 +22,7 @@ pub struct Db {
     pub read: SqlitePool,
 }
 
-/// Open (creating if missing) the stoop database and run pending migrations.
+/// Open (creating if missing) the server database and run pending migrations.
 pub async fn init(db_path: &Path) -> anyhow::Result<Db> {
     if let Some(parent) = db_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -72,20 +72,20 @@ mod tests {
         let db = init(&dir.path().join("linger.db")).await.unwrap();
 
         // Writer can write.
-        sqlx::query("INSERT INTO stoop_config (key, value) VALUES ('name', 'test stoop')")
+        sqlx::query("INSERT INTO server_config (key, value) VALUES ('name', 'test server')")
             .execute(&db.write)
             .await
             .unwrap();
 
         // Reader sees it and is actually read-only.
         let (value,): (String,) =
-            sqlx::query_as("SELECT value FROM stoop_config WHERE key = 'name'")
+            sqlx::query_as("SELECT value FROM server_config WHERE key = 'name'")
                 .fetch_one(&db.read)
                 .await
                 .unwrap();
-        assert_eq!(value, "test stoop");
+        assert_eq!(value, "test server");
 
-        let denied = sqlx::query("INSERT INTO stoop_config (key, value) VALUES ('x', 'y')")
+        let denied = sqlx::query("INSERT INTO server_config (key, value) VALUES ('x', 'y')")
             .execute(&db.read)
             .await;
         assert!(denied.is_err(), "read pool must reject writes");

@@ -14,8 +14,8 @@ export default function App() {
     <div className="frame">
       <aside className="rail">
         <section className="rail-section">
-          <h2 className="panel-label">stoops</h2>
-          <p className="placeholder">no stoop yet</p>
+          <h2 className="panel-label">servers</h2>
+          <p className="placeholder">no server yet</p>
         </section>
         <section className="rail-section rail-rooms">
           <h2 className="panel-label">rooms</h2>
@@ -26,11 +26,11 @@ export default function App() {
       <main className="stream">
         <header className="stream-header">
           <span className="room-name">welcome</span>
-          <span className="meta">nobody sitting in</span>
+          <span className="meta">nobody in the room</span>
         </header>
         <div className="stream-body">
           <p className="placeholder">
-            This is a stoop with the lights off. M1–M3 turn them on.
+            This is a server with the lights off. M1–M3 turn them on.
           </p>
         </div>
         <footer className="composer">

@@ -88,7 +88,7 @@ impl Gateway {
         self.presence.iter().map(|e| e.value().clone()).collect()
     }
 
-    /// Who is sitting in a room right now.
+    /// Who is in a room right now.
     #[must_use]
     pub fn occupancy(&self, room_id: RoomId) -> Vec<UserId> {
         self.presence
@@ -138,9 +138,14 @@ impl Gateway {
         entry
     }
 
-    /// Apply a `room.sit` / stand and emit the resulting events, in protocol
-    /// order: leave → enter → occupancy → presence.
-    fn apply_sit(&self, user_id: UserId, room_id: Option<RoomId>, entrance_sound: Option<String>) {
+    /// Apply a `room.focus` (or a `None` = left the room) and emit the resulting
+    /// events, in protocol order: leave → enter → occupancy → presence.
+    fn apply_room_focus(
+        &self,
+        user_id: UserId,
+        room_id: Option<RoomId>,
+        entrance_sound: Option<String>,
+    ) {
         let prev_room = self.presence.get(&user_id).and_then(|e| e.value().room_id);
         if prev_room == room_id {
             return;
@@ -154,7 +159,7 @@ impl Gateway {
                 .unwrap_or_else(|| offline_entry(user_id));
             entry.room_id = room_id;
             entry.state = if room_id.is_some() {
-                PresenceState::Sitting
+                PresenceState::InRoom
             } else {
                 PresenceState::Around
             };
@@ -205,14 +210,14 @@ impl Gateway {
         };
         if remaining == 0 {
             self.conn_count.remove(&user_id);
-            self.apply_sit(user_id, None, None);
+            self.apply_room_focus(user_id, None, None);
             self.presence.remove(&user_id);
             self.publish(ServerEvent::PresenceUpdate(offline_entry(user_id)));
         }
     }
 
     /// PROTOCOL §8 fan-out rules: everything goes everywhere except
-    /// `room.enter`, which only reaches clients currently sitting in that room.
+    /// `room.enter`, which only reaches clients currently in that room.
     fn visible_to(&self, receiver: UserId, event: &ServerEvent) -> bool {
         match event {
             ServerEvent::RoomEnter { room_id, .. } => self

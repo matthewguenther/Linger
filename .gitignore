@@ -11,7 +11,7 @@ client/dist/
 # Tauri generated schemas
 client/src-tauri/gen/schemas/
 
-# Local data: a stoop's entire state lives here — never commit it
+# Local data: a server's entire state lives here — never commit it
 /data/
 *.db
 *.db-wal

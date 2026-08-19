@@ -44,9 +44,10 @@ pub enum ClientFrame {
         activity: Option<String>,
         away_message: Option<String>,
     },
-    /// `room_id: None` means the user stood up.
-    #[serde(rename = "room.sit")]
-    RoomSit { room_id: Option<RoomId> },
+    /// Fired when the client focuses a room. `room_id: None` means the user
+    /// left the room (unfocused, backgrounded, or idle).
+    #[serde(rename = "room.focus")]
+    RoomFocus { room_id: Option<RoomId> },
     #[serde(rename = "typing.start")]
     TypingStart { room_id: RoomId },
 }
@@ -108,7 +109,7 @@ pub enum ServerEvent {
         room_id: RoomId,
         user_ids: Vec<UserId>,
     },
-    /// Sent only to clients sitting in that room; the receiver applies its own
+    /// Sent only to clients in that room; the receiver applies its own
     /// mute rules and quiet hours before playing anything (SPEC §4.1).
     #[serde(rename = "room.enter")]
     RoomEnter {
@@ -121,7 +122,7 @@ pub enum ServerEvent {
         room_id: RoomId,
         user_id: UserId,
     },
-    /// Display name, style, or sign changed.
+    /// Display name, style, or status changed.
     #[serde(rename = "user.update")]
     UserUpdate(User),
     #[serde(rename = "room.create")]
@@ -179,11 +180,11 @@ mod tests {
 
     #[test]
     fn dotted_op_names_survive_round_trip() {
-        let f = ClientFrame::RoomSit { room_id: None };
+        let f = ClientFrame::RoomFocus { room_id: None };
         let json = serde_json::to_string(&f).unwrap();
-        assert!(json.contains(r#""op":"room.sit""#));
+        assert!(json.contains(r#""op":"room.focus""#));
         let back: ClientFrame = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back, ClientFrame::RoomSit { room_id: None }));
+        assert!(matches!(back, ClientFrame::RoomFocus { room_id: None }));
     }
 
     #[test]

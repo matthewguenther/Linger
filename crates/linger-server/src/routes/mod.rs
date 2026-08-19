@@ -1,6 +1,6 @@
 //! Route assembly. Everything REST lives under `/api/v1`; the gateway upgrades
 //! at `/api/v1/gateway` (PROTOCOL preamble). Still to mount: `/uploads` and
-//! `/shelf` (M6), `/export` (M9).
+//! `/media` (M6), `/export` (M9).
 //!
 //! Unknown paths get the PROTOCOL §1 envelope, not axum's plain-text 404, so
 //! the client can always switch on `error.code`.
@@ -10,8 +10,8 @@ mod health;
 mod invites;
 mod messages;
 mod rooms;
+mod server;
 mod setup;
-mod stoop;
 mod users;
 
 use axum::routing::any;
@@ -28,7 +28,7 @@ pub fn router(state: AppState) -> Router {
         .merge(auth::router())
         .merge(users::router())
         .merge(invites::router())
-        .merge(stoop::router())
+        .merge(server::router())
         .merge(rooms::router())
         .merge(messages::router())
         .route("/gateway", any(crate::gateway::ws_route))
@@ -41,5 +41,5 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn api_not_found() -> ApiError {
-    ApiError::not_found("No such thing on this stoop.")
+    ApiError::not_found("No such thing on this server.")
 }

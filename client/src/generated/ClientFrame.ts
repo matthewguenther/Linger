@@ -17,4 +17,4 @@ s: number, } } | { "op": "heartbeat", "d": {
 /**
  * Last sequence number seen, for the server's replay bookkeeping.
  */
-s: number | null, } } | { "op": "presence.update", "d": { state: PresenceState, activity: string | null, away_message: string | null, } } | { "op": "room.sit", "d": { room_id: RoomId | null, } } | { "op": "typing.start", "d": { room_id: RoomId, } };
+s: number | null, } } | { "op": "presence.update", "d": { state: PresenceState, activity: string | null, away_message: string | null, } } | { "op": "room.focus", "d": { room_id: RoomId | null, } } | { "op": "typing.start", "d": { room_id: RoomId, } };

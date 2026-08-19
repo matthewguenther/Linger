@@ -4,7 +4,7 @@ import type { MessageId } from "./MessageId";
 import type { RoomId } from "./RoomId";
 
 /**
- * What the shelf grid renders: an attachment plus the moment it came from,
+ * What the media grid renders: an attachment plus the moment it came from,
  * so every item links back to its message (SPEC §4.4).
  */
-export type ShelfItem = { attachment: Attachment, message_id: MessageId | null, room_id: RoomId | null, };
+export type MediaItem = { attachment: Attachment, message_id: MessageId | null, room_id: RoomId | null, };

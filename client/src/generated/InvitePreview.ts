@@ -3,4 +3,4 @@
 /**
  * Unauthenticated invite preview (`GET /auth/invite/:code`).
  */
-export type InvitePreview = { valid: boolean, stoop_name: string | null, expires_at: number | null, };
+export type InvitePreview = { valid: boolean, server_name: string | null, expires_at: number | null, };

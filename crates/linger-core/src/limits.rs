@@ -3,7 +3,7 @@
 
 /// 500 MB per file (SPEC §4.10).
 pub const MAX_FILE_BYTES: u64 = 500 * 1024 * 1024;
-/// 50 GB default per-stoop pool; host-configurable (SPEC §4.10).
+/// 50 GB default per-server pool; host-configurable (SPEC §4.10).
 pub const DEFAULT_POOL_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 /// Files over this use multipart upload, which is what makes uploads resumable.
 pub const MULTIPART_THRESHOLD_BYTES: u64 = 8 * 1024 * 1024;
@@ -16,10 +16,10 @@ pub const MAX_ENTRANCE_SOUND_MS: u32 = 2_000;
 /// A given user's entrance sound plays at most once per 5 min per listener.
 pub const ENTRANCE_SOUND_COOLDOWN_MS: u64 = 5 * 60 * 1000;
 
-/// Sign fields (SPEC §4.6).
-pub const MAX_SIGN_LINE_CHARS: usize = 240;
-pub const MAX_SIGN_FIELD_CHARS: usize = 80;
-pub const MAX_SIGN_IMAGE_BYTES: u64 = 512 * 1024;
+/// User-status fields (SPEC §4.6).
+pub const MAX_STATUS_LINE_CHARS: usize = 240;
+pub const MAX_STATUS_FIELD_CHARS: usize = 80;
+pub const MAX_STATUS_IMAGE_BYTES: u64 = 512 * 1024;
 
 /// Message body cap, chars after trim (PROTOCOL §4).
 pub const MAX_MESSAGE_CHARS: usize = 8_000;

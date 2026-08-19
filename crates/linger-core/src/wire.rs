@@ -129,14 +129,14 @@ impl Default for Style {
 }
 
 // ---------------------------------------------------------------------------
-// Users and signs (SPEC §4.6, PROTOCOL §5)
+// Users and statuses (SPEC §4.6, PROTOCOL §5)
 // ---------------------------------------------------------------------------
 
-/// A user's sign: a small card, not a bio field. The away message supersedes
+/// A user's status: a small card, not a bio field. The away message supersedes
 /// `line` when set.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct Sign {
+pub struct UserStatus {
     pub line: Option<String>,
     pub reading: Option<String>,
     pub listening: Option<String>,
@@ -155,7 +155,7 @@ pub struct User {
     pub display_name: String,
     pub is_host: bool,
     pub style: Style,
-    pub sign: Option<Sign>,
+    pub status: Option<UserStatus>,
     /// Bundled sound key, or object key for a custom upload.
     pub entrance_sound: Option<String>,
     #[ts(type = "number | null")]
@@ -208,12 +208,12 @@ pub struct RefreshResponse {
     pub expires_in: u64,
 }
 
-/// First-run setup (PROTOCOL §2.1): creates the host account and names the stoop.
+/// First-run setup (PROTOCOL §2.1): creates the host account and names the server.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SetupRequest {
     pub token: String,
-    pub stoop_name: String,
+    pub server_name: String,
     pub username: String,
     pub display_name: String,
     pub password: String,
@@ -232,14 +232,14 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
-/// `PATCH /me`: absent fields unchanged; `style`/`sign` replace whole objects;
+/// `PATCH /me`: absent fields unchanged; `style`/`status` replace whole objects;
 /// `entrance_sound: ""` clears the sound (PROTOCOL §5).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct UpdateMeRequest {
     pub display_name: Option<String>,
     pub style: Option<Style>,
-    pub sign: Option<Sign>,
+    pub status: Option<UserStatus>,
     pub entrance_sound: Option<String>,
 }
 
@@ -248,18 +248,18 @@ pub struct UpdateMeRequest {
 #[ts(export)]
 pub struct InvitePreview {
     pub valid: bool,
-    pub stoop_name: Option<String>,
+    pub server_name: Option<String>,
     #[ts(type = "number | null")]
     pub expires_at: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
-// The stoop and its rooms (PROTOCOL §3)
+// The server and its rooms (PROTOCOL §3)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct StoopInfo {
+pub struct ServerInfo {
     pub name: String,
     pub accent_key: Option<ColorKey>,
     pub icon_key: Option<String>,
@@ -286,7 +286,7 @@ pub struct UpdateRoomRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct UpdateStoopRequest {
+pub struct UpdateServerRequest {
     pub name: Option<String>,
     pub accent_key: Option<ColorKey>,
     pub icon_key: Option<String>,
@@ -369,7 +369,7 @@ pub struct UpdateReadMarkerRequest {
 pub type ReadMap = HashMap<RoomId, MessageId>;
 
 // ---------------------------------------------------------------------------
-// Uploads and the shelf (PROTOCOL §6)
+// Uploads and media (PROTOCOL §6)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -440,11 +440,11 @@ pub struct CompleteUploadRequest {
     pub parts: Option<Vec<CompletedPart>>,
 }
 
-/// What the shelf grid renders: an attachment plus the moment it came from,
+/// What the media grid renders: an attachment plus the moment it came from,
 /// so every item links back to its message (SPEC §4.4).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct ShelfItem {
+pub struct MediaItem {
     pub attachment: Attachment,
     pub message_id: Option<MessageId>,
     pub room_id: Option<RoomId>,
@@ -458,7 +458,8 @@ pub struct ShelfItem {
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
 pub enum PresenceState {
-    Sitting,
+    #[serde(rename = "in_room")]
+    InRoom,
     Around,
     Idle,
     Away,
@@ -594,8 +595,8 @@ mod tests {
     #[test]
     fn presence_states_serialize_lowercase() {
         assert_eq!(
-            serde_json::to_string(&PresenceState::Sitting).unwrap(),
-            "\"sitting\""
+            serde_json::to_string(&PresenceState::InRoom).unwrap(),
+            "\"in_room\""
         );
         assert_eq!(
             serde_json::to_string(&PresenceState::Around).unwrap(),

@@ -103,7 +103,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 }
 
 /// The session this socket was attached to. Sessions are per-socket in
-/// practice; matching by user is enough at stoop scale because a stale Detach
+/// practice; matching by user is enough at this scale because a stale Detach
 /// to an already-detached session is a no-op.
 fn find_session_for_cleanup(state: &AppState, user_id: UserId) -> Option<mpsc::Sender<Ctl>> {
     state
@@ -254,7 +254,7 @@ async fn handle_client_frame(
             );
             state.gateway.publish(ServerEvent::PresenceUpdate(entry));
         }
-        ClientFrame::RoomSit { room_id } => {
+        ClientFrame::RoomFocus { room_id } => {
             let entrance_sound: Option<String> =
                 sqlx::query_scalar("SELECT sound_key FROM entrance_sounds WHERE user_id = ?")
                     .bind(user_id.to_vec())
@@ -262,7 +262,9 @@ async fn handle_client_frame(
                     .await
                     .ok()
                     .flatten();
-            state.gateway.apply_sit(user_id, room_id, entrance_sound);
+            state
+                .gateway
+                .apply_room_focus(user_id, room_id, entrance_sound);
         }
         ClientFrame::TypingStart { room_id } => {
             let key = format!("typing:{user_id}:{room_id}");

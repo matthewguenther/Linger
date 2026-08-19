@@ -1,4 +1,4 @@
-//! linger-server: the stoop. One Rust binary, one data directory.
+//! linger-server: the server process. One Rust binary, one data directory.
 //!
 //! Library layout exists so integration tests can build the exact production
 //! router against a temp SQLite file (AGENTS.md testing rules). `main.rs` is a

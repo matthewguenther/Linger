@@ -1,6 +1,6 @@
 //! Keyed token buckets for the ARCHITECTURE §7 rate limits (constants in
 //! `linger-core::limits`). In-memory on purpose: limits reset on restart, which
-//! is harmless at stoop scale and keeps the database out of the hot path.
+//! is harmless at this scale and keeps the database out of the hot path.
 
 use std::time::Instant;
 

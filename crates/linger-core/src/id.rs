@@ -98,7 +98,7 @@ macro_rules! define_id {
 }
 
 define_id!(
-    /// A member of the stoop.
+    /// A member of the server.
     UserId
 );
 define_id!(
@@ -110,7 +110,7 @@ define_id!(
     MessageId
 );
 define_id!(
-    /// An uploaded file (an item on the shelf).
+    /// An uploaded file (an item in the media collection).
     AttachmentId
 );
 define_id!(

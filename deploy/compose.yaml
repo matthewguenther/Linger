@@ -1,4 +1,4 @@
-# A stoop in two containers: linger itself and Caddy for automatic TLS.
+# A Linger server in two containers: linger itself and Caddy for automatic TLS.
 # Target: a non-expert friend gets this running in under 15 minutes.
 #
 #   1. Point your domain's DNS at this machine.
@@ -6,7 +6,7 @@
 #   3. docker compose up -d
 #   4. docker compose logs linger   ← prints the one-time host-setup URL
 #
-# Backup = ./data/linger.db + ./data/objects/. That's the whole stoop.
+# Backup = ./data/linger.db + ./data/objects/. That's the whole server.
 
 services:
   linger:

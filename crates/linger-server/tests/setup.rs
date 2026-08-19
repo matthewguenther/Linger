@@ -2,21 +2,21 @@
 
 mod common;
 
-use linger_core::wire::{AuthResponse, StoopInfo};
+use linger_core::wire::{AuthResponse, ServerInfo};
 
 #[tokio::test]
-async fn fresh_stoop_completes_setup_exactly_once() {
-    let stoop = common::spawn_stoop().await;
-    let token = stoop
+async fn fresh_server_completes_setup_exactly_once() {
+    let server = common::spawn_server().await;
+    let token = server
         .state
         .setup
         .peek()
-        .expect("fresh stoop must arm a setup token");
+        .expect("fresh server must arm a setup token");
     let client = reqwest::Client::new();
 
     // Preview: right token is valid, wrong token isn't.
     let ok: serde_json::Value = client
-        .get(stoop.url(&format!("/setup/{token}")))
+        .get(server.url(&format!("/setup/{token}")))
         .send()
         .await
         .unwrap()
@@ -25,7 +25,7 @@ async fn fresh_stoop_completes_setup_exactly_once() {
         .unwrap();
     assert_eq!(ok["valid"], true);
     let bad: serde_json::Value = client
-        .get(stoop.url("/setup/not-the-token"))
+        .get(server.url("/setup/not-the-token"))
         .send()
         .await
         .unwrap()
@@ -36,9 +36,9 @@ async fn fresh_stoop_completes_setup_exactly_once() {
 
     // A bad form must NOT burn the token.
     let short_pw = client
-        .post(stoop.url("/setup"))
+        .post(server.url("/setup"))
         .json(&serde_json::json!({
-            "token": token, "stoop_name": "home", "username": "matt",
+            "token": token, "server_name": "home", "username": "matt",
             "display_name": "Matt", "password": "short",
         }))
         .send()
@@ -46,15 +46,15 @@ async fn fresh_stoop_completes_setup_exactly_once() {
         .unwrap();
     assert_eq!(short_pw.status(), 422);
     assert!(
-        stoop.state.setup.peek().is_some(),
+        server.state.setup.peek().is_some(),
         "validation failure must not consume the token"
     );
 
-    // Complete for real: host account + stoop name.
+    // Complete for real: host account + server name.
     let auth: AuthResponse = client
-        .post(stoop.url("/setup"))
+        .post(server.url("/setup"))
         .json(&serde_json::json!({
-            "token": token, "stoop_name": "the garage", "username": "matt",
+            "token": token, "server_name": "the garage", "username": "matt",
             "display_name": "Matt", "password": "correct horse battery",
         }))
         .send()
@@ -68,9 +68,9 @@ async fn fresh_stoop_completes_setup_exactly_once() {
 
     // Token is dead: preview 404s, a second completion 404s.
     let again = client
-        .post(stoop.url("/setup"))
+        .post(server.url("/setup"))
         .json(&serde_json::json!({
-            "token": token, "stoop_name": "x", "username": "mallory",
+            "token": token, "server_name": "x", "username": "mallory",
             "display_name": "M", "password": "a long enough password",
         }))
         .send()
@@ -78,15 +78,15 @@ async fn fresh_stoop_completes_setup_exactly_once() {
         .unwrap();
     assert_eq!(again.status(), 404);
     let preview = client
-        .get(stoop.url(&format!("/setup/{token}")))
+        .get(server.url(&format!("/setup/{token}")))
         .send()
         .await
         .unwrap();
     assert_eq!(preview.status(), 404);
 
-    // The stoop knows its name.
-    let info: StoopInfo = client
-        .get(stoop.url("/stoop"))
+    // The server knows its name.
+    let info: ServerInfo = client
+        .get(server.url("/server"))
         .bearer_auth(&auth.access_token)
         .send()
         .await
