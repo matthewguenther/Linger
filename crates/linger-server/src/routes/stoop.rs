@@ -40,7 +40,10 @@ async fn build_info(state: &AppState) -> Result<StoopInfo, ApiError> {
     })
 }
 
-async fn info(State(state): State<AppState>, _auth: AuthedUser) -> Result<Json<StoopInfo>, ApiError> {
+async fn info(
+    State(state): State<AppState>,
+    _auth: AuthedUser,
+) -> Result<Json<StoopInfo>, ApiError> {
     build_info(&state).await.map(Json)
 }
 
@@ -57,7 +60,9 @@ async fn update(
     }
     if let Some(accent) = &req.accent_key {
         if !accent.is_valid() {
-            return Err(ApiError::validation("The accent comes from the named palette."));
+            return Err(ApiError::validation(
+                "The accent comes from the named palette.",
+            ));
         }
     }
 

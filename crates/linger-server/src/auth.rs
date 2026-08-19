@@ -61,7 +61,9 @@ pub async fn hash_password(password: String) -> anyhow::Result<String> {
 pub async fn verify_password(password: String, hash: String) -> anyhow::Result<bool> {
     tokio::task::spawn_blocking(move || {
         let parsed = PasswordHash::new(&hash).map_err(|e| anyhow::anyhow!("bad hash: {e}"))?;
-        Ok(argon2().verify_password(password.as_bytes(), &parsed).is_ok())
+        Ok(argon2()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok())
     })
     .await?
 }
@@ -89,10 +91,9 @@ impl JwtKeys {
         let pkcs8: Vec<u8> = if path.exists() {
             std::fs::read(&path)?
         } else {
-            let doc = ring::signature::Ed25519KeyPair::generate_pkcs8(
-                &ring::rand::SystemRandom::new(),
-            )
-            .map_err(|_| anyhow::anyhow!("keypair generation failed"))?;
+            let doc =
+                ring::signature::Ed25519KeyPair::generate_pkcs8(&ring::rand::SystemRandom::new())
+                    .map_err(|_| anyhow::anyhow!("keypair generation failed"))?;
             std::fs::create_dir_all(data_dir)?;
             std::fs::write(&path, doc.as_ref())?;
             #[cfg(unix)]
@@ -133,7 +134,10 @@ impl JwtKeys {
         let validation = Validation::new(jsonwebtoken::Algorithm::EdDSA);
         let data = jsonwebtoken::decode::<Claims>(token, &self.decoding, &validation)
             .map_err(|_| ApiError::unauthenticated())?;
-        data.claims.sub.parse().map_err(|_| ApiError::unauthenticated())
+        data.claims
+            .sub
+            .parse()
+            .map_err(|_| ApiError::unauthenticated())
     }
 }
 
@@ -182,11 +186,14 @@ pub enum RefreshOutcome {
 
 /// Rotate a refresh token (PROTOCOL §2). Runs in one transaction on the writer.
 pub async fn rotate_refresh(db: &SqlitePool, token: &str) -> anyhow::Result<RefreshOutcome> {
+    // (id, user_id, family_id, expires_at, revoked_at)
+    type RefreshRow = (Vec<u8>, Vec<u8>, Vec<u8>, i64, Option<i64>);
+
     let hash = token_hash(token);
     let now = now_ms();
     let mut tx = db.begin().await?;
 
-    let row: Option<(Vec<u8>, Vec<u8>, Vec<u8>, i64, Option<i64>)> = sqlx::query_as(
+    let row: Option<RefreshRow> = sqlx::query_as(
         "SELECT id, user_id, family_id, expires_at, revoked_at
          FROM refresh_tokens WHERE token_hash = ?",
     )
@@ -200,11 +207,13 @@ pub async fn rotate_refresh(db: &SqlitePool, token: &str) -> anyhow::Result<Refr
 
     if revoked_at.is_some() {
         // Reuse of a rotated token: someone is replaying. Kill the family.
-        sqlx::query("UPDATE refresh_tokens SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL")
-            .bind(now)
-            .bind(&family)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE refresh_tokens SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL",
+        )
+        .bind(now)
+        .bind(&family)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         tracing::warn!("refresh token reuse detected; family revoked");
         return Ok(RefreshOutcome::Rejected);
@@ -256,11 +265,13 @@ pub async fn revoke_family(db: &SqlitePool, token: &str) -> anyhow::Result<()> {
 
 /// Password change / deactivation: revoke everything the user holds.
 pub async fn revoke_all_for_user(db: &SqlitePool, user_id: UserId) -> anyhow::Result<()> {
-    sqlx::query("UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
-        .bind(now_ms())
-        .bind(user_id.to_vec())
-        .execute(db)
-        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+    )
+    .bind(now_ms())
+    .bind(user_id.to_vec())
+    .execute(db)
+    .await?;
     Ok(())
 }
 

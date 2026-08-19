@@ -66,7 +66,10 @@ mod tests {
         }
         let retry = rl.check("login:1.2.3.4", (5, 60)).unwrap_err();
         // One token refills every 12s; the hint must be in that ballpark.
-        assert!(retry > 10_000 && retry <= 12_000, "retry_after_ms was {retry}");
+        assert!(
+            retry > 10_000 && retry <= 12_000,
+            "retry_after_ms was {retry}"
+        );
     }
 
     #[test]

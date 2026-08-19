@@ -38,8 +38,8 @@ pub const FONTS: [&str; 12] = [
 /// Keys are stable wire identifiers; the glyph shown for each is a client concern.
 /// NOTE: provisional curation — confirm the set with Matt before M3 ships reactions.
 pub const REACTIONS: [&str; 12] = [
-    "heart", "laugh", "wow", "cry", "fire", "skull", "up", "down", "eyes", "clap",
-    "hundred", "sparkles",
+    "heart", "laugh", "wow", "cry", "fire", "skull", "up", "down", "eyes", "clap", "hundred",
+    "sparkles",
 ];
 
 /// Bundled entrance-sound keys (SPEC §4.1). Provisional until T-408 curates the

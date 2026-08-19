@@ -126,8 +126,14 @@ mod tests {
 
     #[test]
     fn classification_covers_the_matrix() {
-        assert_eq!(classify("windows", None, None, None, None), BackendKind::Windows);
-        assert_eq!(classify("macos", None, None, None, None), BackendKind::MacOs);
+        assert_eq!(
+            classify("windows", None, None, None, None),
+            BackendKind::Windows
+        );
+        assert_eq!(
+            classify("macos", None, None, None, None),
+            BackendKind::MacOs
+        );
         assert_eq!(
             classify("linux", Some("wayland"), Some("KDE"), None, None),
             BackendKind::LinuxKwin
@@ -138,11 +144,23 @@ mod tests {
             "KWin scripting works on X11 sessions too"
         );
         assert_eq!(
-            classify("linux", Some("wayland"), Some("Hyprland"), Some("abc123"), None),
+            classify(
+                "linux",
+                Some("wayland"),
+                Some("Hyprland"),
+                Some("abc123"),
+                None
+            ),
             BackendKind::LinuxHyprland
         );
         assert_eq!(
-            classify("linux", Some("wayland"), Some("sway"), None, Some("/run/sway.sock")),
+            classify(
+                "linux",
+                Some("wayland"),
+                Some("sway"),
+                None,
+                Some("/run/sway.sock")
+            ),
             BackendKind::LinuxSway
         );
         assert_eq!(

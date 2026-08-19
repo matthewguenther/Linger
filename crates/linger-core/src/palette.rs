@@ -37,7 +37,11 @@ pub struct PaletteColor {
 }
 
 const fn c(key: &'static str, hue: f64) -> PaletteColor {
-    PaletteColor { key, hue, muted: false }
+    PaletteColor {
+        key,
+        hue,
+        muted: false,
+    }
 }
 
 /// The IRC 16, remapped through OKLCH. Order matters only for the picker UI.
@@ -57,7 +61,11 @@ pub const PALETTE: [PaletteColor; 16] = [
     c("violet", 295.0),
     c("orchid", 320.0),
     c("rose", 350.0),
-    PaletteColor { key: "slate", hue: 250.0, muted: true },
+    PaletteColor {
+        key: "slate",
+        hue: 250.0,
+        muted: true,
+    },
 ];
 
 /// Whether `key` names a palette color. This is what the server validates wire
@@ -146,7 +154,11 @@ fn oklch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> (f64, f64, f64) {
     let g = -1.268_438_004_6 * l3 + 2.609_757_401_1 * m3 - 0.341_319_396_5 * s3;
     let b = -0.004_196_086_3 * l3 - 0.703_418_614_7 * m3 + 1.707_614_701_0 * s3;
 
-    (gamma(r.clamp(0.0, 1.0)), gamma(g.clamp(0.0, 1.0)), gamma(b.clamp(0.0, 1.0)))
+    (
+        gamma(r.clamp(0.0, 1.0)),
+        gamma(g.clamp(0.0, 1.0)),
+        gamma(b.clamp(0.0, 1.0)),
+    )
 }
 
 fn gamma(linear: f64) -> f64 {
@@ -211,8 +223,8 @@ mod tests {
     fn palette_is_exactly_the_named_16() {
         assert_eq!(PALETTE.len(), 16);
         for key in [
-            "ember", "rust", "amber", "brass", "lime", "fern", "mint", "teal", "cyan",
-            "sky", "azure", "indigo", "violet", "orchid", "rose", "slate",
+            "ember", "rust", "amber", "brass", "lime", "fern", "mint", "teal", "cyan", "sky",
+            "azure", "indigo", "violet", "orchid", "rose", "slate",
         ] {
             assert!(is_valid_color_key(key), "missing palette key {key}");
         }

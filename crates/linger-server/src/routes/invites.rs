@@ -26,12 +26,24 @@ fn new_code() -> String {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
     let mut bytes = [0u8; INVITE_CODE_CHARS];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|b| ALPHABET[(b % 32) as usize] as char).collect()
+    bytes
+        .iter()
+        .map(|b| ALPHABET[(b % 32) as usize] as char)
+        .collect()
 }
 
-fn row_to_invite(
-    row: (String, Vec<u8>, Option<i64>, Option<u32>, u32, Option<i64>, i64),
-) -> Result<Invite, ApiError> {
+/// (code, created_by, expires_at, max_uses, uses, revoked_at, created_at)
+type InviteRow = (
+    String,
+    Vec<u8>,
+    Option<i64>,
+    Option<u32>,
+    u32,
+    Option<i64>,
+    i64,
+);
+
+fn row_to_invite(row: InviteRow) -> Result<Invite, ApiError> {
     let (code, created_by, expires_at, max_uses, uses, revoked_at, created_at) = row;
     Ok(Invite {
         code,
@@ -44,15 +56,20 @@ fn row_to_invite(
     })
 }
 
-async fn list(State(state): State<AppState>, _auth: AuthedUser) -> Result<Json<Vec<Invite>>, ApiError> {
-    let rows: Vec<(String, Vec<u8>, Option<i64>, Option<u32>, u32, Option<i64>, i64)> =
-        sqlx::query_as(
-            "SELECT code, created_by, expires_at, max_uses, uses, revoked_at, created_at
-             FROM invites ORDER BY created_at DESC",
-        )
-        .fetch_all(&state.db.read)
-        .await?;
-    rows.into_iter().map(row_to_invite).collect::<Result<Vec<_>, _>>().map(Json)
+async fn list(
+    State(state): State<AppState>,
+    _auth: AuthedUser,
+) -> Result<Json<Vec<Invite>>, ApiError> {
+    let rows: Vec<InviteRow> = sqlx::query_as(
+        "SELECT code, created_by, expires_at, max_uses, uses, revoked_at, created_at
+         FROM invites ORDER BY created_at DESC",
+    )
+    .fetch_all(&state.db.read)
+    .await?;
+    rows.into_iter()
+        .map(row_to_invite)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Json)
 }
 
 async fn create(
@@ -60,7 +77,10 @@ async fn create(
     auth: AuthedUser,
     Json(req): Json<CreateInviteRequest>,
 ) -> Result<Json<Invite>, ApiError> {
-    if let Err(retry) = state.limiter.check(&format!("invite:{}", auth.id), RATE_INVITE_CREATE) {
+    if let Err(retry) = state
+        .limiter
+        .check(&format!("invite:{}", auth.id), RATE_INVITE_CREATE)
+    {
         return Err(ApiError::rate_limited(retry));
     }
     if req.max_uses == Some(0) {
@@ -110,14 +130,15 @@ async fn revoke(
     };
 
     let is_creator = UserId::from_slice(&created_by).map_err(anyhow::Error::from)? == auth.id;
-    let is_host: bool =
-        sqlx::query_scalar("SELECT is_host FROM users WHERE id = ?")
-            .bind(auth.id.to_vec())
-            .fetch_optional(&state.db.read)
-            .await?
-            .unwrap_or(false);
+    let is_host: bool = sqlx::query_scalar("SELECT is_host FROM users WHERE id = ?")
+        .bind(auth.id.to_vec())
+        .fetch_optional(&state.db.read)
+        .await?
+        .unwrap_or(false);
     if !is_creator && !is_host {
-        return Err(ApiError::forbidden("Only the inviter or the host can revoke an invite."));
+        return Err(ApiError::forbidden(
+            "Only the inviter or the host can revoke an invite.",
+        ));
     }
 
     sqlx::query("UPDATE invites SET revoked_at = ? WHERE code = ? AND revoked_at IS NULL")

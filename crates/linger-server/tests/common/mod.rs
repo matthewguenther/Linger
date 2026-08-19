@@ -48,12 +48,20 @@ pub async fn spawn_stoop() -> TestStoop {
         .await
         .unwrap();
     });
-    TestStoop { base: format!("http://{addr}"), state, _dir: dir }
+    TestStoop {
+        base: format!("http://{addr}"),
+        state,
+        _dir: dir,
+    }
 }
 
 /// Complete first-run setup: creates the host account and names the stoop.
 pub async fn bootstrap_host(stoop: &TestStoop) -> AuthResponse {
-    let token = stoop.state.setup.peek().expect("fresh stoop has a setup token");
+    let token = stoop
+        .state
+        .setup
+        .peek()
+        .expect("fresh stoop has a setup token");
     let resp = reqwest::Client::new()
         .post(stoop.url("/setup"))
         .json(&serde_json::json!({
@@ -66,7 +74,12 @@ pub async fn bootstrap_host(stoop: &TestStoop) -> AuthResponse {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "setup failed: {}", resp.text().await.unwrap());
+    assert_eq!(
+        resp.status(),
+        200,
+        "setup failed: {}",
+        resp.text().await.unwrap()
+    );
     resp.json().await.unwrap()
 }
 
@@ -94,7 +107,12 @@ pub async fn join_member(stoop: &TestStoop, host_access: &str, username: &str) -
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "register failed: {}", resp.text().await.unwrap());
+    assert_eq!(
+        resp.status(),
+        200,
+        "register failed: {}",
+        resp.text().await.unwrap()
+    );
     resp.json().await.unwrap()
 }
 

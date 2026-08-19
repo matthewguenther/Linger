@@ -21,7 +21,10 @@ pub fn router() -> Router<AppState> {
         .route("/rooms/{id}/archive", post(archive))
 }
 
-async fn list(State(state): State<AppState>, _auth: AuthedUser) -> Result<Json<Vec<Room>>, ApiError> {
+async fn list(
+    State(state): State<AppState>,
+    _auth: AuthedUser,
+) -> Result<Json<Vec<Room>>, ApiError> {
     repo::rooms::all(&state.db.read).await.map(Json)
 }
 
@@ -37,10 +40,9 @@ async fn create(
     }
 
     let id = RoomId::new();
-    let position: i64 =
-        sqlx::query_scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM rooms")
-            .fetch_one(&state.db.read)
-            .await?;
+    let position: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(position), -1) + 1 FROM rooms")
+        .fetch_one(&state.db.read)
+        .await?;
 
     let inserted = sqlx::query(
         "INSERT INTO rooms (id, slug, name, topic, position, created_at)

@@ -56,7 +56,12 @@ async fn slug_rules_and_uniqueness() {
     let host = common::bootstrap_host(&stoop).await;
     let client = reqwest::Client::new();
 
-    for bad_slug in ["", "Garage", "the garage", "way-too-long-for-a-slug-way-too-long"] {
+    for bad_slug in [
+        "",
+        "Garage",
+        "the garage",
+        "way-too-long-for-a-slug-way-too-long",
+    ] {
         let resp = client
             .post(stoop.url("/rooms"))
             .bearer_auth(&host.access_token)

@@ -19,7 +19,9 @@ impl SetupState {
             rand::rngs::OsRng.fill_bytes(&mut bytes);
             hex::encode(bytes)
         });
-        Self { token: Mutex::new(token) }
+        Self {
+            token: Mutex::new(token),
+        }
     }
 
     /// The current token, for printing the setup URL (and for tests).
@@ -36,7 +38,9 @@ impl SetupState {
     /// One-shot consume: true exactly once, for the matching token.
     #[must_use]
     pub fn consume(&self, candidate: &str) -> bool {
-        let Ok(mut slot) = self.token.lock() else { return false };
+        let Ok(mut slot) = self.token.lock() else {
+            return false;
+        };
         if slot.as_deref() == Some(candidate) {
             *slot = None;
             true

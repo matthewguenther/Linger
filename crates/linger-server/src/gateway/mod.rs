@@ -62,12 +62,11 @@ impl Gateway {
     #[must_use]
     pub fn new() -> Self {
         let (bus, _) = broadcast::channel(1024);
-        let registry =
-            linger_activity::registry::Registry::from_json(include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../registry/apps.json"
-            )))
-            .expect("bundled registry parses (guarded by linger-activity tests)");
+        let registry = linger_activity::registry::Registry::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../registry/apps.json"
+        )))
+        .expect("bundled registry parses (guarded by linger-activity tests)");
         Self {
             bus,
             sessions: DashMap::new(),
@@ -164,14 +163,21 @@ impl Gateway {
         };
 
         if let Some(prev) = prev_room {
-            self.publish(ServerEvent::RoomLeave { room_id: prev, user_id });
+            self.publish(ServerEvent::RoomLeave {
+                room_id: prev,
+                user_id,
+            });
             self.publish(ServerEvent::RoomOccupancy {
                 room_id: prev,
                 user_ids: self.occupancy(prev),
             });
         }
         if let Some(new) = room_id {
-            self.publish(ServerEvent::RoomEnter { room_id: new, user_id, entrance_sound });
+            self.publish(ServerEvent::RoomEnter {
+                room_id: new,
+                user_id,
+                entrance_sound,
+            });
             self.publish(ServerEvent::RoomOccupancy {
                 room_id: new,
                 user_ids: self.occupancy(new),

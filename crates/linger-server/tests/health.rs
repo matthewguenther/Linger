@@ -21,7 +21,9 @@ async fn health_reports_ok_with_a_live_database() {
 #[tokio::test]
 async fn unknown_api_paths_return_the_protocol_error_envelope() {
     let stoop = common::spawn_stoop().await;
-    let resp = reqwest::get(stoop.url("/definitely-not-a-route")).await.unwrap();
+    let resp = reqwest::get(stoop.url("/definitely-not-a-route"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 404);
     let env: ErrorEnvelope = resp.json().await.unwrap();
     assert_eq!(env.error.code, ErrorCode::NotFound);

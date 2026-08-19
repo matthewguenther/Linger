@@ -33,7 +33,9 @@ fn row_to_user(row: &SqliteRow) -> Result<User, ApiError> {
                     to: ColorKey(row.get::<Option<String>, _>("fill_to").unwrap_or(fill_from)),
                 }
             } else {
-                Fill::Solid { color: ColorKey(fill_from) }
+                Fill::Solid {
+                    color: ColorKey(fill_from),
+                }
             };
             Style {
                 font_key,

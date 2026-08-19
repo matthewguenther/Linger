@@ -38,8 +38,7 @@ impl Config {
         let data_dir = std::env::var("LINGER_DATA_DIR")
             .map_or_else(|_| PathBuf::from("./data"), PathBuf::from);
 
-        let bind_raw =
-            std::env::var("LINGER_BIND").unwrap_or_else(|_| "0.0.0.0:8420".to_string());
+        let bind_raw = std::env::var("LINGER_BIND").unwrap_or_else(|_| "0.0.0.0:8420".to_string());
         let bind = bind_raw
             .parse()
             .map_err(|_| ConfigError::Bind(bind_raw.clone()))?;

@@ -7,7 +7,11 @@ use linger_core::wire::{AuthResponse, StoopInfo};
 #[tokio::test]
 async fn fresh_stoop_completes_setup_exactly_once() {
     let stoop = common::spawn_stoop().await;
-    let token = stoop.state.setup.peek().expect("fresh stoop must arm a setup token");
+    let token = stoop
+        .state
+        .setup
+        .peek()
+        .expect("fresh stoop must arm a setup token");
     let client = reqwest::Client::new();
 
     // Preview: right token is valid, wrong token isn't.
@@ -41,7 +45,10 @@ async fn fresh_stoop_completes_setup_exactly_once() {
         .await
         .unwrap();
     assert_eq!(short_pw.status(), 422);
-    assert!(stoop.state.setup.peek().is_some(), "validation failure must not consume the token");
+    assert!(
+        stoop.state.setup.peek().is_some(),
+        "validation failure must not consume the token"
+    );
 
     // Complete for real: host account + stoop name.
     let auth: AuthResponse = client
@@ -70,7 +77,11 @@ async fn fresh_stoop_completes_setup_exactly_once() {
         .await
         .unwrap();
     assert_eq!(again.status(), 404);
-    let preview = client.get(stoop.url(&format!("/setup/{token}"))).send().await.unwrap();
+    let preview = client
+        .get(stoop.url(&format!("/setup/{token}")))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(preview.status(), 404);
 
     // The stoop knows its name.

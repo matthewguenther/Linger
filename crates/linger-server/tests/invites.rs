@@ -4,11 +4,7 @@ mod common;
 
 use linger_core::wire::{ErrorCode, ErrorEnvelope, Invite, InvitePreview};
 
-async fn make_invite(
-    stoop: &common::TestStoop,
-    token: &str,
-    body: serde_json::Value,
-) -> Invite {
+async fn make_invite(stoop: &common::TestStoop, token: &str, body: serde_json::Value) -> Invite {
     reqwest::Client::new()
         .post(stoop.url("/invites"))
         .bearer_auth(token)
@@ -38,9 +34,16 @@ async fn single_use_default_exhausts_after_one_join() {
     let stoop = common::spawn_stoop().await;
     let host = common::bootstrap_host(&stoop).await;
     let invite = make_invite(&stoop, &host.access_token, serde_json::json!({})).await;
-    assert_eq!(invite.max_uses, Some(1), "invites are single-use by default");
+    assert_eq!(
+        invite.max_uses,
+        Some(1),
+        "invites are single-use by default"
+    );
 
-    assert_eq!(register_with(&stoop, &invite.code, "callie").await.status(), 200);
+    assert_eq!(
+        register_with(&stoop, &invite.code, "callie").await.status(),
+        200
+    );
 
     let resp = register_with(&stoop, &invite.code, "dave").await;
     assert_eq!(resp.status(), 422);
@@ -52,11 +55,25 @@ async fn single_use_default_exhausts_after_one_join() {
 async fn multi_use_invite_counts_down() {
     let stoop = common::spawn_stoop().await;
     let host = common::bootstrap_host(&stoop).await;
-    let invite = make_invite(&stoop, &host.access_token, serde_json::json!({ "max_uses": 2 })).await;
+    let invite = make_invite(
+        &stoop,
+        &host.access_token,
+        serde_json::json!({ "max_uses": 2 }),
+    )
+    .await;
 
-    assert_eq!(register_with(&stoop, &invite.code, "callie").await.status(), 200);
-    assert_eq!(register_with(&stoop, &invite.code, "dave").await.status(), 200);
-    assert_eq!(register_with(&stoop, &invite.code, "jen").await.status(), 422);
+    assert_eq!(
+        register_with(&stoop, &invite.code, "callie").await.status(),
+        200
+    );
+    assert_eq!(
+        register_with(&stoop, &invite.code, "dave").await.status(),
+        200
+    );
+    assert_eq!(
+        register_with(&stoop, &invite.code, "jen").await.status(),
+        422
+    );
 }
 
 #[tokio::test]
@@ -64,8 +81,12 @@ async fn expired_invite_says_expired() {
     let stoop = common::spawn_stoop().await;
     let host = common::bootstrap_host(&stoop).await;
     // 0 hours ⇒ expires_at = now: already dead by the time it's used.
-    let invite =
-        make_invite(&stoop, &host.access_token, serde_json::json!({ "expires_in_hours": 0 })).await;
+    let invite = make_invite(
+        &stoop,
+        &host.access_token,
+        serde_json::json!({ "expires_in_hours": 0 }),
+    )
+    .await;
 
     let resp = register_with(&stoop, &invite.code, "callie").await;
     assert_eq!(resp.status(), 422);
@@ -108,7 +129,10 @@ async fn revocation_kills_an_invite_and_permissions_hold() {
         .unwrap();
     assert_eq!(revoked.status(), 204);
 
-    assert_eq!(register_with(&stoop, &invite.code, "jen").await.status(), 422);
+    assert_eq!(
+        register_with(&stoop, &invite.code, "jen").await.status(),
+        422
+    );
 }
 
 #[tokio::test]

@@ -136,7 +136,9 @@ mod tests {
         let id = UserId::new();
         let s = id.to_string();
         assert_eq!(s.len(), 32);
-        assert!(s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(s
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert_eq!(s.parse::<UserId>().unwrap(), id);
     }
 

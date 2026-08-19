@@ -17,11 +17,20 @@ pub struct ApiError {
 
 impl ApiError {
     fn new(status: StatusCode, code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { status, code, message: message.into(), retry_after_ms: None }
+        Self {
+            status,
+            code,
+            message: message.into(),
+            retry_after_ms: None,
+        }
     }
 
     pub fn unauthenticated() -> Self {
-        Self::new(StatusCode::UNAUTHORIZED, ErrorCode::Unauthenticated, "Sign in to do that.")
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthenticated,
+            "Sign in to do that.",
+        )
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {
@@ -33,7 +42,11 @@ impl ApiError {
     }
 
     pub fn validation(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::ValidationFailed, message)
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ValidationFailed,
+            message,
+        )
     }
 
     pub fn conflict(message: impl Into<String>) -> Self {

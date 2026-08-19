@@ -21,7 +21,10 @@ use std::time::SystemTime;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Activity {
     None,
-    App { registry_id: String, since: SystemTime },
+    App {
+        registry_id: String,
+        since: SystemTime,
+    },
 }
 
 /// The raw identity of a foreground process, as read from the OS.
@@ -110,7 +113,12 @@ mod tests {
     fn unknown_process_reports_nothing_at_all() {
         // Default deny is the core product rule of activity detection.
         let reg = test_registry();
-        let act = resolve(&ident("definitely-not-listed"), &reg, &[], SystemTime::now());
+        let act = resolve(
+            &ident("definitely-not-listed"),
+            &reg,
+            &[],
+            SystemTime::now(),
+        );
         assert_eq!(act, Activity::None);
     }
 
@@ -120,14 +128,22 @@ mod tests {
         let act = resolve(&ident("Firefox.exe"), &reg, &[], SystemTime::UNIX_EPOCH);
         assert_eq!(
             act,
-            Activity::App { registry_id: "firefox".into(), since: SystemTime::UNIX_EPOCH }
+            Activity::App {
+                registry_id: "firefox".into(),
+                since: SystemTime::UNIX_EPOCH
+            }
         );
     }
 
     #[test]
     fn hidden_apps_report_nothing() {
         let reg = test_registry();
-        let act = resolve(&ident("blender"), &reg, &["blender".into()], SystemTime::now());
+        let act = resolve(
+            &ident("blender"),
+            &reg,
+            &["blender".into()],
+            SystemTime::now(),
+        );
         assert_eq!(act, Activity::None);
     }
 

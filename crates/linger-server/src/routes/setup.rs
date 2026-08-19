@@ -25,7 +25,9 @@ async fn preview(
     if state.setup.peek().is_none() {
         return Err(ApiError::not_found("This stoop is already set up."));
     }
-    Ok(Json(SetupPreview { valid: state.setup.matches(&token) }))
+    Ok(Json(SetupPreview {
+        valid: state.setup.matches(&token),
+    }))
 }
 
 async fn complete(
@@ -65,7 +67,10 @@ async fn complete(
     .bind(now)
     .execute(&mut *tx)
     .await?;
-    for (key, value) in [("name", stoop_name.to_string()), ("created_at", now.to_string())] {
+    for (key, value) in [
+        ("name", stoop_name.to_string()),
+        ("created_at", now.to_string()),
+    ] {
         sqlx::query("INSERT INTO stoop_config (key, value) VALUES (?, ?)")
             .bind(key)
             .bind(value)

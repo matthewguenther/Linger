@@ -19,9 +19,6 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: fmt
-        # Advisory until T-001 formats the tree with a rustfmt-equipped toolchain
-        # and removes this line — then it gates.
-        continue-on-error: true
         run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

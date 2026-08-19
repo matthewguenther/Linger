@@ -33,7 +33,12 @@ pub async fn auth_response(state: &AppState, user_id: UserId) -> Result<AuthResp
     let (access_token, _) = state.jwt.mint(user_id)?;
     let refresh_token = auth::issue_refresh_family(&state.db.write, user_id).await?;
     let user = repo::users::expect(&state.db.read, user_id).await?;
-    Ok(AuthResponse { access_token, refresh_token, expires_in: ACCESS_TOKEN_TTL_SECS, user })
+    Ok(AuthResponse {
+        access_token,
+        refresh_token,
+        expires_in: ACCESS_TOKEN_TTL_SECS,
+        user,
+    })
 }
 
 async fn register(
@@ -114,9 +119,7 @@ async fn register(
 /// unknown-user and wrong-password take comparable time.
 fn dummy_hash() -> &'static str {
     static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    DUMMY.get_or_init(|| {
-        auth::hash_password_sync("dummy-timing-password").unwrap_or_default()
-    })
+    DUMMY.get_or_init(|| auth::hash_password_sync("dummy-timing-password").unwrap_or_default())
 }
 
 async fn login(
@@ -125,7 +128,10 @@ async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, ApiError> {
     let ip = auth::client_ip(&parts);
-    if let Err(retry) = state.limiter.check(&format!("login:{ip}"), RATE_LOGIN_PER_IP) {
+    if let Err(retry) = state
+        .limiter
+        .check(&format!("login:{ip}"), RATE_LOGIN_PER_IP)
+    {
         return Err(ApiError::rate_limited(retry));
     }
 
@@ -138,7 +144,10 @@ async fn login(
     .await?;
 
     let (user_id, hash) = match row {
-        Some((id, hash)) => (Some(UserId::from_slice(&id).map_err(anyhow::Error::from)?), hash),
+        Some((id, hash)) => (
+            Some(UserId::from_slice(&id).map_err(anyhow::Error::from)?),
+            hash,
+        ),
         None => (None, dummy_hash().to_string()),
     };
 
@@ -185,12 +194,13 @@ async fn invite_preview(
     State(state): State<AppState>,
     Path(code): Path<String>,
 ) -> Result<Json<InvitePreview>, ApiError> {
-    let row: Option<(Option<i64>, Option<u32>, u32, Option<i64>)> = sqlx::query_as(
-        "SELECT expires_at, max_uses, uses, revoked_at FROM invites WHERE code = ?",
-    )
-    .bind(code.trim().to_lowercase())
-    .fetch_optional(&state.db.read)
-    .await?;
+    // (expires_at, max_uses, uses, revoked_at)
+    type InvitePreviewRow = (Option<i64>, Option<u32>, u32, Option<i64>);
+    let row: Option<InvitePreviewRow> =
+        sqlx::query_as("SELECT expires_at, max_uses, uses, revoked_at FROM invites WHERE code = ?")
+            .bind(code.trim().to_lowercase())
+            .fetch_optional(&state.db.read)
+            .await?;
 
     let now = now_ms();
     let (valid, expires_at) = match row {
@@ -211,5 +221,9 @@ async fn invite_preview(
         None
     };
 
-    Ok(Json(InvitePreview { valid, stoop_name, expires_at }))
+    Ok(Json(InvitePreview {
+        valid,
+        stoop_name,
+        expires_at,
+    }))
 }

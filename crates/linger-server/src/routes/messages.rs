@@ -10,7 +10,9 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use linger_core::gateway::ServerEvent;
 use linger_core::limits::RATE_MESSAGE_SEND;
-use linger_core::wire::{CreateMessageRequest, EditMessageRequest, Message, UpdateReadMarkerRequest};
+use linger_core::wire::{
+    CreateMessageRequest, EditMessageRequest, Message, UpdateReadMarkerRequest,
+};
 use linger_core::{MessageId, RoomId, UserId};
 use serde::Deserialize;
 
@@ -59,7 +61,10 @@ async fn create(
     Path(room_id): Path<RoomId>,
     Json(req): Json<CreateMessageRequest>,
 ) -> Result<Json<Message>, ApiError> {
-    if let Err(retry) = state.limiter.check(&format!("msg:{}", auth.id), RATE_MESSAGE_SEND) {
+    if let Err(retry) = state
+        .limiter
+        .check(&format!("msg:{}", auth.id), RATE_MESSAGE_SEND)
+    {
         return Err(ApiError::rate_limited(retry));
     }
 
@@ -68,7 +73,11 @@ async fn create(
         return Err(ApiError::validation("That room is archived."));
     }
     let body = validate::message_body(&req.body)?;
-    if req.attachment_ids.as_ref().is_some_and(|ids| !ids.is_empty()) {
+    if req
+        .attachment_ids
+        .as_ref()
+        .is_some_and(|ids| !ids.is_empty())
+    {
         return Err(ApiError::validation("Attachments arrive with M6."));
     }
     if let Some(reply_to) = req.reply_to {
@@ -93,7 +102,9 @@ async fn create(
     .await?;
 
     let message = repo::messages::expect(&state.db.read, id).await?;
-    state.gateway.publish(ServerEvent::MessageCreate(message.clone()));
+    state
+        .gateway
+        .publish(ServerEvent::MessageCreate(message.clone()));
     Ok(Json(message))
 }
 
@@ -120,7 +131,9 @@ async fn edit(
         .await?;
 
     let message = repo::messages::expect(&state.db.read, id).await?;
-    state.gateway.publish(ServerEvent::MessageUpdate(message.clone()));
+    state
+        .gateway
+        .publish(ServerEvent::MessageUpdate(message.clone()));
     Ok(Json(message))
 }
 
@@ -142,7 +155,9 @@ async fn delete(
         return Ok(StatusCode::NO_CONTENT); // idempotent
     }
     if message.author_id != auth.id && !is_host(&state, auth.id).await? {
-        return Err(ApiError::forbidden("Only the author or the host can delete a message."));
+        return Err(ApiError::forbidden(
+            "Only the author or the host can delete a message.",
+        ));
     }
 
     // Tombstone, not removal: body empties, the row (and reply chains) survive.
@@ -152,17 +167,14 @@ async fn delete(
         .execute(&state.db.write)
         .await?;
 
-    state
-        .gateway
-        .publish(ServerEvent::MessageDelete { id, room_id: message.room_id });
+    state.gateway.publish(ServerEvent::MessageDelete {
+        id,
+        room_id: message.room_id,
+    });
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn set_pin(
-    state: &AppState,
-    id: MessageId,
-    pinned: bool,
-) -> Result<Json<Message>, ApiError> {
+async fn set_pin(state: &AppState, id: MessageId, pinned: bool) -> Result<Json<Message>, ApiError> {
     let message = repo::messages::expect(&state.db.read, id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
@@ -173,7 +185,9 @@ async fn set_pin(
         .execute(&state.db.write)
         .await?;
     let message = repo::messages::expect(&state.db.read, id).await?;
-    state.gateway.publish(ServerEvent::MessageUpdate(message.clone()));
+    state
+        .gateway
+        .publish(ServerEvent::MessageUpdate(message.clone()));
     Ok(Json(message))
 }
 
@@ -199,7 +213,9 @@ async fn add_reaction(
     Path((id, key)): Path<(MessageId, String)>,
 ) -> Result<StatusCode, ApiError> {
     if !linger_core::is_valid_reaction_key(&key) {
-        return Err(ApiError::validation("Reactions come from the fixed set of 12."));
+        return Err(ApiError::validation(
+            "Reactions come from the fixed set of 12.",
+        ));
     }
     let message = repo::messages::expect(&state.db.read, id).await?;
     if message.deleted_at.is_some() {
@@ -227,7 +243,9 @@ async fn remove_reaction(
     Path((id, key)): Path<(MessageId, String)>,
 ) -> Result<StatusCode, ApiError> {
     if !linger_core::is_valid_reaction_key(&key) {
-        return Err(ApiError::validation("Reactions come from the fixed set of 12."));
+        return Err(ApiError::validation(
+            "Reactions come from the fixed set of 12.",
+        ));
     }
     sqlx::query("DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND key = ?")
         .bind(id.to_vec())

@@ -53,8 +53,8 @@ async fn hydrate_reactions(db: &SqlitePool, messages: &mut [Message]) -> Result<
     for row in &rows {
         let mid = MessageId::from_slice(&row.get::<Vec<u8>, _>("message_id"))
             .map_err(anyhow::Error::from)?;
-        let uid = UserId::from_slice(&row.get::<Vec<u8>, _>("user_id"))
-            .map_err(anyhow::Error::from)?;
+        let uid =
+            UserId::from_slice(&row.get::<Vec<u8>, _>("user_id")).map_err(anyhow::Error::from)?;
         grouped.entry((mid, row.get("key"))).or_default().push(uid);
     }
 
@@ -62,11 +62,13 @@ async fn hydrate_reactions(db: &SqlitePool, messages: &mut [Message]) -> Result<
         m.reactions = REACTIONS
             .iter()
             .filter_map(|key| {
-                grouped.remove(&(m.id, (*key).to_string())).map(|user_ids| ReactionGroup {
-                    key: (*key).to_string(),
-                    count: user_ids.len() as u32,
-                    user_ids,
-                })
+                grouped
+                    .remove(&(m.id, (*key).to_string()))
+                    .map(|user_ids| ReactionGroup {
+                        key: (*key).to_string(),
+                        count: user_ids.len() as u32,
+                        user_ids,
+                    })
             })
             .collect();
     }
@@ -119,7 +121,10 @@ pub async fn page(
     query = query.bind(i64::from(limit));
 
     let rows = query.fetch_all(db).await?;
-    let mut messages = rows.iter().map(row_to_message).collect::<Result<Vec<_>, _>>()?;
+    let mut messages = rows
+        .iter()
+        .map(row_to_message)
+        .collect::<Result<Vec<_>, _>>()?;
     hydrate_reactions(db, &mut messages).await?;
     Ok(messages)
 }
@@ -141,5 +146,9 @@ pub async fn reaction_group(
         .iter()
         .map(|r| UserId::from_slice(&r.get::<Vec<u8>, _>("user_id")).map_err(anyhow::Error::from))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(ReactionGroup { key: key.to_string(), count: user_ids.len() as u32, user_ids })
+    Ok(ReactionGroup {
+        key: key.to_string(),
+        count: user_ids.len() as u32,
+        user_ids,
+    })
 }

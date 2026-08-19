@@ -47,7 +47,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         }
     });
 
-    send_control(&sink, ServerEvent::Hello { heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS }).await;
+    send_control(
+        &sink,
+        ServerEvent::Hello {
+            heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
+        },
+    )
+    .await;
 
     // First frame decides the path: identify (new session) or resume.
     let user_id = match handshake(&state, &sink, &mut ws_rx).await {
@@ -114,8 +120,12 @@ async fn handshake(
     sink: &mpsc::Sender<String>,
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
 ) -> Option<UserId> {
-    let first = tokio::time::timeout(HANDSHAKE_TIMEOUT, ws_rx.next()).await.ok()??;
-    let Ok(Message::Text(text)) = first else { return None };
+    let first = tokio::time::timeout(HANDSHAKE_TIMEOUT, ws_rx.next())
+        .await
+        .ok()??;
+    let Ok(Message::Text(text)) = first else {
+        return None;
+    };
     let Ok(frame) = serde_json::from_str::<ClientFrame>(text.as_str()) else {
         return None;
     };
@@ -125,23 +135,33 @@ async fn handshake(
             let Ok(user_id) = state.jwt.verify(&token) else {
                 send_control(
                     sink,
-                    ServerEvent::InvalidSession { reason: "unauthenticated".into() },
+                    ServerEvent::InvalidSession {
+                        reason: "unauthenticated".into(),
+                    },
                 )
                 .await;
                 return None;
             };
             let Ok(user) = repo::users::expect(&state.db.read, user_id).await else {
-                send_control(sink, ServerEvent::InvalidSession { reason: "unknown user".into() })
-                    .await;
+                send_control(
+                    sink,
+                    ServerEvent::InvalidSession {
+                        reason: "unknown user".into(),
+                    },
+                )
+                .await;
                 return None;
             };
 
             let session_id = uuid::Uuid::now_v7().as_simple().to_string();
             let ctl = spawn_session(Arc::clone(&state.gateway), session_id.clone(), user_id);
-            state
-                .gateway
-                .sessions
-                .insert(session_id.clone(), SessionHandle { user_id, ctl: ctl.clone() });
+            state.gateway.sessions.insert(
+                session_id.clone(),
+                SessionHandle {
+                    user_id,
+                    ctl: ctl.clone(),
+                },
+            );
 
             // Snapshot after the session subscribed to the bus: anything that
             // lands in between is both in the snapshot and replayed as
@@ -158,16 +178,26 @@ async fn handshake(
             let frame = ServerFrame::sequenced(ServerEvent::Ready(ready), 0);
             sink.send(serde_json::to_string(&frame).ok()?).await.ok()?;
 
-            ctl.send(Ctl::Attach { sink: sink.clone(), resume_from: 0, is_resume: false })
-                .await
-                .ok()?;
+            ctl.send(Ctl::Attach {
+                sink: sink.clone(),
+                resume_from: 0,
+                is_resume: false,
+            })
+            .await
+            .ok()?;
             Some(user_id)
         }
-        ClientFrame::Resume { session_id, token, s } => {
+        ClientFrame::Resume {
+            session_id,
+            token,
+            s,
+        } => {
             let Ok(user_id) = state.jwt.verify(&token) else {
                 send_control(
                     sink,
-                    ServerEvent::InvalidSession { reason: "unauthenticated".into() },
+                    ServerEvent::InvalidSession {
+                        reason: "unauthenticated".into(),
+                    },
                 )
                 .await;
                 return None;
@@ -179,12 +209,22 @@ async fn handshake(
                 .filter(|e| e.value().user_id == user_id)
                 .map(|e| e.value().ctl.clone());
             let Some(ctl) = ctl else {
-                send_control(sink, ServerEvent::InvalidSession { reason: "expired".into() }).await;
+                send_control(
+                    sink,
+                    ServerEvent::InvalidSession {
+                        reason: "expired".into(),
+                    },
+                )
+                .await;
                 return None;
             };
-            ctl.send(Ctl::Attach { sink: sink.clone(), resume_from: s, is_resume: true })
-                .await
-                .ok()?;
+            ctl.send(Ctl::Attach {
+                sink: sink.clone(),
+                resume_from: s,
+                is_resume: true,
+            })
+            .await
+            .ok()?;
             Some(user_id)
         }
         _ => None,
@@ -201,7 +241,11 @@ async fn handle_client_frame(
         ClientFrame::Heartbeat { s: _ } => {
             send_control(sink, ServerEvent::HeartbeatAck).await;
         }
-        ClientFrame::PresenceUpdate { state: presence_state, activity, away_message } => {
+        ClientFrame::PresenceUpdate {
+            state: presence_state,
+            activity,
+            away_message,
+        } => {
             let entry = state.gateway.apply_presence(
                 user_id,
                 presence_state,
@@ -223,7 +267,9 @@ async fn handle_client_frame(
         ClientFrame::TypingStart { room_id } => {
             let key = format!("typing:{user_id}:{room_id}");
             if state.limiter.check(&key, RATE_TYPING_PER_ROOM).is_ok() {
-                state.gateway.publish(ServerEvent::Typing { room_id, user_id });
+                state
+                    .gateway
+                    .publish(ServerEvent::Typing { room_id, user_id });
             }
         }
         // Handshake ops after the handshake: ignore.

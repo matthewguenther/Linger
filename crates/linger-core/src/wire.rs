@@ -119,7 +119,9 @@ impl Default for Style {
             font_key: "geist-sans".into(),
             weight: 500,
             italic: false,
-            fill: Fill::Solid { color: ColorKey("slate".into()) },
+            fill: Fill::Solid {
+                color: ColorKey("slate".into()),
+            },
             effect: NameEffect::None,
             msg_font_key: None,
         }
@@ -562,7 +564,12 @@ mod tests {
     #[test]
     fn fill_is_kind_tagged() {
         let solid: Fill = serde_json::from_str(r#"{"kind":"solid","color":"azure"}"#).unwrap();
-        assert_eq!(solid, Fill::Solid { color: ColorKey("azure".into()) });
+        assert_eq!(
+            solid,
+            Fill::Solid {
+                color: ColorKey("azure".into())
+            }
+        );
 
         let grad = Fill::Gradient {
             from: ColorKey("teal".into()),
@@ -586,7 +593,13 @@ mod tests {
 
     #[test]
     fn presence_states_serialize_lowercase() {
-        assert_eq!(serde_json::to_string(&PresenceState::Sitting).unwrap(), "\"sitting\"");
-        assert_eq!(serde_json::to_string(&PresenceState::Around).unwrap(), "\"around\"");
+        assert_eq!(
+            serde_json::to_string(&PresenceState::Sitting).unwrap(),
+            "\"sitting\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PresenceState::Around).unwrap(),
+            "\"around\""
+        );
     }
 }

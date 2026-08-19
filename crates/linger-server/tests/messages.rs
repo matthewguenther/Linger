@@ -5,12 +5,7 @@ mod common;
 
 use linger_core::wire::{ErrorCode, ErrorEnvelope, Message};
 
-async fn send(
-    stoop: &common::TestStoop,
-    token: &str,
-    room: &str,
-    body: &str,
-) -> Message {
+async fn send(stoop: &common::TestStoop, token: &str, room: &str, body: &str) -> Message {
     let resp = reqwest::Client::new()
         .post(stoop.url(&format!("/rooms/{room}/messages")))
         .bearer_auth(token)
@@ -18,16 +13,16 @@ async fn send(
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "send failed: {}", resp.text().await.unwrap());
+    assert_eq!(
+        resp.status(),
+        200,
+        "send failed: {}",
+        resp.text().await.unwrap()
+    );
     resp.json().await.unwrap()
 }
 
-async fn fetch(
-    stoop: &common::TestStoop,
-    token: &str,
-    room: &str,
-    query: &str,
-) -> Vec<Message> {
+async fn fetch(stoop: &common::TestStoop, token: &str, room: &str, query: &str) -> Vec<Message> {
     reqwest::Client::new()
         .get(stoop.url(&format!("/rooms/{room}/messages{query}")))
         .bearer_auth(token)
@@ -46,12 +41,18 @@ async fn pagination_is_newest_first_with_working_edges() {
     let room = room.id.to_string();
 
     // Empty room pages cleanly.
-    assert!(fetch(&stoop, &host.access_token, &room, "").await.is_empty());
+    assert!(fetch(&stoop, &host.access_token, &room, "")
+        .await
+        .is_empty());
 
     // 8 messages, alternating authors (stays under the per-user rate limit).
     let mut sent = Vec::new();
     for i in 0..8 {
-        let token = if i % 2 == 0 { &host.access_token } else { &member.access_token };
+        let token = if i % 2 == 0 {
+            &host.access_token
+        } else {
+            &member.access_token
+        };
         sent.push(send(&stoop, token, &room, &format!("message {i}")).await);
     }
 
@@ -63,21 +64,42 @@ async fn pagination_is_newest_first_with_working_edges() {
 
     // limit clamps and slices from the newest end.
     let top3 = fetch(&stoop, &host.access_token, &room, "?limit=3").await;
-    assert_eq!(top3.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), [
-        "message 7", "message 6", "message 5"
-    ]);
+    assert_eq!(
+        top3.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(),
+        ["message 7", "message 6", "message 5"]
+    );
 
     // before: strictly older than the anchor; exact-limit boundary.
-    let before = fetch(&stoop, &host.access_token, &room, &format!("?before={}&limit=5", sent[5].id)).await;
-    assert_eq!(before.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), [
-        "message 4", "message 3", "message 2", "message 1", "message 0"
-    ]);
+    let before = fetch(
+        &stoop,
+        &host.access_token,
+        &room,
+        &format!("?before={}&limit=5", sent[5].id),
+    )
+    .await;
+    assert_eq!(
+        before.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(),
+        [
+            "message 4",
+            "message 3",
+            "message 2",
+            "message 1",
+            "message 0"
+        ]
+    );
 
     // after: strictly newer, still returned newest-first.
-    let after = fetch(&stoop, &host.access_token, &room, &format!("?after={}", sent[5].id)).await;
-    assert_eq!(after.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), [
-        "message 7", "message 6"
-    ]);
+    let after = fetch(
+        &stoop,
+        &host.access_token,
+        &room,
+        &format!("?after={}", sent[5].id),
+    )
+    .await;
+    assert_eq!(
+        after.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(),
+        ["message 7", "message 6"]
+    );
 
     // before + after together bound a window.
     let window = fetch(
@@ -87,9 +109,10 @@ async fn pagination_is_newest_first_with_working_edges() {
         &format!("?after={}&before={}", sent[1].id, sent[5].id),
     )
     .await;
-    assert_eq!(window.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), [
-        "message 4", "message 3", "message 2"
-    ]);
+    assert_eq!(
+        window.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(),
+        ["message 4", "message 3", "message 2"]
+    );
 }
 
 #[tokio::test]
@@ -119,7 +142,13 @@ async fn body_validation_and_reply_room_checks() {
     }
 
     // Cross-room reply is invalid.
-    let in_a = send(&stoop, &host.access_token, &room_a.id.to_string(), "hello garage").await;
+    let in_a = send(
+        &stoop,
+        &host.access_token,
+        &room_a.id.to_string(),
+        "hello garage",
+    )
+    .await;
     let resp = client
         .post(stoop.url(&format!("/rooms/{}/messages", room_b.id)))
         .bearer_auth(&host.access_token)
@@ -198,7 +227,10 @@ async fn edit_delete_permission_matrix_and_tombstones() {
 
     // Tombstone: still present in the page, body empty, deleted_at set.
     let page = fetch(&stoop, &host.access_token, &room, "").await;
-    let stone = page.iter().find(|m| m.id == theirs.id).expect("tombstone survives");
+    let stone = page
+        .iter()
+        .find(|m| m.id == theirs.id)
+        .expect("tombstone survives");
     assert_eq!(stone.body, "");
     assert!(stone.deleted_at.is_some());
 
@@ -255,7 +287,13 @@ async fn reactions_validate_keys_group_and_are_idempotent() {
     let (stoop, host, room) = common::stoop_with_room("garage").await;
     let member = common::join_member(&stoop, &host.access_token, "callie").await;
     let client = reqwest::Client::new();
-    let msg = send(&stoop, &host.access_token, &room.id.to_string(), "react to me").await;
+    let msg = send(
+        &stoop,
+        &host.access_token,
+        &room.id.to_string(),
+        "react to me",
+    )
+    .await;
 
     // Off-list key: rejected.
     let resp = client
@@ -294,7 +332,10 @@ async fn reactions_validate_keys_group_and_are_idempotent() {
         .await
         .unwrap();
     let page = fetch(&stoop, &host.access_token, &room.id.to_string(), "").await;
-    assert_eq!(page.iter().find(|m| m.id == msg.id).unwrap().reactions[0].count, 1);
+    assert_eq!(
+        page.iter().find(|m| m.id == msg.id).unwrap().reactions[0].count,
+        1
+    );
 }
 
 #[tokio::test]

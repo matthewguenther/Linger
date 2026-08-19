@@ -5,9 +5,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, patch};
 use axum::{Json, Router};
 use linger_core::gateway::ServerEvent;
-use linger_core::wire::{
-    ChangePasswordRequest, Fill, NotifyRule, UpdateMeRequest, User,
-};
+use linger_core::wire::{ChangePasswordRequest, Fill, NotifyRule, UpdateMeRequest, User};
 use linger_core::UserId;
 
 use crate::auth::{self, AuthedUser};
@@ -24,7 +22,9 @@ pub fn router() -> Router<AppState> {
         .route("/me/password", patch(change_password))
         .route(
             "/me/notify-rules",
-            get(list_notify_rules).put(put_notify_rule).delete(delete_notify_rule),
+            get(list_notify_rules)
+                .put(put_notify_rule)
+                .delete(delete_notify_rule),
         )
 }
 
@@ -64,7 +64,9 @@ async fn patch_me(
     }
     if let Some(sound) = &req.entrance_sound {
         if !sound.is_empty() && !linger_core::is_valid_entrance_sound_key(sound) {
-            return Err(ApiError::validation("That entrance sound isn't in the bundled set."));
+            return Err(ApiError::validation(
+                "That entrance sound isn't in the bundled set.",
+            ));
         }
     }
 
@@ -186,7 +188,9 @@ async fn change_password(
     .bind(auth.id.to_vec())
     .fetch_optional(&state.db.read)
     .await?;
-    let Some(hash) = hash else { return Err(ApiError::unauthenticated()) };
+    let Some(hash) = hash else {
+        return Err(ApiError::unauthenticated());
+    };
 
     if !auth::verify_password(req.current_password, hash).await? {
         return Err(ApiError::forbidden("Current password doesn't match."));
@@ -208,12 +212,11 @@ async fn list_notify_rules(
     State(state): State<AppState>,
     auth: AuthedUser,
 ) -> Result<Json<Vec<NotifyRule>>, ApiError> {
-    let rows: Vec<(Vec<u8>, Option<Vec<u8>>)> = sqlx::query_as(
-        "SELECT target_user_id, room_id FROM notify_rules WHERE user_id = ?",
-    )
-    .bind(auth.id.to_vec())
-    .fetch_all(&state.db.read)
-    .await?;
+    let rows: Vec<(Vec<u8>, Option<Vec<u8>>)> =
+        sqlx::query_as("SELECT target_user_id, room_id FROM notify_rules WHERE user_id = ?")
+            .bind(auth.id.to_vec())
+            .fetch_all(&state.db.read)
+            .await?;
     let rules = rows
         .into_iter()
         .map(|(target, room)| {
@@ -241,12 +244,14 @@ async fn put_notify_rule(
     // SQLite treats NULLs as distinct in primary keys, so "delete then insert"
     // is the only reliable upsert for the all-rooms (NULL) rule.
     let mut tx = state.db.write.begin().await.map_err(ApiError::from)?;
-    sqlx::query("DELETE FROM notify_rules WHERE user_id = ? AND target_user_id = ? AND room_id IS ?")
-        .bind(auth.id.to_vec())
-        .bind(rule.target_user_id.to_vec())
-        .bind(rule.room_id.map(|r| r.to_vec()))
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM notify_rules WHERE user_id = ? AND target_user_id = ? AND room_id IS ?",
+    )
+    .bind(auth.id.to_vec())
+    .bind(rule.target_user_id.to_vec())
+    .bind(rule.room_id.map(|r| r.to_vec()))
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("INSERT INTO notify_rules (user_id, target_user_id, room_id) VALUES (?, ?, ?)")
         .bind(auth.id.to_vec())
         .bind(rule.target_user_id.to_vec())
@@ -262,11 +267,13 @@ async fn delete_notify_rule(
     auth: AuthedUser,
     Json(rule): Json<NotifyRule>,
 ) -> Result<StatusCode, ApiError> {
-    sqlx::query("DELETE FROM notify_rules WHERE user_id = ? AND target_user_id = ? AND room_id IS ?")
-        .bind(auth.id.to_vec())
-        .bind(rule.target_user_id.to_vec())
-        .bind(rule.room_id.map(|r| r.to_vec()))
-        .execute(&state.db.write)
-        .await?;
+    sqlx::query(
+        "DELETE FROM notify_rules WHERE user_id = ? AND target_user_id = ? AND room_id IS ?",
+    )
+    .bind(auth.id.to_vec())
+    .bind(rule.target_user_id.to_vec())
+    .bind(rule.room_id.map(|r| r.to_vec()))
+    .execute(&state.db.write)
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }

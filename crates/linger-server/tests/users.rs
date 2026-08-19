@@ -86,7 +86,10 @@ async fn server_rejects_every_off_list_key() {
     let mut cases: Vec<serde_json::Value> = Vec::new();
     let mut with = |patch: serde_json::Value| {
         let mut style = base_style.clone();
-        style.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
+        style
+            .as_object_mut()
+            .unwrap()
+            .extend(patch.as_object().unwrap().clone());
         cases.push(serde_json::json!({ "style": style }));
     };
     with(serde_json::json!({ "font_key": "comic-sans" }));
@@ -120,15 +123,24 @@ async fn away_message_stamps_away_since_server_side() {
     let user: User = client
         .patch(stoop.url("/me"))
         .bearer_auth(&host.access_token)
-        .json(&serde_json::json!({ "sign": { "away_message": "back after work", "away_since": 1 } }))
+        .json(
+            &serde_json::json!({ "sign": { "away_message": "back after work", "away_since": 1 } }),
+        )
         .send()
         .await
         .unwrap()
         .json()
         .await
         .unwrap();
-    let since = user.sign.unwrap().away_since.expect("server stamps away_since");
-    assert!(since > 1_600_000_000_000, "must be a real timestamp, not the client's value");
+    let since = user
+        .sign
+        .unwrap()
+        .away_since
+        .expect("server stamps away_since");
+    assert!(
+        since > 1_600_000_000_000,
+        "must be a real timestamp, not the client's value"
+    );
 
     // Same message ⇒ stamp is stable; clearing ⇒ stamp clears.
     let user: User = client

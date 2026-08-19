@@ -89,7 +89,10 @@ pub enum ServerEvent {
     #[serde(rename = "message.update")]
     MessageUpdate(Message),
     #[serde(rename = "message.delete")]
-    MessageDelete { id: MessageId, room_id: RoomId },
+    MessageDelete {
+        id: MessageId,
+        room_id: RoomId,
+    },
     /// `count` is present for accessibility labels; the client renders weight.
     #[serde(rename = "reaction.update")]
     ReactionUpdate {
@@ -101,7 +104,10 @@ pub enum ServerEvent {
     #[serde(rename = "presence.update")]
     PresenceUpdate(PresenceEntry),
     #[serde(rename = "room.occupancy")]
-    RoomOccupancy { room_id: RoomId, user_ids: Vec<UserId> },
+    RoomOccupancy {
+        room_id: RoomId,
+        user_ids: Vec<UserId>,
+    },
     /// Sent only to clients sitting in that room; the receiver applies its own
     /// mute rules and quiet hours before playing anything (SPEC §4.1).
     #[serde(rename = "room.enter")]
@@ -111,7 +117,10 @@ pub enum ServerEvent {
         entrance_sound: Option<String>,
     },
     #[serde(rename = "room.leave")]
-    RoomLeave { room_id: RoomId, user_id: UserId },
+    RoomLeave {
+        room_id: RoomId,
+        user_id: UserId,
+    },
     /// Display name, style, or sign changed.
     #[serde(rename = "user.update")]
     UserUpdate(User),
@@ -119,9 +128,14 @@ pub enum ServerEvent {
     RoomCreate(Room),
     #[serde(rename = "room.update")]
     RoomUpdate(Room),
-    Typing { room_id: RoomId, user_id: UserId },
+    Typing {
+        room_id: RoomId,
+        user_id: UserId,
+    },
     /// V2 (SPEC §4.9); defined now because op values are additive within v1.
-    Knock { from_user_id: UserId },
+    Knock {
+        from_user_id: UserId,
+    },
 }
 
 /// A server frame: an event plus its sequence number. `hello`, `heartbeat_ack`,
@@ -175,7 +189,10 @@ mod tests {
     #[test]
     fn server_frame_flattens_op_d_s() {
         let f = ServerFrame::sequenced(
-            ServerEvent::RoomLeave { room_id: RoomId::new(), user_id: UserId::new() },
+            ServerEvent::RoomLeave {
+                room_id: RoomId::new(),
+                user_id: UserId::new(),
+            },
             7,
         );
         let json = serde_json::to_value(&f).unwrap();
@@ -183,10 +200,15 @@ mod tests {
         assert_eq!(json["s"], 7);
         assert!(json["d"]["room_id"].is_string());
 
-        let hello = ServerFrame::control(ServerEvent::Hello { heartbeat_interval_ms: 30_000 });
+        let hello = ServerFrame::control(ServerEvent::Hello {
+            heartbeat_interval_ms: 30_000,
+        });
         let json = serde_json::to_value(&hello).unwrap();
         assert_eq!(json["op"], "hello");
-        assert!(json.get("s").is_none(), "control frames must omit s entirely");
+        assert!(
+            json.get("s").is_none(),
+            "control frames must omit s entirely"
+        );
     }
 
     #[test]

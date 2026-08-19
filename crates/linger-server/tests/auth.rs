@@ -24,7 +24,10 @@ async fn register_login_and_wrong_password() {
         .unwrap();
     assert_eq!(ok.user.username, "callie");
 
-    for (user, pw) in [("callie", "wrong password entirely"), ("nobody", "whatever whatever")] {
+    for (user, pw) in [
+        ("callie", "wrong password entirely"),
+        ("nobody", "whatever whatever"),
+    ] {
         let resp = client
             .post(stoop.url("/auth/login"))
             .json(&serde_json::json!({ "username": user, "password": pw }))
@@ -123,7 +126,11 @@ async fn refresh_rotates_and_reuse_revokes_the_family() {
         .send()
         .await
         .unwrap();
-    assert_eq!(family_dead.status(), 401, "reuse must revoke the newest token too");
+    assert_eq!(
+        family_dead.status(),
+        401,
+        "reuse must revoke the newest token too"
+    );
 }
 
 #[tokio::test]
@@ -194,7 +201,15 @@ async fn expired_and_garbage_access_tokens_are_rejected() {
     assert_eq!(ok.status(), 200);
 
     // A structurally valid JWT signed by nobody we know.
-    let forged = format!("{}.e30.forged-signature", host.access_token.split('.').next().unwrap());
-    let resp = client.get(stoop.url("/me")).bearer_auth(forged).send().await.unwrap();
+    let forged = format!(
+        "{}.e30.forged-signature",
+        host.access_token.split('.').next().unwrap()
+    );
+    let resp = client
+        .get(stoop.url("/me"))
+        .bearer_auth(forged)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 401);
 }

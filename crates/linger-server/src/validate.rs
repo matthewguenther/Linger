@@ -14,7 +14,8 @@ use crate::error::ApiError;
 /// not normalize, so people see exactly what their username is.
 pub fn username(s: &str) -> Result<(), ApiError> {
     let ok = (2..=24).contains(&s.len())
-        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
     if ok {
         Ok(())
     } else {
@@ -27,7 +28,8 @@ pub fn username(s: &str) -> Result<(), ApiError> {
 /// `[a-z0-9-]{1,32}`.
 pub fn room_slug(s: &str) -> Result<(), ApiError> {
     let ok = (1..=32).contains(&s.len())
-        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
     if ok {
         Ok(())
     } else {
@@ -51,7 +53,9 @@ pub fn password(s: &str) -> Result<(), ApiError> {
     if s.chars().count() >= MIN_PASSWORD_CHARS {
         Ok(())
     } else {
-        Err(ApiError::validation("Passwords need at least 12 characters."))
+        Err(ApiError::validation(
+            "Passwords need at least 12 characters.",
+        ))
     }
 }
 
@@ -77,7 +81,9 @@ pub fn style(style: &Style) -> Result<(), ApiError> {
     }
     if let Some(msg_font) = &style.msg_font_key {
         if !linger_core::is_valid_font_key(msg_font) {
-            return Err(ApiError::validation("That message font isn't in the bundled set."));
+            return Err(ApiError::validation(
+                "That message font isn't in the bundled set.",
+            ));
         }
     }
     if ![400u16, 500, 700].contains(&style.weight) {
@@ -88,7 +94,9 @@ pub fn style(style: &Style) -> Result<(), ApiError> {
         Fill::Gradient { from, to } => from.is_valid() && to.is_valid(),
     };
     if !colors_ok {
-        return Err(ApiError::validation("Colors are picked from the named palette."));
+        return Err(ApiError::validation(
+            "Colors are picked from the named palette.",
+        ));
     }
     Ok(())
 }
@@ -96,9 +104,9 @@ pub fn style(style: &Style) -> Result<(), ApiError> {
 pub fn sign(sign: &Sign) -> Result<(), ApiError> {
     let cap = |field: &Option<String>, max: usize, what: &str| -> Result<(), ApiError> {
         match field {
-            Some(v) if v.chars().count() > max => {
-                Err(ApiError::validation(format!("{what} is capped at {max} characters.")))
-            }
+            Some(v) if v.chars().count() > max => Err(ApiError::validation(format!(
+                "{what} is capped at {max} characters."
+            ))),
             _ => Ok(()),
         }
     };
@@ -133,11 +141,19 @@ mod tests {
         s.font_key = "comic-sans".into();
         assert!(style(&s).is_err());
         s.font_key = "geist-sans".into();
-        s.fill = Fill::Solid { color: ColorKey("#ff00ff".into()) };
+        s.fill = Fill::Solid {
+            color: ColorKey("#ff00ff".into()),
+        };
         assert!(style(&s).is_err());
-        s.fill = Fill::Gradient { from: ColorKey("teal".into()), to: ColorKey("nope".into()) };
+        s.fill = Fill::Gradient {
+            from: ColorKey("teal".into()),
+            to: ColorKey("nope".into()),
+        };
         assert!(style(&s).is_err());
-        s.fill = Fill::Gradient { from: ColorKey("teal".into()), to: ColorKey("violet".into()) };
+        s.fill = Fill::Gradient {
+            from: ColorKey("teal".into()),
+            to: ColorKey("violet".into()),
+        };
         s.weight = 600;
         assert!(style(&s).is_err());
     }
