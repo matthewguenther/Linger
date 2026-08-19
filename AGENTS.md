@@ -93,6 +93,36 @@ pass.
 
 ---
 
+## How to explain your work
+
+Matt reads every one of these summaries. He builds by feel and vibe with a technical
+background behind it — he is not a senior engineer, and does not want to be written to
+like one. **Dense, jargon-packed writing is a defect here, the same as a failing test.**
+
+Write the chat summary like you are explaining it to a smart friend who did not read
+the code:
+
+- **Short, plain sentences.** One idea each. If a sentence needs a second read, rewrite it.
+- **Use the normal word.** "Left over", not "vestigial". "Runs at the same time", not
+  "concurrent". "Deleted the old files", not "reaped the stale artifacts".
+- **Jargon only when it is the actual name of a thing** — `serde`, WebSocket, migration,
+  clippy. Those are real names, keep them. Then say in plain words what it does the first
+  time it comes up.
+- **Lead with what it means for Matt**, then the detail. "Any database you made before
+  today has to be deleted" beats "the schema change is non-backward-compatible."
+- **Don't pile up clauses.** No em-dash chains, no three-part parallel constructions, no
+  sentence that shows off. Say the thing and stop.
+- **Cut the throat-clearing.** No "worth noting", "it's worth flagging that",
+  "importantly". If it matters, just say it.
+
+Length follows the work: a one-line fix gets a couple of sentences, a big change gets a
+short section per piece. Long is fine. Dense is not.
+
+None of this applies to code, code comments, or the docs — those stay precise and
+technical. This is about the summary you write in chat.
+
+---
+
 ## Where you will be wrong
 
 Be more careful in these areas and write more tests. Code here that looks right and

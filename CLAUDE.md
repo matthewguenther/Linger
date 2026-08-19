@@ -13,11 +13,14 @@ non-negotiable. Docs (`SPEC.md`, `ARCHITECTURE.md`, `PROTOCOL.md`) win over code
 - Vocabulary: server / room / in the room / host / media / status. `RoomId`, not
   `ChannelId`. The coined words (stoop, shelf, sign, sitting in) were dropped in T-006.
 - Wire types live in `crates/linger-core`, exported via `ts-rs`. Never hand-write one.
+- **Explain your work in plain language** — short sentences, ordinary words, no jargon
+  pile-ups. Matt is a vibe coder with a technical background, not a senior engineer.
+  Dense writing is a defect. Full guidance in AGENTS.md §"How to explain your work".
 
 ## Workflow
 
 - The work queue is `TASKS.md` — find the current milestone there, state it before
-  writing code, and check items off as they land.
+  writing code, and mark tasks ⬜ not started / ✅ done as they land.
 - Do not start a milestone until the previous one passes its check (ARCHITECTURE §10).
 
 ## Build commands
