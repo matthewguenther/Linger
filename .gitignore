@@ -1,0 +1,39 @@
+# Rust
+/target/
+client/src-tauri/target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+client/dist/
+*.tsbuildinfo
+
+# Tauri generated schemas
+client/src-tauri/gen/schemas/
+
+# Local data: a stoop's entire state lives here — never commit it
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Secrets and local config
+.env
+.env.*
+*.key
+*.pem
+# Tauri updater signing key — backed up OFFLINE, never in git (ARCHITECTURE §7)
+*.key.pub
+
+# Editors and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build/test droppings
+/dist/
+coverage/

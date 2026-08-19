@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# ts-rs output: committed but machine-written (CI regenerates and checks drift)
+client/src/generated/** linguist-generated=true
