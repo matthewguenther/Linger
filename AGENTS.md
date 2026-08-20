@@ -40,21 +40,23 @@ pass.
 8. **Palette and font keys are validated server-side** against `linger-core::PALETTE`
    and `linger-core::FONTS`. Client-side validation alone is a defect.
 9. **Never claim end-to-end encryption** in code comments, UI copy, or README.
-10. **No scope creep.** If a change requires a feature from the V2, V3, or post-release
-    AI lists, or from the anti-goals list, stop and ask. Do not build roles, threads,
-    federation, or a permission matrix.
+10. **No scope creep.** If a change requires a feature from the V2 or V3 lists, or from
+    the anti-goals list, stop and ask. Do not build roles, threads, federation, or a
+    permission matrix.
 11. **Design system is "Console" (SPEC §5).** No chat bubbles. No avatars. No shadows
     except focus rings. No gradients on surfaces. No rounded panels. No colored icon
     squares in the rail. Monospace is metadata-only — mono in a message body is a defect.
 12. **Colors are palette keys, never hex or OKLCH literals**, on the wire and in the
     database. The 16-color palette is defined once in `linger-core::PALETTE`.
-13. **No AI in the conversation.** No AI participants, no suggested replies, no drafting,
-    no sentiment analysis. Local-model features only, opt-in, host-configured endpoint,
-    no cloud fallback (SPEC §8). They are also the **last** thing built: nothing in
-    SPEC §8 starts until V1 has shipped as a real, working, signed release.
-14. **Agent actions are always attributed to the delegating human and visibly marked**
-    (`matt (via agent)`), in a style that cannot be disabled. An agent must never be
-    renderable as indistinguishable from a person.
+13. **No AI features, anywhere in the product.** No participants, no suggested replies,
+    no drafting, no sentiment analysis, no summaries, no embeddings, no semantic search,
+    no model endpoint — local or otherwise. Cut on 2026-08-19; SPEC §8 records the
+    decision and what would have to come back with it if Matt ever revisits. Reversing
+    this is his call, not a maintenance decision. (Rule 1 is a different rule and still
+    applies: no AI attribution in this repo, ever.)
+14. **No payment surface.** No paid tier, no store, no cosmetics for sale, nothing held
+    back to sell later. The scope discipline is the product, and a price list is how
+    that discipline dies.
 
 ---
 

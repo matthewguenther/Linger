@@ -79,6 +79,9 @@ task fails its acceptance criteria twice.
   with no user action, and resumes without gaps or duplicates against a real
   server. **Next up: T-303, where the milestone check lives.**
 - ⬜ **M4 … M9** — queued below.
+- 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
+  agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
+  rule 13 is the enforceable version. Do not build any of it back.
 
 **The one thing that bit us in T-301:** a webview page is a cross-origin caller,
 so the server had to start sending CORS headers before the client could read a
@@ -503,9 +506,6 @@ test with real disconnects, not mocks.*
   *Accept:* kill the server, restart it, client resumes or re-identifies with no
   user action; status text follows the states.
 
-- ⬜ **T-303 · The stream** — effort: **high**
-  SPEC §4.7 + §5.6. Virtualized list **from day one**; author grouping (break
-  10min); session breaks (3h) with natural-language dividers (`SATURDAY MORNING`
   ### **Done 2026-08-19.** The accept path was run for real, twice over.
 
   *A live `linger-server` was SIGKILLed under a connected client. The status bar
@@ -586,6 +586,9 @@ test with real disconnects, not mocks.*
     a throwaway server at `http://127.0.0.1:8421` that no longer exists. The app
     will say it can't reach it on next launch — one "sign out" clears it.*
 
+- ⬜ **T-303 · The stream** — effort: **high**
+  SPEC §4.7 + §5.6. Virtualized list **from day one**; author grouping (break
+  10min); session breaks (3h) with natural-language dividers (`SATURDAY MORNING`
   mono small-caps); aging via one CSS custom property (body only, floor 78%);
   3px per-person gutter rule, no avatar column; density modes Comfortable/
   Compact/IRC (IRC: one line/message, mono, no grouping/aging/effects).

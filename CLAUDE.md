@@ -11,6 +11,8 @@ non-negotiable. Docs (`SPEC.md`, `ARCHITECTURE.md`, `PROTOCOL.md`) win over code
 - Never transmit, store, or log a window title. `ProcessIdent` has no title field.
 - No unread counts, no telemetry, no `@everyone`, no E2EE claims.
 - Vocabulary: server / room / in the room / host / media / status. `RoomId`, not
+- **No AI features in the product** — cut entirely on 2026-08-19, including the local
+  ones that used to be "last on the roadmap" (SPEC §8). No payment surface either.
   `ChannelId`. The coined words (stoop, shelf, sign, sitting in) were dropped in T-006.
 - Wire types live in `crates/linger-core`, exported via `ts-rs`. Never hand-write one.
 - **Explain your work in plain language** — short sentences, ordinary words, no jargon

@@ -84,6 +84,9 @@ Every feature decision resolves against these, in order.
 - Any algorithmic ordering
 - Analytics or telemetry of any kind, opt-in or otherwise
 - Ephemeral-by-default messaging (fights principle 3)
+- **AI features of any kind** — no participants, no suggested replies or drafting, no
+  sentiment analysis, no summaries, no embeddings, no local model endpoint. See §8.
+- A paid tier, a storefront, cosmetics for sale, or any payment surface at all
 
 ---
 
@@ -497,16 +500,10 @@ first two are the system defaults.
   surface)
 - Custom emoji
 
-### Last, on purpose — local AI and the agent surface (§8)
+### Not on the roadmap — AI (§8)
 
-Deliberately sequenced behind everything above. **Nothing in §8 starts until V1 has
-shipped as a real, working, signed release that people are actually using.**
-
-This is not doubt about the features — §8 makes the case for them. It is a statement
-about what Linger is. The product has to stand on its own as a place friends hang out,
-with no model in the loop, before anything is layered on top. Building the AI layer
-early would also mean designing the core around it, which is exactly the mistake §8.1
-is about.
+There is no AI phase. It was on this list once, sequenced last; **as of 2026-08-19 it
+is off the list entirely.** §8 records the decision and the reasoning.
 
 ---
 
@@ -539,70 +536,40 @@ that is the differentiation. Do not fork them, but do not re-derive solved probl
 
 ---
 
-## 8. AI — where it belongs and where it does not (last phase)
+## 8. AI — decided against
 
-The position: **no AI in the conversation. Yes to local AI features and an
-agent-accessible architecture — after everything else ships.**
+**Position: Linger has no AI features. Not in the conversation, not around it.**
 
-Sequencing note: this whole section is the **last** phase of the roadmap (§6). It is
-written out in full now so the architecture does not paint itself into a corner, not
-because any of it is coming soon. Nothing here begins until V1 has shipped as a real,
-working, signed release.
+An earlier version of this spec argued for a set of local-only, opt-in features —
+semantic search, catch-up summaries, transcription — and for an agent surface, all
+sequenced behind V1. **Matt cut all of it on 2026-08-19.** The reasoning, kept here so
+the decision does not get re-made by accident:
 
-### 8.1 Why not in the conversation
+- **Running a model alongside a chat app for eight people does not make sense.** The
+  honest version of those features needs a second daemon, a model download, and a
+  machine big enough to serve it. That is a real operational cost pushed onto whoever
+  is hosting for their friends, in exchange for features nobody has asked for.
+- **The dishonest version is worse.** The moment a local endpoint is not configured,
+  the pressure to "just fall back to an API" starts, and that is conversation content
+  leaving the host's box. Not having the feature is the only design that cannot decay
+  into that.
+- **The thesis argues against it anyway.** Presence over messages and remove
+  obligation. The entire value of a friend replying is that a person chose to spend
+  attention on you; introduce a thing that also replies and every reply gets cheaper,
+  because you can no longer tell what was chosen. Suggested replies are worse — they
+  turn a friendship into autocomplete.
 
-The thesis is presence over messages and remove obligation. An AI participant attacks
-both. The entire value of a friend replying is that a person chose to spend attention on
-you; introduce a thing that also replies and every reply gets cheaper, because you can no
-longer tell what was chosen. Suggested replies are worse — they turn a friendship into
-autocomplete.
+The anti-goals in §2 are the enforceable form of this and they are permanent within
+V1: no AI participants, no suggested replies or drafting, no sentiment or tone
+analysis, no summaries, no embeddings, no model endpoint of any kind, and no network
+call carrying message content to anywhere the host did not explicitly configure.
 
-**Permanent anti-goals. Add to §2:**
+**If it is ever revisited** — and that is Matt's call, not a maintenance decision —
+two constraints from the cut version survive and must come back with it: everything
+runs against a host-configured local endpoint with no cloud default and no cloud
+fallback, and any action taken by an agent is attributed to the delegating human and
+visibly marked (`matt (via agent)`) in a style that cannot be turned off. An agent must
+never be renderable as indistinguishable from a person.
 
-- AI participants that post in rooms
-- Suggested replies, message drafting, or autocomplete on message content
-- Sentiment, tone, or mood analysis of any kind
-- Any network call containing message content to an endpoint the host did not configure
-- Any AI feature that is on by default
-
-### 8.2 Where it earns a place — all local, all opt-in
-
-| Feature | Notes |
-|---|---|
-| **Semantic search over history and media** | Highest-value item. "that video of the drive" actually finds it. Local embeddings, stored alongside the SQLite DB. |
-| **Catch-up summaries** | "Since you were gone" (§4.2), summarized. Pulled, never pushed. |
-| **App registry auto-classification** | Classify unknown processes locally so the 200-entry registry isn't hand-maintained forever. Touches zero conversation content. |
-| **Transcription and alt-text** | Accessibility. Local Whisper for voice memos, local vision model for image alt-text. |
-
-**Hard constraint:** every feature above runs against a host-configured local endpoint
-(Ollama-compatible). There is no cloud default and no cloud fallback. If no endpoint is
-configured, these features do not appear in the UI at all.
-
-The strategic point, worth stating in the README: a self-hosted Linger server can run
-all of this on the box. A hosted competitor structurally cannot — their version
-requires shipping your friends' conversations to a third party.
-
-### 8.3 The agent surface
-
-"Agent-friendly" mostly means "has a clean, documented, authenticated API," which V1
-already produces. The delta is small and worth taking.
-
-1. **`linger-mcp`: a separate optional binary** wrapping the existing REST API as an MCP
-   server. Roughly 300 lines once M1 is done. **Ships disabled.** The host must enable it,
-   and enabling it is a config change, not a UI toggle.
-
-2. **Delegated capability tokens, not bot accounts.** A user issues a token to their *own*
-   agent with an explicit scope and expiry:
-   ```
-   scope:  read:rooms[#shop]  write:none  expires:24h
-   ```
-   Revocable by the issuer at any time, listed in their settings, and never a separate
-   identity in the member list.
-
-3. **Everything an agent does is attributed to the delegating human and visibly marked.**
-   `matt (via agent)`, always, in a visually distinct style that cannot be turned off.
-   **An agent must never be renderable as indistinguishable from a person.** This is the
-   rule that makes the rest of it safe. It is a hard rule in `AGENTS.md`.
-
-4. Agent actions are rate-limited more aggressively than human actions, and an agent
-   cannot issue tokens, create invites, or change another user's settings — ever.
+None of this touches `AGENTS.md` rule 1: no AI attribution anywhere in this repo. That
+rule is about who wrote the code, and it stands regardless.
