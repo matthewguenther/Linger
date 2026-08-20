@@ -80,7 +80,9 @@ task fails its acceptance criteria twice.
   action, and resumes without gaps or duplicates against a real server. T-303
   landed 2026-08-20: the stream is real, two clients on one machine exchanged
   messages in real time, and 10,000 messages of scrollback held 24–43 rows in
-  the DOM. **Next up: T-304 (composer + message actions), then T-305.**
+  the DOM. T-304 landed 2026-08-20: markdown that can never become HTML, the
+  composer, edit/delete/reply, and reactions by weight. **Next up: T-305 ("you
+  left off here"), which closes M3.**
 - ⬜ **M4 … M9** — queued below.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -713,12 +715,131 @@ test with real disconnects, not mocks.*
     animated, so synthetic key presses closer together than ~300ms coalesce and
     scroll far less than a page each.*
 
-- ⬜ **T-304 · Composer + message actions** — effort: **medium**
+- ✅ **T-304 · Composer + message actions** — effort: **medium**
   Markdown (allowlist sanitizer, **no raw HTML passthrough**), send affordance in
   accent, edit/delete/reply, reactions by **weight** (denser/larger mark, count
   only in hover/aria — never rendered as a number).
   *Accept:* XSS attempt (`<img onerror>` etc.) renders inert; reactions show
   weight not numbers.
+
+  ### **Done 2026-08-20.** Both halves of the accept criterion were run for real.
+
+  *A throwaway server was seeded with seven extra accounts and a room full of
+  hostile input, then the real client was pointed at it.
+  [`docs/t304-inert.png`](docs/t304-inert.png) is the answer to the first half:
+  `<img src=x onerror=…>`, `<script>alert(document.cookie)</script>`,
+  `<a href="javascript:…">`, `<svg/onload=…>` and `[click me](javascript:alert(1))`
+  all render as the characters somebody typed. No dialog, no broken-image icon, no
+  link. The last one shows its own source, because a refused destination is worth
+  seeing rather than quietly swallowing.*
+
+  *[`docs/t304-weight.png`](docs/t304-weight.png) is the second half: one message
+  carrying the same five reactions held by one, two, four, six and eight people.
+  The mark gets larger and more solid across the five and **there is not a number
+  anywhere** — the count is in the hover title and the accessibility label only,
+  which is where PROTOCOL §4 says it may live.*
+  [`docs/t304-actions.png`](docs/t304-actions.png) *is the action strip with the
+  twelve reactions open in it.*
+
+  *Everything else was driven in the real app too, entirely from the keyboard:
+  replying (banner up, focus into the composer, quote line on the sent message),
+  editing in place (the editor opens on the **markdown source**, enter saves,
+  "edited" lands at the end of the last line), deleting (confirm, tombstone, and
+  the reply pointing at it survives), the twelve-reaction picker, IRC and
+  Comfortable density, and `Callie is typing…` driven by a second account on the
+  gateway.*
+
+  ### What got built
+
+  - `client/src/stream/markdown.ts` — the parser. Bold, italic, strike, code spans
+    and fences, quotes, both kinds of list, `[label](url)` and bare links. It emits
+    **typed nodes, never an HTML string**.
+  - `client/src/stream/Markdown.tsx` — draws those nodes as React elements.
+  - `client/src/stream/MessageRow.tsx` — one message: the body, what it replies to,
+    its reactions, and the action strip.
+  - `client/src/stream/Composer.tsx` — a textarea that grows, enter to send,
+    shift-enter for a new line, the reply banner, and the line that says who else
+    is typing.
+  - `client/src/stream/reactions.ts` — key → glyph → weight step.
+  - `client/src/lib/limits.ts`, `client/src/lib/open.ts`, `client/src/lib/autogrow.ts`.
+  - `client/src/lib/gateway.ts` — `editMessage`, `deleteMessage`, `setReaction`,
+    `startTyping`, replies on `sendMessage`, and the `typing` frame.
+  - 37 more tests (58 total): the parser's grammar and every hostile input above,
+    the weight steps, and two drift tests that **read the Rust source** and fail if
+    `linger-core`'s reaction keys or limits stop matching the TypeScript copies.
+
+  ### The three rules this ended up resting on
+
+  - ***There is no sanitizer, because there is nothing to sanitize.*** A sanitizer
+    is what you need when you have built an HTML string and want to make it safe
+    again. Parsing to typed nodes and rendering those as elements means the unsafe
+    string is never built. The rule that keeps it true is one line long: no
+    `dangerouslySetInnerHTML` anywhere in `client/`. Grep for it — there are none,
+    on purpose, so there is nothing to copy from.
+  - ***A link destination is the one string left that can still do something.***
+    Everything else in a body is inert by construction; an `href` is not. So it
+    goes through `new URL()` — which settles case, encoding and control characters
+    before anything is compared — and then an allowlist of http, https and mailto.
+    The check is repeated in `lib/open.ts` and again in the Tauri capability,
+    because a comparison costs nothing and a miss costs everything.
+  - ***A strip that swaps in place beats a popover.*** React, reply, edit, delete,
+    the twelve reactions, and "delete this?" are all the same strip in different
+    states. A popover next to a virtualized row would have to be positioned against
+    a scroller, clipped at its edges and layered over the rows after it — three
+    problems, in exchange for nothing.
+
+  ### Notes for whoever is next
+
+  - *Reaction glyphs are a **client** decision (PROTOCOL §4) and the twelve keys are
+    still marked provisional in `linger-core::lib.rs` — "confirm the set with Matt
+    before M3 ships reactions". They ship here as the obvious reading of those keys
+    (`up` → 👍, `hundred` → 💯). **Changing a glyph is one line in
+    `stream/reactions.ts`; changing a key is a wire change**, so this is the cheap
+    moment to say the set is wrong. The provisional note is still in the Rust.*
+  - *`typing.start` is wired, which T-302's note flagged as this task's job. It is
+    not in the SPEC §6 V1 list — PROTOCOL §8 defines both directions and the server
+    already rate-limits it, so leaving it unwired would have left a dead path. The
+    line above the composer holds its height whether or not it has anything to say,
+    so nobody's typing ever moves the stream. **If typing indicators are not wanted,
+    the whole feature is `startTyping` plus the `typing` case in the store.***
+  - *A message body is hostile input, and a parser is a place that costs time.
+    Three shapes of body used to scan to the end of the string once per
+    character — 8,000 unclosed `*`, `` ` `` or `[` — which is 143ms of one frame
+    per render for a body somebody could send on purpose. Emphasis and code spans
+    now remember that a delimiter of a given shape found nothing to close
+    against (true from any later position too, since closing depends only on what
+    surrounds the closer), brackets are bounded by a label length instead
+    (**not** the same argument: `[[a]` has no link at the first bracket and one
+    at the second), and `MessageBody` parses once per body rather than once per
+    render. 143ms → 3.2ms, and `markdown.test.ts` holds a 50ms budget over five
+    such bodies so it cannot quietly come back.*
+  - *No headings in the markdown subset. Type sizes are fixed by the density mode
+    (SPEC §5.2), so a line that silently became 24px would be a hole in the design
+    system. No images or tables either — an image is an upload (M6).*
+  - *Editing is lost if the message scrolls far enough out of view for the
+    virtualizer to unmount its row. The draft lives in the row, and the row is not
+    guaranteed to exist. It takes a real effort to hit — the overscan is twelve rows
+    either side of a message you are looking at — and the fix is lifting the draft
+    into `Stream.tsx` beside `editingId` if it ever bites.*
+  - *In IRC mode a message with reactions is no longer one line. Neither is one with
+    a code block, so "one line per message" was already an intention rather than a
+    rule; reactions ride at the end of the text and wrap.*
+  - *New dependencies: `tauri-plugin-opener` in the shell and
+    `@tauri-apps/plugin-opener` in the client, so a link can open in the system
+    browser instead of navigating the WebView away from the app forever. The
+    capability in `client/src-tauri/capabilities/default.json` narrows it to http,
+    https and mailto. Also `@types/node`, so the two drift tests can read the Rust
+    source. The bundle went 245KB → 261KB (77KB → 82KB gzipped).*
+  - *`.density-option` in `app.css` sets `font: inherit`, which defeats the
+    `meta` class it also carries — so the density picker draws in the 13.5px body
+    face rather than 11px mono. It is T-303's and it may well be deliberate, so it
+    was left alone; the new buttons in `stream.css` avoid the shorthand for exactly
+    this reason. Worth one decision from Matt either way.*
+  - *Testing needed the GUI driven again and this box still has no xdotool. This
+    time it was a keyboard only, over `/dev/uinput`, which turned out to be a real
+    test of its own: **every action in this task is reachable and operable from the
+    keyboard**, including the strip, the picker and the confirm. The scaffolding is
+    throwaway and is not in the repo.*
 
 - ⬜ **T-305 · "You left off here"** — effort: **medium**
   SPEC §4.2. Accent divider at last-read, persists for the session; room label

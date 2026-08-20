@@ -95,9 +95,15 @@
 
 .composer-row {
   display: flex;
+  align-items: flex-end;
   gap: 8px;
 }
 
+/*
+ * A textarea, not a text field: Enter sends and Shift-Enter is a new line, and
+ * the box grows with what you have written up to ten rows. `resize: none`
+ * because the handle is a second way to set a size the content already sets.
+ */
 .composer-input {
   flex: 1;
   min-width: 0;
@@ -106,7 +112,64 @@
   border-radius: var(--radius-control);
   color: var(--text-primary);
   font: inherit;
+  line-height: 1.5;
   padding: 8px 10px;
+  resize: none;
+}
+
+/*
+ * The banner for a reply in progress. It stays up the whole time you are
+ * typing, because a reply you forgot you were writing lands in the wrong place.
+ */
+.composer-reply {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 6px;
+  color: var(--text-secondary);
+}
+
+.composer-reply-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-label-size);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.composer-reply-drop {
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.composer-reply-drop:hover {
+  color: var(--text-primary);
+}
+
+/*
+ * One line above the composer: what went wrong with the last send, or who else
+ * is mid-sentence. It keeps its height when it has nothing to say, so the
+ * stream never jumps because somebody started typing.
+ */
+.composer-line {
+  min-height: 15px;
+  padding-bottom: 4px;
+  color: var(--text-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* How much room is left, shown only once there is nearly none. */
+.composer-left {
+  flex: none;
+  align-self: center;
+  color: var(--text-faint);
 }
 
 .composer-input::placeholder {
@@ -122,7 +185,7 @@
   color: var(--accent);
   font-family: var(--font-mono);
   font-size: var(--text-meta-size);
-  padding: 0 12px;
+  padding: 9px 12px;
   cursor: pointer;
   transition: border-color var(--motion-fast);
 }
@@ -134,11 +197,6 @@
 .composer-send:disabled {
   color: var(--text-faint);
   cursor: default;
-}
-
-.composer-problem {
-  color: var(--text-secondary);
-  padding-bottom: 6px;
 }
 
 .roster {

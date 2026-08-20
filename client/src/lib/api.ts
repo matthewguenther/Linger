@@ -287,6 +287,13 @@ export class AuthedApi {
     );
   }
 
+  /** No `<T>`: every PUT in PROTOCOL answers 204 with an empty body. */
+  put(path: string, body?: unknown): Promise<void> {
+    return this.#withAuth((accessToken) =>
+      requestVoid(this.baseUrl, "PUT", path, { accessToken, body }),
+    );
+  }
+
   delete(path: string): Promise<void> {
     return this.#withAuth((accessToken) =>
       requestVoid(this.baseUrl, "DELETE", path, { accessToken }),

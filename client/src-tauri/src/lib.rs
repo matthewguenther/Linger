@@ -184,6 +184,12 @@ fn gateway_send(connection: State<'_, Connection>, frame: ClientFrame) -> bool {
 /// Entry point shared by main.rs and (later) mobile.
 pub fn run() {
     tauri::Builder::default()
+        // Links in a message body have to leave the app, not navigate it: a
+        // WebView that follows an `href` replaces Linger with a web page and
+        // there is no back button. The capability file narrows this to http,
+        // https and mailto, and `lib/open.ts` checks the scheme again before
+        // it ever gets here.
+        .plugin(tauri_plugin_opener::init())
         .manage(Connection::default())
         .invoke_handler(tauri::generate_handler![
             activity_probe,
