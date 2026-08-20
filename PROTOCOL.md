@@ -48,6 +48,18 @@ POST /auth/logout       { refresh_token }              → 204
 GET  /auth/invite/:code → { valid, server_name, expires_at }  # unauthenticated preview
 ```
 
+### 2.2 Shareable links
+
+Nothing on the server serves these paths — they exist so a person has one thing to
+paste into the client, which parses them and calls the endpoints above. The origin
+is the server; everything else is the client's business.
+
+```
+https://linger.example/setup?token=…   first-run link, printed to the console
+https://linger.example/invite/CODE     an invite (?code=CODE is also accepted)
+linger.example                         no path: sign in to an existing account
+```
+
 `username`: `[a-z0-9_]{2,24}`, unique, immutable after creation.
 `display_name`: 1–32 chars, mutable.
 `password`: minimum 12 characters. Do not impose composition rules.

@@ -48,3 +48,63 @@ async fn protected_routes_reject_missing_and_garbage_tokens() {
         .unwrap();
     assert_eq!(garbage.status(), 401);
 }
+
+/// The desktop client is a webview page, so every call it makes is cross-origin
+/// and the browser will not hand it a response without these headers. Without
+/// this the whole client silently fails to reach the server, which is exactly
+/// what happened during T-301 — hence a test rather than a comment.
+#[tokio::test]
+async fn the_desktop_client_origin_is_allowed_and_others_are_not() {
+    let server = common::spawn_server().await;
+    let client = reqwest::Client::new();
+
+    for origin in ["tauri://localhost", "http://tauri.localhost"] {
+        // The preflight the browser sends before a JSON POST with a bearer token.
+        let preflight = client
+            .request(reqwest::Method::OPTIONS, server.url("/auth/login"))
+            .header("origin", origin)
+            .header("access-control-request-method", "POST")
+            .header(
+                "access-control-request-headers",
+                "authorization,content-type",
+            )
+            .send()
+            .await
+            .unwrap();
+        assert!(preflight.status().is_success(), "preflight for {origin}");
+        assert_eq!(
+            preflight
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some(origin),
+        );
+
+        let actual = client
+            .get(server.url("/health"))
+            .header("origin", origin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            actual
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some(origin),
+        );
+    }
+
+    // A web page somewhere else gets no such permission: it can send the
+    // request, but the browser won't let it read the answer.
+    let stranger = client
+        .get(server.url("/health"))
+        .header("origin", "https://example.com")
+        .send()
+        .await
+        .unwrap();
+    assert!(stranger
+        .headers()
+        .get("access-control-allow-origin")
+        .is_none());
+}

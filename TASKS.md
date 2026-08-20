@@ -73,8 +73,16 @@ task fails its acceptance criteria twice.
 - ✅ **T-006 — the vocabulary change** (2026-08-19): the coined words are gone,
   ahead of M3 writing any UI copy. Full mapping and the presence-naming call are
   recorded under the task below.
-- ⬜ **M3 … M9** — queued below. **Next up: T-301.** M0 and T-006 are closed, so
-  M3 is clear to start.
+- ⬜ **M3 — client: message stream** — started. T-301 landed 2026-08-19:
+  the client can sign in, and stays signed in across restarts. **Next up: T-302.**
+- ⬜ **M4 … M9** — queued below.
+
+**The one thing that bit us in T-301, worth knowing before T-302:** a webview
+page is a cross-origin caller, so the server had to start sending CORS headers
+before the client could read a single response. The allowed origins are a fixed
+list in `crates/linger-server/src/routes/mod.rs`. The gateway WebSocket is *not*
+subject to CORS, so T-302 won't hit this — but if a future browser-side call
+mysteriously "can't reach the server", that list is the first place to look.
 
 Two decisions M5/M7 no longer have to make: **use `oklch()` directly** (WebKitGTK
 2.52.3 supports it, T-002), and **T-503's Win32 backend is a known quantity**
@@ -398,12 +406,90 @@ test with real disconnects, not mocks.*
 
 *Milestone check: two clients on one machine exchange messages in real time.*
 
-- ⬜ **T-301 · API client + auth flow** — effort: **medium**
+- ✅ **T-301 · API client + auth flow** — effort: **medium**
   Typed fetch wrapper over generated types (no `any`, no `as` across the wire);
   login/register screens (invite link paste); token refresh on 401; tokens in OS
   keyring via a Tauri command (`keyring` crate) — **test the headless/no-wallet
   fallback: clear re-login prompt, not a crash** (ARCHITECTURE §7.3).
   *Accept:* manual: login on a fresh profile, restart app, still authed.
+
+  ### **Done 2026-08-19.** Both accept paths were run for real, on this box.
+
+  *Signed in against a live `linger-server`, killed the app, started it again —
+  it came back signed in with no typing. Screenshot at
+  [`docs/t301-signed-in.png`](docs/t301-signed-in.png). Proof it was the real
+  round trip and not a cached screen: the refresh token in the keyring changed
+  from the one seeded before launch to a new one, which only happens if the app
+  read it, spent it at `/auth/refresh`, and wrote the replacement back.*
+
+  *The no-wallet case was run too, by starting the app with the D-Bus session
+  address pointed at nothing — the same as a headless box or a locked wallet.
+  The app opens normally, shows the sign-in box, and says "No usable keyring on
+  this computer… You'll have to sign in again next time." No crash, no hang.*
+
+  ### ⚠️ **The big one: the server had to learn CORS.**
+
+  *A Tauri window is a web page, so every call it makes to the server is
+  cross-origin, and a browser refuses to hand the page a response without
+  permission headers. Without this the client cannot reach the server **at
+  all** — the first live run failed with "Couldn't reach…" while `curl` against
+  the same URL worked fine. `linger-server` now sends CORS headers for a fixed
+  list of four origins (`tauri://localhost`, `http(s)://tauri.localhost` for
+  Windows, and Vite's `http://localhost:1420` for `pnpm dev`), enforced by a
+  test in `tests/health.rs`. It is a fixed list rather than a wildcard on
+  purpose: with a wildcard, any website you visited could quietly check whether
+  this server exists.*
+
+  *Two smaller server-side changes came out of the same run. A wrong password
+  answered "Sign in to do that.", which is nonsense under a login form — it now
+  says "That username and password don't match." And the client's CSP now allows
+  `http://localhost` and `http://127.0.0.1`, so a server running on your own
+  machine works; plain-http LAN addresses are still refused, which is deliberate,
+  since that would be a password over the wire in the clear.*
+
+  ### What got built
+
+  - `client/src/lib/api.ts` — every call, typed off `src/generated/`. There is
+    no `as` cast anywhere in it: error codes are checked against a list that
+    `satisfies Record<ErrorCode, ErrorCode>`, so if `linger-core` ever adds or
+    renames a code, `pnpm check` fails. Verified by deleting a code and watching
+    it fail. A refused call comes back as `ApiError` (the server talking) or
+    `TransportError` (no answer at all) — the screens show `error.message`
+    directly, which is what PROTOCOL §1 promises it is for.
+  - `AuthedApi` handles the 15-minute access token expiring mid-use: it
+    refreshes and retries once. Two calls failing at the same time share **one**
+    refresh, because spending a refresh token twice revokes the whole family and
+    would log you out.
+  - `client/src-tauri/src/secrets.rs` — three Tauri commands over the `keyring`
+    crate. **None of them can fail**: "there is no keyring here" is a value the
+    UI renders, not an error that blows up the IPC call. Only the refresh token
+    is stored; the access token is not, since it dies in 15 minutes anyway.
+  - One paste box instead of three screens. It takes a setup link, an invite
+    link, or a bare address, and picks the right form. The link shapes are now
+    written down in PROTOCOL §2.2 and in the README, since nothing serves those
+    paths — they only exist for a person to paste.
+
+  ### Notes for whoever is next
+
+  - *`keyring` is configured per platform: pure-Rust zbus on Linux
+    (`async-secret-service` + `crypto-rust`), so **no new system dependency**.
+    The kernel-keyutils backend is deliberately off — it would "work" on a
+    headless box and then lose the secret at logout, hiding the exact case
+    ARCHITECTURE §7.3 asks us to handle honestly.*
+  - *Restoring the session runs **once per launch**, guarded by a
+    module-level promise. React StrictMode double-mounts effects in development,
+    which would spend the refresh token twice and revoke the family — a bug that
+    would only ever appear on a dev machine.*
+  - *`client/src-tauri` has real tests now (`cd client/src-tauri && cargo test`).
+    `cargo test --workspace` does not run them. One needs a real desktop session
+    and is marked `#[ignore]`; run it with `cargo test -- --ignored`.*
+  - *There is still **no test runner on the frontend**. The API client and the
+    link parser were checked by driving them from Node against a live server
+    (26 assertions, all passing) — a throwaway harness, not committed. If the TS
+    side grows much past this, it wants vitest; that is a decision, not a task
+    yet.*
+  - *The generated TypeScript did not drift, so nothing in
+    `client/src/generated/` changed.*
 
 - ⬜ **T-302 · Gateway client in Rust core** — effort: **high**
   ARCHITECTURE §1: the WS client lives in the Tauri core, not the WebView.

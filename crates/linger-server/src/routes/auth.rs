@@ -153,7 +153,9 @@ async fn login(
 
     let verified = !hash.is_empty() && auth::verify_password(req.password, hash).await?;
     let Some(user_id) = user_id.filter(|_| verified) else {
-        return Err(ApiError::unauthenticated());
+        return Err(ApiError::unauthenticated_with(
+            "That username and password don't match.",
+        ));
     };
 
     sqlx::query("UPDATE users SET last_seen_at = ? WHERE id = ?")

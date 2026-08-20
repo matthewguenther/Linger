@@ -371,12 +371,18 @@ E2EE launders a false promise, which is worse than an honest limitation.
    CSPRNG, single-use by default.
 5. **Rate limits:** login 5/min/IP, message send 10/10s/user, upload slot 20/hour/user,
    invite creation 10/day/user, knock 3/hour/target.
-6. **Tauri capabilities:** the WebView gets the minimum permission set. Activity
+6. **CORS is an allowlist, not a wildcard.** The client is a webview page, so it is
+   a cross-origin caller and the server must grant it permission explicitly. The
+   allowed origins are the Tauri app's (`tauri://localhost`, and
+   `http(s)://tauri.localhost` on Windows) plus Vite's dev server. Reflecting any
+   origin would let a website you happened to visit probe whether this server
+   exists, which is worth avoiding for a product that is otherwise this private.
+7. **Tauri capabilities:** the WebView gets the minimum permission set. Activity
    detection is exposed as exactly one narrow command returning a resolved
    `Activity`. The WebView can never enumerate processes.
-7. **Signed auto-updates.** Tauri's updater with a signing key generated at M0 and
+8. **Signed auto-updates.** Tauri's updater with a signing key generated at M0 and
    **backed up offline**. Losing it means you can never ship an update.
-8. **No telemetry.** Not opt-in, not anonymous, not crash reporting. None.
+9. **No telemetry.** Not opt-in, not anonymous, not crash reporting. None.
 
 ### User content is hostile
 

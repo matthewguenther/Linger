@@ -25,3 +25,21 @@ linger-activity = { path = "../../crates/linger-activity" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# OS keyring for the refresh token (ARCHITECTURE §7.3). Features are picked per
+# platform on purpose:
+#
+#   Linux — `async-secret-service` + `crypto-rust` speaks the Secret Service
+#   D-Bus API through zbus, in pure Rust. The alternative, `sync-secret-service`,
+#   links libdbus and would add `libdbus-1-dev` to everyone's build. Note that
+#   `linux-native` (kernel keyutils) is deliberately NOT enabled: it would
+#   "succeed" on a headless box while losing the secret at logout, hiding the
+#   no-wallet case the client is required to handle honestly.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["async-secret-service", "crypto-rust", "tokio"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }

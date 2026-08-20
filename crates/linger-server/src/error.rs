@@ -33,6 +33,17 @@ impl ApiError {
         )
     }
 
+    /// Same code, different sentence. The default message reads as an
+    /// instruction, which is wrong under a login form where the person *is*
+    /// trying to sign in. Deliberately says nothing about which half was wrong.
+    pub fn unauthenticated_with(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthenticated,
+            message,
+        )
+    }
+
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, ErrorCode::Forbidden, message)
     }

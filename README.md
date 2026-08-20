@@ -116,6 +116,15 @@ docker compose logs linger   # prints a one-time host-setup URL on first run
 
 Caddy is bundled so TLS certificates are automatic.
 
+The setup URL in that log is meant for the desktop client, not a browser: open Linger
+and paste it into the first box. It creates your account, makes you the host, and names
+the server. It works once, and a restart replaces it.
+
+Inviting people works the same way. An invite code becomes a link by hanging it off
+your server's address — `https://linger.example/invite/CODE` — and whoever you send it
+to pastes that into the same box. The box also takes a bare address
+(`linger.example`) for signing back in.
+
 **Backup** is the whole point of self-hosting your friendships — it's two paths:
 `data/linger.db` and `data/objects/`. A cron one-liner:
 
@@ -173,6 +182,14 @@ Things that surprise people the first time:
   `cargo`.
 - **pnpm comes from corepack** and the version is pinned in `client/package.json`. Run
   pnpm commands from inside the repo so it picks up the pin.
+- **`cargo test --workspace` skips the client shell**, for the same reason. Its tests
+  are `cd client/src-tauri && cargo test`. A few need a real desktop session (an
+  unlocked keyring, for one) and are marked `#[ignore]` — run those with
+  `cargo test -- --ignored` when you're sitting in front of the machine.
+- **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
+  keyring — Keychain, Credential Manager, or a Secret Service provider like
+  gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app
+  still works; it just says so and asks you to sign in again next launch.
 
 Current work queue lives in [TASKS.md](TASKS.md).
 

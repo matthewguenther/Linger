@@ -1,0 +1,150 @@
+/* The sign-in surface. Same Console rules as the main frame (SPEC §5): square
+   corners, hairline borders, no shadows except focus rings, no gradients on
+   surfaces, accent reserved for the one button that moves you forward. */
+
+.auth {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--gutter);
+  overflow-y: auto;
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  padding: calc(var(--gutter) * 2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+
+.auth-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-wordmark {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.auth-tagline {
+  color: var(--text-faint);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gutter);
+}
+
+/* Which server you're talking to, with the way back out. */
+.auth-where {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: var(--gutter);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.auth-back {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.auth-back:hover {
+  color: var(--text-primary);
+}
+
+.auth-lead {
+  color: var(--text-secondary);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.auth-input {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.auth-input::placeholder {
+  color: var(--text-faint);
+}
+
+.auth-hint {
+  color: var(--text-muted);
+  font-size: var(--text-meta-size);
+}
+
+.auth-go {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  color: var(--surface-0);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  padding: 9px 12px;
+  transition: opacity var(--motion-fast);
+}
+
+/* A disabled action must not read as the primary one. Flat surface, no accent. */
+.auth-go:disabled {
+  background: var(--surface-2);
+  border-color: var(--hairline-strong);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.auth-problem {
+  color: var(--text-primary);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+
+.auth-notice,
+.auth-keyring {
+  color: var(--text-secondary);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--gutter);
+}
+
+/* Sentences, not metadata — so this stays in the body face. Mono is for
+   timestamps and labels (SPEC §5.2), and four lines of mono prose is a wall. */
+.auth-keyring {
+  font-size: var(--text-meta-size);
+}
+
+.auth-notice {
+  border-top: 0;
+  border-bottom: 1px solid var(--hairline);
+  padding: 0 0 var(--gutter);
+}
+
+/* Forms are the one place text selection is expected — base.css turns it off
+   app-wide so the client doesn't feel like a web page. */
+.auth-input,
+.auth-problem,
+.auth-notice {
+  user-select: text;
+}

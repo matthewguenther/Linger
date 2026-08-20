@@ -91,3 +91,31 @@
 .rail-rooms {
   flex: 1;
 }
+
+.rail-server {
+  margin-top: 6px;
+  font-weight: 500;
+}
+
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-warn {
+  color: var(--text-secondary);
+}
+
+.status-action {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status-action:hover {
+  color: var(--text-primary);
+}

@@ -14,12 +14,53 @@ mod server;
 mod setup;
 mod users;
 
+use axum::http::{header, HeaderValue, Method};
 use axum::routing::any;
 use axum::Router;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
 use crate::state::AppState;
+
+/// Origins the desktop client runs from. A webview page is a cross-origin
+/// caller like any other, so without these the client can't read a single
+/// response — which is how this list came to exist (T-301).
+///
+/// Tauri serves the app from `tauri://localhost`, except on Windows and Android
+/// where webview2/webkit need the `tauri.localhost` workaround host. The last
+/// entry is Vite's dev server, so `pnpm dev` can talk to a real server.
+///
+/// It is a fixed list rather than "reflect whatever asked", on purpose: with a
+/// wildcard, any web page you happened to visit could read this server's
+/// unauthenticated endpoints and learn that it exists. Nothing here needs to be
+/// reachable from the open web.
+const CLIENT_ORIGINS: [&str; 4] = [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:1420",
+];
+
+fn cors() -> CorsLayer {
+    let origins: Vec<HeaderValue> = CLIENT_ORIGINS
+        .iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok())
+        .collect();
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::PUT,
+            Method::DELETE,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        // Auth is a bearer token the client holds deliberately. There are no
+        // cookies, so there is no ambient authority for a browser to attach.
+        .allow_credentials(false)
+}
 
 pub fn router(state: AppState) -> Router {
     let api = Router::new()
@@ -36,6 +77,7 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api/v1", api)
+        .layer(cors())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
