@@ -184,7 +184,7 @@ Read first, in order: [SPEC.md](SPEC.md) → [ARCHITECTURE.md](ARCHITECTURE.md) 
 cargo test --workspace
 
 # frontend
-cd client && pnpm install && pnpm check
+cd client && pnpm install && pnpm check && pnpm test
 
 # desktop client (needs system webview deps; on Debian/Ubuntu:
 #   sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
@@ -198,7 +198,7 @@ Before you push, run what CI runs — it gates on all of it:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cd client && pnpm check && pnpm exec vite build
+cd client && pnpm check && pnpm test && pnpm exec vite build
 
 # the desktop shell — outside the workspace, so it needs its own pass
 cd client/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
@@ -229,6 +229,12 @@ Things that surprise people the first time:
   `client/src/lib/gateway.ts`, and no connection code at all. Reconnecting, resume, and
   sequence accounting are Rust's problem, and they're covered by tests that talk to a
   real socket.
+- **The message list is virtualized**, so only the rows on screen exist in the DOM
+  (`client/src/stream/`). Two rules follow from that and both are easy to trip over.
+  Space between rows must be *padding*, never margin — the virtualizer measures each
+  row's own box and a margin sits outside it. And a row's height is a guess until it
+  has been drawn once, so anything that scrolls to a position has to keep re-aiming as
+  the real heights arrive; jumping once lands in the wrong place.
 - **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
   keyring — Keychain, Credential Manager, or a Secret Service provider like
   gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app

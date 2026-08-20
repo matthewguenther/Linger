@@ -265,9 +265,9 @@ Statuses appear in the roster card when expanded, and in the user popover.
 
 Discord is simultaneously low-density and visually noisy. Fix both.
 
-**Aging.** Message opacity steps down with age: <1h at 100%, <1d at 88%, <1w at 76%,
-older at 66%. Scrolling up feels like walking into the past. One CSS custom property
-computed from the timestamp.
+**Aging.** Message opacity steps down with age: <1h at 100%, <1d at 88%, older at 78%,
+and it stops there — see §5.6 for the steps and the floor. Scrolling up feels like
+walking into the past. One CSS custom property computed from the timestamp.
 
 **Sessions, not a stream.** Group consecutive messages by the same author; break the
 group on a 10-minute gap. Break the *session* on a 3-hour gap, which inserts real

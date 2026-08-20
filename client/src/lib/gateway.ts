@@ -2,15 +2,17 @@
  * The gateway store: the frontend's one piece of shared state.
  *
  * AGENTS allows local component state plus exactly one gateway store, and this
- * is it — about eighty lines of subscribe-and-notify instead of a state
- * library. React reads it through `useSyncExternalStore`, so every component
- * that cares re-renders on a change and nothing else does.
+ * is it — subscribe-and-notify instead of a state library. React reads it
+ * through `useSyncExternalStore`, so every component that cares re-renders on a
+ * change and nothing else does.
  *
  * The connection itself is not here. It lives in the Tauri core
  * (ARCHITECTURE §1), which owns reconnecting, resume and sequence numbers and
  * sends two events up: a connection status, and each sequenced server frame.
- * This file's whole job is to fold those frames into a snapshot the UI can
- * render, and to answer when the core says it needs a fresh access token.
+ * This file folds those frames into a snapshot the UI can render, answers when
+ * the core says it needs a fresh access token, and holds each open room's
+ * history — because history arrives two ways, as pages over REST and as frames
+ * over the socket, and the two have to be stitched together in one place.
  *
  * Running `pnpm dev` in a plain browser, with no Tauri underneath, leaves the
  * status on `offline` — the same honest degrading as session storage.
@@ -20,8 +22,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useSyncExternalStore } from "react";
 
 import type { ClientFrame } from "../generated/ClientFrame";
+import type { CreateMessageRequest } from "../generated/CreateMessageRequest";
+import type { Message } from "../generated/Message";
+import type { MessageId } from "../generated/MessageId";
 import type { PresenceEntry } from "../generated/PresenceEntry";
+import type { ReactionGroup } from "../generated/ReactionGroup";
 import type { Room } from "../generated/Room";
+import type { RoomId } from "../generated/RoomId";
 import type { ServerFrame } from "../generated/ServerFrame";
 import type { User } from "../generated/User";
 import type { UserId } from "../generated/UserId";
@@ -42,6 +49,23 @@ export type GatewayStatus =
   | { kind: "waiting"; retry_in_ms: number; reason: string }
   | { kind: "needs_token" };
 
+/**
+ * One room's loaded history.
+ *
+ * A room only appears in the store once it has been opened. Message frames for
+ * a room nobody has opened are dropped rather than kept, because the page fetch
+ * that opens it would fetch them anyway, and half a room's history is worse
+ * than none: the gaps are invisible.
+ */
+export interface RoomStream {
+  /** Oldest first. Ids are UUIDv7, so "in id order" is "in time order". */
+  messages: Message[];
+  /** True once the oldest message held is the oldest the server has. */
+  atStart: boolean;
+  /** A page is in flight; stops the same backfill firing twice. */
+  loading: boolean;
+}
+
 export interface GatewayState {
   status: GatewayStatus;
   /** Who the server says we are. Null until the first `ready`. */
@@ -51,6 +75,8 @@ export interface GatewayState {
   presence: PresenceEntry[];
   /** Who is in each room, keyed by room id. */
   occupancy: Record<string, UserId[]>;
+  /** Loaded history, keyed by room id. */
+  streams: Record<string, RoomStream>;
 }
 
 const EMPTY: GatewayState = {
@@ -60,6 +86,7 @@ const EMPTY: GatewayState = {
   rooms: [],
   presence: [],
   occupancy: {},
+  streams: {},
 };
 
 let state: GatewayState = EMPTY;
@@ -105,14 +132,88 @@ function occupancyFrom(presence: PresenceEntry[]): Record<string, UserId[]> {
 }
 
 /**
- * Apply one server frame. Message events land in T-303 — they arrive here
- * already and are ignored on purpose rather than half-stored.
+ * How many messages one page of history holds. The server clamps `limit` to
+ * 100 (PROTOCOL §4), so this is as much as one round trip can ever bring.
  */
+const PAGE_SIZE = 100;
+
+function byId(a: Message, b: Message): number {
+  if (a.id < b.id) return -1;
+  return a.id > b.id ? 1 : 0;
+}
+
+/** Insert or replace one message, keeping the list in id order. */
+function mergeMessage(list: Message[], message: Message): Message[] {
+  const at = list.findIndex((held) => held.id === message.id);
+  if (at >= 0) {
+    const next = [...list];
+    next[at] = message;
+    return next;
+  }
+  const newest = list[list.length - 1];
+  // Nearly always: something newer than everything we hold.
+  if (newest === undefined || newest.id < message.id) return [...list, message];
+  return [...list, message].sort(byId);
+}
+
+/** Fold a fetched page (the server sends newest-first) into what we hold. */
+function mergePage(list: Message[], page: Message[]): Message[] {
+  if (page.length === 0) return list;
+  const older = [...page].sort(byId);
+  const first = list[0];
+  const last = older[older.length - 1];
+  // Backfill asks for everything `before` the oldest message we hold, so the
+  // ordinary case is a block that belongs entirely above the list. The slow
+  // path is for the one race there is: a message arriving over the socket
+  // while the first page of the same room is still on the wire.
+  if (first === undefined || last === undefined || last.id < first.id) {
+    return [...older, ...list];
+  }
+  const byKey = new Map(list.map((held) => [held.id, held]));
+  for (const message of older) byKey.set(message.id, message);
+  return [...byKey.values()].sort(byId);
+}
+
+/**
+ * Replace one reaction group in place, so the server's canonical key order
+ * survives. A count of zero is the last person taking theirs back.
+ */
+function applyReaction(groups: ReactionGroup[], update: ReactionGroup): ReactionGroup[] {
+  const at = groups.findIndex((group) => group.key === update.key);
+  if (update.count === 0) return at < 0 ? groups : groups.filter((_, index) => index !== at);
+  if (at < 0) return [...groups, update];
+  const next = [...groups];
+  next[at] = update;
+  return next;
+}
+
+/**
+ * Rewrite one room's stream inside a snapshot. Returning the stream unchanged
+ * returns the snapshot unchanged, so a frame that touches nothing re-renders
+ * nothing.
+ */
+function withStream(
+  current: GatewayState,
+  roomId: RoomId,
+  change: (stream: RoomStream) => RoomStream,
+): GatewayState {
+  const stream = current.streams[roomId];
+  if (!stream) return current;
+  const next = change(stream);
+  if (next === stream) return current;
+  return { ...current, streams: { ...current.streams, [roomId]: next } };
+}
+
+/** Apply one server frame. */
 function apply(current: GatewayState, frame: ServerFrame): GatewayState {
   switch (frame.op) {
     case "ready":
       // A fresh `ready` replaces everything. It arrives after a re-identify,
       // which is exactly when our copy is the thing that can't be trusted.
+      // Loaded history goes with it: re-identifying means the resume window
+      // lapsed, so there may be messages we never saw, and a hole in the middle
+      // of a room is invisible in a way an empty room is not. The open room
+      // refetches, which costs one request and a scroll position.
       return {
         ...current,
         me: frame.d.user,
@@ -120,6 +221,7 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         rooms: frame.d.rooms,
         presence: frame.d.presence,
         occupancy: occupancyFrom(frame.d.presence),
+        streams: {},
       };
     case "presence.update": {
       const entry = frame.d;
@@ -146,6 +248,48 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         ...current,
         occupancy: { ...current.occupancy, [frame.d.room_id]: frame.d.user_ids },
       };
+    case "message.create":
+    case "message.update": {
+      const message = frame.d;
+      return withStream(current, message.room_id, (stream) => ({
+        ...stream,
+        messages: mergeMessage(stream.messages, message),
+      }));
+    }
+    case "message.delete": {
+      const { id, room_id } = frame.d;
+      // A delete is a tombstone, not a removal, so reply chains survive
+      // (PROTOCOL §4). The frame carries no timestamp and nothing reads the
+      // value — only whether there is one.
+      return withStream(current, room_id, (stream) => ({
+        ...stream,
+        messages: stream.messages.map((held) =>
+          held.id === id ? { ...held, body: "", deleted_at: held.deleted_at ?? Date.now() } : held,
+        ),
+      }));
+    }
+    case "reaction.update": {
+      // The only frame that names a message without naming its room, so the
+      // rooms we hold get searched. There are a handful of them, not hundreds.
+      const { message_id, key, count, user_ids } = frame.d;
+      const update: ReactionGroup = { key, count, user_ids };
+      let next = current;
+      for (const roomId of Object.keys(current.streams)) {
+        next = withStream(next, roomId, (stream) =>
+          stream.messages.some((held) => held.id === message_id)
+            ? {
+                ...stream,
+                messages: stream.messages.map((held) =>
+                  held.id === message_id
+                    ? { ...held, reactions: applyReaction(held.reactions, update) }
+                    : held,
+                ),
+              }
+            : stream,
+        );
+      }
+      return next;
+    }
     default:
       return current;
   }
@@ -246,6 +390,82 @@ export async function send(frame: ClientFrame): Promise<boolean> {
   if (!isTauri()) return false;
   const sent: boolean = await invoke("gateway_send", { frame });
   return sent;
+}
+
+// ---------------------------------------------------------------------------
+// Room history
+// ---------------------------------------------------------------------------
+
+/** Put one room's stream into the snapshot, creating it if it is new. */
+function putStream(roomId: RoomId, stream: RoomStream): void {
+  publish({ ...state, streams: { ...state.streams, [roomId]: stream } });
+}
+
+async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | null): Promise<void> {
+  const room = encodeURIComponent(roomId);
+  const range = before === null ? "" : `&before=${encodeURIComponent(before)}`;
+  let page: Message[];
+  try {
+    page = await api.get<Message[]>(`/rooms/${room}/messages?limit=${PAGE_SIZE}${range}`);
+  } catch {
+    // A page that didn't arrive doesn't need a state of its own. The status bar
+    // is already saying what is wrong, and the next scroll asks again.
+    const stream = state.streams[roomId];
+    if (connected === api && stream) putStream(roomId, { ...stream, loading: false });
+    return;
+  }
+  const stream = state.streams[roomId];
+  if (connected !== api || !stream) return;
+  putStream(roomId, {
+    messages: mergePage(stream.messages, page),
+    // A short page means the range scan ran out of room: this is the beginning.
+    atStart: page.length < PAGE_SIZE,
+    loading: false,
+  });
+}
+
+/**
+ * Open a room: take a place in the store first, then fetch the newest page.
+ *
+ * That order is the point. From the moment the room is in `streams`, live
+ * frames for it are kept, so a message posted while the first page is still on
+ * the wire is not lost — the two get folded together whichever way they land.
+ *
+ * Opening a room that is already loaded does nothing, which is what keeps its
+ * scrollback when you switch away and come back.
+ */
+export async function openRoom(api: AuthedApi, roomId: RoomId): Promise<void> {
+  if (connected !== api || state.streams[roomId]) return;
+  putStream(roomId, { messages: [], atStart: false, loading: true });
+  await fetchPage(api, roomId, null);
+}
+
+/** Fetch the page before the oldest message held. Safe to call repeatedly. */
+export async function loadOlder(api: AuthedApi, roomId: RoomId): Promise<void> {
+  const stream = state.streams[roomId];
+  if (connected !== api || !stream || stream.loading || stream.atStart) return;
+  const oldest = stream.messages[0];
+  putStream(roomId, { ...stream, loading: true });
+  await fetchPage(api, roomId, oldest?.id ?? null);
+}
+
+/**
+ * Post a message.
+ *
+ * The gateway sends the same message back as a frame, and merging is by id, so
+ * folding the POST's own answer in here can't double it up. Doing both means
+ * the message appears even when the socket is down and REST is fine.
+ *
+ * Failures are thrown, not swallowed: the composer is the only thing that knows
+ * what the person was typing, so it is the only thing that can tell them.
+ */
+export async function sendMessage(api: AuthedApi, roomId: RoomId, body: string): Promise<void> {
+  const request: CreateMessageRequest = { body, reply_to: null, attachment_ids: null };
+  const path = `/rooms/${encodeURIComponent(roomId)}/messages`;
+  const message = await api.post<Message>(path, request);
+  const stream = state.streams[roomId];
+  if (connected !== api || !stream) return;
+  putStream(roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
 }
 
 /** The status bar line (SPEC §5.6): protocol text, never a spinner. */

@@ -25,7 +25,11 @@
   grid-area: stream;
   display: flex;
   flex-direction: column;
+  /* Both minimums are load-bearing. A grid item's default `min-height: auto`
+     refuses to shrink below its content, so without this a long stream pushes
+     the composer and the status bar off the bottom of the window. */
   min-width: 0;
+  min-height: 0;
 }
 
 .stream-header {
@@ -41,9 +45,46 @@
   font-weight: 500;
 }
 
+.room-topic {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Density lives in the room header rather than behind a settings screen: it is
+   a way of looking at the stream, and you change it while looking at one. */
+.density {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.density-option {
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  color: var(--text-faint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.density-option:hover {
+  color: var(--text-secondary);
+}
+
+.density-option[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
 .stream-body {
   flex: 1;
   overflow-y: auto;
+  /* The virtualizer scrolls this element, so it owns the scrollbar and nothing
+     inside it may scroll on its own. */
   padding: var(--gutter);
 }
 
@@ -52,8 +93,14 @@
   border-top: 1px solid var(--hairline);
 }
 
+.composer-row {
+  display: flex;
+  gap: 8px;
+}
+
 .composer-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   background: var(--surface-2);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
@@ -64,6 +111,34 @@
 
 .composer-input::placeholder {
   color: var(--text-faint);
+}
+
+/* One of accent's four jobs: the send affordance (SPEC §5.3). */
+.composer-send {
+  flex: none;
+  background: none;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  padding: 0 12px;
+  cursor: pointer;
+  transition: border-color var(--motion-fast);
+}
+
+.composer-send:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.composer-send:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.composer-problem {
+  color: var(--text-secondary);
+  padding-bottom: 6px;
 }
 
 .roster {
@@ -110,6 +185,31 @@
 .roster-name {
   padding: 3px 0;
   color: var(--text-secondary);
+}
+
+.room-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  /* The active-room rule sits in the panel's own gutter, so switching rooms
+     moves a mark rather than shifting every name sideways. */
+  border-left: 2px solid transparent;
+  margin-left: calc(var(--gutter) * -1);
+  padding-left: calc(var(--gutter) - 2px);
+  font: inherit;
+  cursor: pointer;
+}
+
+.room-item:hover {
+  color: var(--text-primary);
+}
+
+/* The third of accent's four jobs: the active-room rule (SPEC §5.3). */
+.room-item[aria-current="true"] {
+  border-left-color: var(--accent);
+  color: var(--text-primary);
 }
 
 .roster-name {

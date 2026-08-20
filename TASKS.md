@@ -73,11 +73,14 @@ task fails its acceptance criteria twice.
 - ✅ **T-006 — the vocabulary change** (2026-08-19): the coined words are gone,
   ahead of M3 writing any UI copy. Full mapping and the presence-naming call are
   recorded under the task below.
-- ⬜ **M3 — client: message stream** — started. T-301 landed 2026-08-19 (sign in,
-  and stay signed in). T-302 landed 2026-08-19: the client holds a live gateway
-  connection from the Tauri core, survives the server being killed and restarted
-  with no user action, and resumes without gaps or duplicates against a real
-  server. **Next up: T-303, where the milestone check lives.**
+- ⬜ **M3 — client: message stream** — started, and **the milestone check
+  passes** (2026-08-20). T-301 landed 2026-08-19 (sign in, and stay signed in).
+  T-302 landed 2026-08-19: the client holds a live gateway connection from the
+  Tauri core, survives the server being killed and restarted with no user
+  action, and resumes without gaps or duplicates against a real server. T-303
+  landed 2026-08-20: the stream is real, two clients on one machine exchanged
+  messages in real time, and 10,000 messages of scrollback held 24–43 rows in
+  the DOM. **Next up: T-304 (composer + message actions), then T-305.**
 - ⬜ **M4 … M9** — queued below.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -586,7 +589,7 @@ test with real disconnects, not mocks.*
     a throwaway server at `http://127.0.0.1:8421` that no longer exists. The app
     will say it can't reach it on next launch — one "sign out" clears it.*
 
-- ⬜ **T-303 · The stream** — effort: **high**
+- ✅ **T-303 · The stream** — effort: **high**
   SPEC §4.7 + §5.6. Virtualized list **from day one**; author grouping (break
   10min); session breaks (3h) with natural-language dividers (`SATURDAY MORNING`
   mono small-caps); aging via one CSS custom property (body only, floor 78%);
@@ -594,6 +597,121 @@ test with real disconnects, not mocks.*
   Compact/IRC (IRC: one line/message, mono, no grouping/aging/effects).
   *Accept:* milestone check runs here: two clients exchange live messages;
   scrollback of 10k messages stays smooth (virtualization proof).
+
+  ### **Done 2026-08-20.** Both halves of the accept criterion were run for real.
+
+  *Two `linger-client` windows on one machine, signed in as different people
+  against a live `linger-server`, both looking at `#porch`. Matt typed, Callie's
+  window showed it and followed to the bottom; Callie replied, Matt's window
+  showed that. Neither window was touched in between — the messages arrived over
+  the gateway socket, not from a refetch.
+  [`docs/t303-two-clients.png`](docs/t303-two-clients.png) is the pair: Matt's
+  window on the left with both messages, Callie's on the right at the moment
+  Matt's arrived and pushed the view along.*
+
+  *For the second half, `#garage` was seeded with 10,000 messages spread over a
+  year (100 messages per HTTP round trip against a 10-per-10s send limit would
+  have taken three hours, so the rows went straight into SQLite with UUIDv7 ids
+  derived from their timestamps — the same shape the server writes). Scrolling
+  to the start of history pulled all of it in. With **10,001 messages loaded and
+  10,436 rows**, the list held **24–43 row elements in the DOM**, and the worst
+  frame during hard continuous scrolling (20 page-downs a second for 18 seconds)
+  was 28–38ms — the same as the worst frame sitting still in a 43-message room
+  on this machine. Scrolling ten thousand messages costs nothing measurable over
+  doing nothing. Screenshot at [`docs/t303-10k.png`](docs/t303-10k.png): the top
+  of a year of history, with the counts on the line above the composer. **That
+  readout was temporary instrumentation and is not in the code** — and the
+  `worstframe` in that particular frame is 45ms because it was taken while the
+  last page was still landing, which is the backfill cost noted below, not the
+  scrolling cost.*
+
+  ### What got built
+
+  - `client/src/stream/time.ts` — session labels, clock times, aging steps. Pure,
+    and takes `now` as an argument, because "yesterday afternoon" is only true
+    relative to a moment and that moment has to be testable.
+  - `client/src/stream/rows.ts` — messages in, rows out. Whether a message shows
+    its author's name depends on the message before it, and a session divider is
+    a row of its own; working that out in one place keeps the component down to
+    "draw row N" and gives the virtualizer a stable key per row.
+  - `client/src/stream/Stream.tsx` — the list, the header, the composer.
+  - `client/src/lib/gateway.ts` — the store now holds each open room's history.
+    History arrives two ways, as pages over REST and as frames over the socket,
+    and the two have to be stitched in one place.
+  - `client/src/lib/density.ts` — the preference. Local state, not a second
+    store: every difference between the three modes is a custom property in
+    `tokens.css`, except grouping, which CSS can't express.
+  - **A test runner.** T-302's note said the TS side would want vitest once it
+    grew; this is where it grew. 21 tests over the date arithmetic and the
+    grouping boundaries — the parts that look right and are wrong at 2am, on a
+    Sunday, or in March. CI runs `pnpm test`.
+
+  ### The three rules this ended up resting on
+
+  - ***Space between rows is padding, never margin.*** The virtualizer measures
+    each row's own box and a margin sits outside it, so margin is spacing it
+    cannot see. It shows up as a list that drifts while you scroll.
+  - ***A row's height is a guess until it has been drawn once.*** Anything that
+    scrolls to a position has to keep re-aiming as the real heights arrive.
+    Landing on the newest message is a per-frame loop, not a jump: a frame is the
+    beat because the browser reports a scroll asynchronously, so two jumps inside
+    one frame means the second is aiming with the first one's stale numbers. The
+    loop stops when the last row is actually drawn — *not* when the total size
+    stops growing, which holds still for a frame all the time while measurements
+    are still arriving. That wrong test cost an hour and landed the view a
+    quarter of the way up the room.
+  - ***A grid item will not shrink below its content unless told to.*** The
+    stream sat in a `1fr` grid track with no `min-height: 0`, so a long room
+    pushed the composer and the status bar off the bottom of the window. It only
+    showed up once there was something long to render.
+
+  ### Notes for whoever is next
+
+  - *The composer sends plain text and nothing else. Markdown, the sanitizer,
+    edit/delete/reply and reactions are **T-304** — but the accept criterion here
+    is two clients exchanging messages, so there had to be a way to say
+    something. It is an `<input>` and T-304 should replace it outright.*
+  - *Reaction frames are stored but nothing renders them. Same reason the store
+    holds a message's `reactions` at all: dropping `reaction.update` would let
+    our copy drift from the server's. Rendering weight is T-304.*
+  - *The per-person gutter rule and the author's name both point at
+    `var(--name-<key>, <neutral>)`. **M7 generates those variables** from
+    `linger-core::PALETTE` into `palette.generated.css`; until it does, both fall
+    back to something neutral and the stream lights up the moment that file
+    exists. Nothing in `client/` knows what "azure" looks like, and nothing
+    should. Font keys and name effects are M7's too, so a styled name currently
+    gets weight and italic only.*
+  - *`ready` now clears loaded history. A fresh `ready` means the client had to
+    re-identify, which means the resume window lapsed, which means there may be
+    messages it never saw — and a hole in the middle of a room is invisible in a
+    way an empty room is not. The open room refetches; it costs one request and a
+    scroll position.*
+  - *A backfill lands 100 messages at once, which costs one long frame (~45–65ms)
+    while the row list and the measurement cache are rebuilt. It is a hitch when
+    a page arrives, not while scrolling. If it ever needs fixing, the O(N) passes
+    are `buildRows` and the virtualizer's `getMeasurements`.*
+  - *Attachments render as nothing. There is no way to make one yet — uploads are
+    M6 — so there is nothing to render, but the branch will need writing.*
+  - *New dependency: `@tanstack/react-virtual` (~600KB of source, a few KB in the
+    bundle; total build is 245KB / 77KB gzipped, well inside AGENTS' 2MB rule).
+    Hand-rolling variable-height virtualization with anchored prepends is the
+    kind of code AGENTS' "where you will be wrong" table is about, and this
+    version has the chat case built in: `anchorTo: "end"` keeps your place when
+    history loads above you, `followOnAppend` follows a new message only when you
+    are already at the bottom.*
+  - *`SPEC.md` §4.7 and §5.6 disagreed about aging: §4.7 said the steps were
+    100/88/76/66, §5.6 said 100/88/78 with a floor at 78. The task text says
+    floor 78%, so §5.6 won and §4.7 now points at it instead of restating
+    different numbers. **If the four-step version was the intended one, this is
+    the line to change back** — it is one constant in `stream/time.ts` and one
+    test.*
+  - *The scrollback region takes `tabIndex={0}` so it can be scrolled without a
+    mouse. That adds a tab stop between the density picker and the composer.*
+  - *Testing needed the GUI driven and this box has no xdotool (Wayland). A
+    virtual keyboard over `/dev/uinput` worked; the scaffolding is throwaway and
+    is not in the repo. Worth knowing: keyboard scrolling in WebKitGTK is
+    animated, so synthetic key presses closer together than ~300ms coalesce and
+    scroll far less than a page each.*
 
 - ⬜ **T-304 · Composer + message actions** — effort: **medium**
   Markdown (allowlist sanitizer, **no raw HTML passthrough**), send affordance in

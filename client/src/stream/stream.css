@@ -1,0 +1,136 @@
+/*
+ * The message stream (SPEC §4.7, §5.6).
+ *
+ * No bubbles and no avatar column. Identity is a 3px colored rule down the left
+ * of a person's messages and their name in the group header — that is the whole
+ * mechanism, and it is why the density here is possible at all.
+ *
+ * Every gap is padding rather than margin. The virtualizer measures each row's
+ * own box, and a margin — collapsing, outside the box — is spacing it cannot
+ * see, which shows up as a list that drifts while you scroll.
+ */
+
+.stream-rows {
+  position: relative;
+  width: 100%;
+}
+
+.stream-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+/* The gap between groups. Zero in IRC mode, which sets --group-gap to 0. */
+.stream-row[data-head="true"] {
+  padding-top: var(--group-gap);
+}
+
+/* --- one message ------------------------------------------------------- */
+
+.msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 1px;
+}
+
+.msg-author {
+  color: var(--person-name);
+  font-size: var(--text-label-size);
+  line-height: 1.4;
+}
+
+.msg-body {
+  border-left: 3px solid var(--person-rule);
+  padding-left: 11px;
+  font-family: var(--font-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  /* Bodies are text, never markup: newlines and runs of spaces survive, and a
+     long unbroken URL wraps instead of pushing the panel wider. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Aging, set per message from its timestamp. Body only — the name and the
+     timestamp never fade (SPEC §5.6). */
+  opacity: var(--age, 1);
+  /* The app disables selection; a message is the one thing you copy out of. */
+  user-select: text;
+}
+
+.msg-edited {
+  margin-left: 6px;
+}
+
+.msg-gone {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* --- session dividers -------------------------------------------------- */
+
+.stream-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Real whitespace: a session break should read as time having passed. */
+  padding: calc(var(--group-gap) * 2) 0 var(--group-gap);
+}
+
+.stream-divider::before,
+.stream-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.divider-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* --- IRC mode ---------------------------------------------------------- */
+
+/*
+ * One line per message: a fixed-width timestamp gutter, the aligned nick column
+ * mIRC had, then the text. No grouping, no aging, no effects (SPEC §5.6).
+ * The gutter is fixed-width for free — mono type and a padded hour.
+ */
+[data-density="irc"] .msg-body {
+  display: flex;
+  gap: 8px;
+  border-left: 0;
+  padding-left: 0;
+  opacity: 1;
+}
+
+[data-density="irc"] .msg-time {
+  flex: none;
+}
+
+[data-density="irc"] .irc-name {
+  flex: none;
+  width: 12ch;
+  text-align: right;
+  color: var(--person-name);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-density="irc"] .irc-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+[data-density="irc"] .stream-divider {
+  padding: 10px 0;
+}
