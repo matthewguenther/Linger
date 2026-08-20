@@ -29,7 +29,8 @@ non-negotiable. Docs (`SPEC.md`, `ARCHITECTURE.md`, `PROTOCOL.md`) win over code
 cargo test --workspace          # core + server + activity; also regenerates TS bindings
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cd client && pnpm check         # typecheck frontend
-cd client && pnpm tauri dev     # system deps are installed on Matt's box
+cd client && pnpm tauri dev     # needs the GUI system deps listed in the README
+cd client/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 Environment quirks on the dev box, all already worked around — don't re-diagnose:

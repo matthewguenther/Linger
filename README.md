@@ -183,9 +183,16 @@ Things that surprise people the first time:
 - **pnpm comes from corepack** and the version is pinned in `client/package.json`. Run
   pnpm commands from inside the repo so it picks up the pin.
 - **`cargo test --workspace` skips the client shell**, for the same reason. Its tests
-  are `cd client/src-tauri && cargo test`. A few need a real desktop session (an
-  unlocked keyring, for one) and are marked `#[ignore]` — run those with
-  `cargo test -- --ignored` when you're sitting in front of the machine.
+  are `cd client/src-tauri && cargo test`, and CI runs them in the `tauri-shell` job.
+  A few need a real desktop session (an unlocked keyring, for one) and are marked
+  `#[ignore]` — run those with `cargo test -- --ignored` when you're sitting in front
+  of the machine.
+- **The WebSocket connection is not in the WebView.** It lives in the Tauri core
+  (`client/src-tauri/src/gateway.rs`) and sends the frontend two events: a connection
+  status and each sequenced server frame. The frontend has one store,
+  `client/src/lib/gateway.ts`, and no connection code at all. Reconnecting, resume, and
+  sequence accounting are Rust's problem, and they're covered by tests that talk to a
+  real socket.
 - **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
   keyring — Keychain, Credential Manager, or a Secret Service provider like
   gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app
@@ -199,6 +206,9 @@ Current work queue lives in [TASKS.md](TASKS.md).
 - **V2** — voice rooms, ambient voice, DMs, search, knock, mobile
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
 - **Last, on purpose** — local-AI features and the agent surface
+
+# the desktop shell — outside the workspace, so it needs its own pass
+cd client/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
   ([SPEC.md §8](SPEC.md)). Deliberately behind everything else: none of it starts
   until Linger has shipped as a real, working, signed release that people are
   actually using. The core product has to stand on its own first.

@@ -26,6 +26,23 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# The gateway client (ARCHITECTURE §1: the WebSocket lives here, not in the
+# WebView). rustls rather than native-tls so no box needs libssl headers to
+# build, and the `ring` provider rather than aws-lc-rs so none needs cmake or
+# nasm either. Roots come from the OS store, with the Mozilla bundle as a
+# backstop — the same certificates the WebView trusts for the REST calls, which
+# is what stops "HTTPS works but the gateway doesn't" from ever happening.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "io-util"] }
+tokio-tungstenite = { version = "0.29", features = [
+  "connect",
+  "handshake",
+  "rustls-tls-native-roots",
+  "rustls-tls-webpki-roots",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+rand = "0.9"
+
 # OS keyring for the refresh token (ARCHITECTURE §7.3). Features are picked per
 # platform on purpose:
 #

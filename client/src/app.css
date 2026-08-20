@@ -97,6 +97,25 @@
   font-weight: 500;
 }
 
+/* Room and people lists. Plain rows: no colored icon squares in the rail, no
+   avatar column in the roster (SPEC §5). T-303 and T-401 build on these. */
+.room-list,
+.roster-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.room-item,
+.roster-name {
+  padding: 3px 0;
+  color: var(--text-secondary);
+}
+
+.roster-name {
+  color: var(--text-primary);
+}
+
 .status-right {
   display: flex;
   align-items: center;

@@ -209,6 +209,13 @@ export class PublicApi {
 export interface Tokens {
   accessToken: string;
   refreshToken: string;
+  /** When the access token dies, in Unix milliseconds. */
+  expiresAt: number;
+}
+
+/** Turn the server's `expires_in` (seconds) into a moment we can compare to. */
+export function expiryOf(expiresIn: number): number {
+  return Date.now() + expiresIn * 1000;
 }
 
 /**
@@ -244,6 +251,22 @@ export class AuthedApi {
 
   get refreshToken(): string {
     return this.#tokens.refreshToken;
+  }
+
+  /**
+   * An access token good enough to hand to the gateway, refreshed first if it
+   * is about to expire. The gateway connection lives in the Tauri core and has
+   * no refresh token of its own — on purpose, since two parties spending a
+   * rotating refresh token revokes the family (PROTOCOL §2). This is the one
+   * door it comes through.
+   *
+   * `force` is for the case where the server refused a token that had not
+   * expired yet, which happens when a server comes back with new signing keys.
+   */
+  async accessToken(force = false): Promise<{ token: string; expiresAt: number }> {
+    const soon = Date.now() + 60_000;
+    if (force || this.#tokens.expiresAt <= soon) await this.#refresh();
+    return { token: this.#tokens.accessToken, expiresAt: this.#tokens.expiresAt };
   }
 
   get<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -299,6 +322,7 @@ export class AuthedApi {
         this.#tokens = {
           accessToken: fresh.access_token,
           refreshToken: fresh.refresh_token,
+          expiresAt: expiryOf(fresh.expires_in),
         };
         this.#onTokens(this.#tokens);
       } catch (error) {
