@@ -6,14 +6,15 @@
  * that is. Nothing about the account is cached locally, so a name or style
  * changed on another device is right the moment the app opens.
  *
- * AGENTS allows local state plus one gateway store. This is local state — the
- * gateway store arrives with T-302.
+ * AGENTS allows local state plus one gateway store. This is the local half; the
+ * gateway store is `./gateway.ts`. The split is deliberate — who you are outlives
+ * any one connection, and the connection is not this file's business.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AuthResponse } from "../generated/AuthResponse";
 import type { User } from "../generated/User";
-import { ApiError, AuthedApi, PublicApi, type Tokens } from "./api";
+import { ApiError, AuthedApi, expiryOf, PublicApi, type Tokens } from "./api";
 import { clearSession, loadSession, saveSession } from "./ipc";
 
 export type SessionState =
@@ -66,7 +67,11 @@ async function restore(): Promise<Restored> {
     const fresh = await new PublicApi(baseUrl).refresh({ refresh_token: refreshToken });
     await saveSession({ base_url: baseUrl, refresh_token: fresh.refresh_token });
     return {
-      tokens: { accessToken: fresh.access_token, refreshToken: fresh.refresh_token },
+      tokens: {
+        accessToken: fresh.access_token,
+        refreshToken: fresh.refresh_token,
+        expiresAt: expiryOf(fresh.expires_in),
+      },
       baseUrl,
       keyringNotice: null,
       notice: null,
@@ -154,6 +159,7 @@ export function useSession(): Session {
       const tokens: Tokens = {
         accessToken: auth.access_token,
         refreshToken: auth.refresh_token,
+        expiresAt: expiryOf(auth.expires_in),
       };
       const stored = await saveSession({
         base_url: baseUrl,

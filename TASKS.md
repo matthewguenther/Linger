@@ -73,16 +73,22 @@ task fails its acceptance criteria twice.
 - ✅ **T-006 — the vocabulary change** (2026-08-19): the coined words are gone,
   ahead of M3 writing any UI copy. Full mapping and the presence-naming call are
   recorded under the task below.
-- ⬜ **M3 — client: message stream** — started. T-301 landed 2026-08-19:
-  the client can sign in, and stays signed in across restarts. **Next up: T-302.**
+- ⬜ **M3 — client: message stream** — started. T-301 landed 2026-08-19 (sign in,
+  and stay signed in). T-302 landed 2026-08-19: the client holds a live gateway
+  connection from the Tauri core, survives the server being killed and restarted
+  with no user action, and resumes without gaps or duplicates against a real
+  server. **Next up: T-303, where the milestone check lives.**
 - ⬜ **M4 … M9** — queued below.
+- 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
+  agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
+  rule 13 is the enforceable version. Do not build any of it back.
 
-**The one thing that bit us in T-301, worth knowing before T-302:** a webview
-page is a cross-origin caller, so the server had to start sending CORS headers
-before the client could read a single response. The allowed origins are a fixed
-list in `crates/linger-server/src/routes/mod.rs`. The gateway WebSocket is *not*
-subject to CORS, so T-302 won't hit this — but if a future browser-side call
-mysteriously "can't reach the server", that list is the first place to look.
+**The one thing that bit us in T-301:** a webview page is a cross-origin caller,
+so the server had to start sending CORS headers before the client could read a
+single response. The allowed origins are a fixed list in
+`crates/linger-server/src/routes/mod.rs`. The gateway WebSocket is *not* subject
+to CORS and T-302 confirmed that — but if a future browser-side call mysteriously
+"can't reach the server", that list is the first place to look.
 
 Two decisions M5/M7 no longer have to make: **use `oklch()` directly** (WebKitGTK
 2.52.3 supports it, T-002), and **T-503's Win32 backend is a known quantity**
@@ -491,7 +497,7 @@ test with real disconnects, not mocks.*
   - *The generated TypeScript did not drift, so nothing in
     `client/src/generated/` changed.*
 
-- ⬜ **T-302 · Gateway client in Rust core** — effort: **high**
+- ✅ **T-302 · Gateway client in Rust core** — effort: **high**
   ARCHITECTURE §1: the WS client lives in the Tauri core, not the WebView.
   Connect/identify/heartbeat/resume/backoff(jittered, capped); emits Tauri events
   to the frontend; one Zustand-free store on the TS side (AGENTS: local state +
@@ -499,6 +505,86 @@ test with real disconnects, not mocks.*
   `connecting… tls ok… identify… ready (28ms)`.
   *Accept:* kill the server, restart it, client resumes or re-identifies with no
   user action; status text follows the states.
+
+  ### **Done 2026-08-19.** The accept path was run for real, twice over.
+
+  *A live `linger-server` was SIGKILLed under a connected client. The status bar
+  went `ready (0ms)` → `retry in 7s…` → `ready (4ms)` with nothing touched:
+  screenshots at [`docs/t302-connected.png`](docs/t302-connected.png) and
+  [`docs/t302-status-states.png`](docs/t302-status-states.png). Under the hood the
+  client tried `resume` first, got `invalid_session` from the restarted process,
+  and re-identified immediately.*
+
+  ### **Resume was proved against the real server, not just a fake one.**
+
+  *The harder half of the accept criterion is resume that actually resumes, which
+  a killed server can never show — its sessions die with it. So the client was
+  pointed at a `socat` proxy in front of a live server, and the proxy was killed
+  mid-stream while messages kept being posted over REST. The client reconnected,
+  sent `resume` with its last sequence number, and the server replayed. The
+  frontend saw **s = 0,1,2,3,4,5,6,7,8,9 — each exactly once, in order**, with
+  the three messages sent during the outage arriving in the replay. No gaps, no
+  duplicates, against real `linger-server` code.*
+
+  ### What got built
+
+  - `client/src-tauri/src/gateway.rs` — the whole connection. It knows nothing
+    about Tauri: status changes and frames go out through an `Events` trait that
+    `lib.rs` implements with `AppHandle::emit` and the tests implement with a
+    channel. That is what makes it testable over a real socket.
+  - `client/src-tauri/tests/gateway_client.rs` — 11 tests, each standing up an
+    actual TCP listener and speaking the protocol at the client. The disconnects
+    are RSTs (`set_linger(0)`), not polite closes, per AGENTS' "test with real
+    disconnects, not mocks".
+  - `client/src/lib/gateway.ts` — the one store, ~80 lines of subscribe-and-notify
+    behind `useSyncExternalStore`. No state library, per AGENTS.
+  - The status bar is live, the rail lists real rooms, and the roster lists whoever
+    is around. Both lists are deliberately plain — T-303 and T-401 replace them.
+
+  ### The three rules this ended up resting on
+
+  - ***Frames with a sequence number belong to the frontend; frames without one
+    stay in Rust.*** `hello`, `heartbeat_ack`, `resumed`, `invalid_session` are
+    connection plumbing and never reach the WebView. `ready` does, because it
+    carries the roster and rooms.
+  - ***The frontend owns tokens.*** The Rust side has no refresh token on purpose
+    — two parties spending a rotating one revokes the family (PROTOCOL §2). When
+    the server refuses a token, Rust emits `needs_token` and waits; the TS side
+    answers through `AuthedApi.accessToken()`, which is single-flight. `AuthedApi`
+    now tracks expiry, so `Tokens` gained an `expiresAt` field.
+  - ***Believe the server about sequence numbers, but check.*** A replayed frame
+    at or below the high-water mark is dropped, and a *gap* forces a full
+    re-identify rather than being papered over — the same trade the server makes
+    when its bus lags. Both have tests.
+
+  ### Notes for whoever is next
+
+  - *`connect_async` is one call for TCP + TLS + the WS handshake, so the status
+    bar can't show a state between them. It shows `tls ok…` for `wss://` and
+    `socket ok…` for a plain `ws://` server on your own machine — SPEC §5.6's
+    example sequence, minus the lie about a TLS handshake that never happened.*
+  - *`gateway_send(frame)` exists and is typed off the generated `ClientFrame`,
+    but nothing calls it yet. T-402 (`room.focus`) and T-304 (`typing.start`) are
+    its first users; a send while disconnected returns `false` rather than
+    queueing, because stale presence is worse than none.*
+  - *The store ignores `message.*` frames today — they arrive and are dropped on
+    purpose rather than half-stored. T-303 adds them.*
+  - *New deps in `client/src-tauri`: `tokio-tungstenite` + `rustls` (ring
+    provider, OS trust store with the Mozilla bundle as backstop), `futures-util`,
+    `rand`. rustls rather than native-tls so nobody needs libssl headers; ring
+    rather than aws-lc-rs so nobody needs cmake or nasm. A WS client is required
+    by ARCHITECTURE §1, so this is not a bundle-size judgment call — but it is
+    ~1MB of binary, worth knowing before M8.*
+  - *CI now **runs clippy and the tests** on the shell instead of just
+    `cargo check`ing it (`tauri-shell` job). The root clippy job can't see this
+    crate — it is outside the workspace on purpose — and clippy caught three real
+    findings in this task's code, so the gap was worth closing. Costs a check
+    pass plus a link step per run.*
+  - *No frontend test runner still. The TS half here is small and was checked by
+    watching the real app; if `client/src` grows much past this it wants vitest.*
+  - *One local side effect of testing: this box's keyring now holds a session for
+    a throwaway server at `http://127.0.0.1:8421` that no longer exists. The app
+    will say it can't reach it on next launch — one "sign out" clears it.*
 
 - ⬜ **T-303 · The stream** — effort: **high**
   SPEC §4.7 + §5.6. Virtualized list **from day one**; author grouping (break

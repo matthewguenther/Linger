@@ -20,13 +20,41 @@ product specification.
 
 ## 🧭 Why this exists
 
-Discord's interface is built for a stadium of 50,000 strangers. Linger is built for a
-dinner party of eight. Every feature decision resolves against three principles, in
-order:
+The big chat platforms are built for a stadium of fifty thousand strangers. Linger is
+built for a dinner party of eight. Every feature decision resolves against three
+principles, in order:
 
 1. **Presence over messages.** The app should feel alive when nobody is typing.
 2. **Remove obligation.** No counters, no streaks, no red dots, no "you're behind."
 3. **Keep the artifact.** Photos, clips, links, and jokes don't scroll away into nothing.
+
+## 🏠 The case for running your own
+
+There was a stretch of the internet where a group of friends just *had* a place. Somebody
+ran it. You knew who that was, you could ask them for things, and the whole arrangement
+was a few files on a machine somebody owned. Then everyone moved into one enormous
+building owned by a company, and the terms changed:
+
+- **Your conversations sit on someone else's disk, and the company's business depends on
+  what it can learn from them.** You are not the customer.
+- **Features get held back and sold back to you.** The free experience gets a little
+  worse on purpose, because friction is what makes an upsell work. That is not a bug in
+  the design... it *is* the design.
+- **There's a storefront in the middle of your conversation**, selling cosmetics and
+  subscriptions nobody asked for.
+- **The product changes under you** whenever a growth target does, and nobody asks.
+
+Linger is the other arrangement. One person runs a server for their friends. The whole
+thing is one binary, one SQLite file, and a folder of uploads — you can back it up, move
+it to another box, read it with off-the-shelf tools, or walk away with all of it. There
+is no account that spans servers, no directory, no company in the middle.
+
+And there is nothing to sell you, structurally: no paid tier, no store, no cosmetics, no
+premium anything, and none of it held back for later. It's AGPL-3.0, so if someone runs a
+modified server for other people, those people get the source. **Zero telemetry** — not
+opt-in, not anonymous, not crash reports.
+
+This is not an attempt to build a better platform. It's an attempt to not need one.
 
 ## 🗣️ Vocabulary
 
@@ -66,7 +94,8 @@ These terms are used everywhere — UI, code, docs, error messages:
 
 XP, levels, streaks, or engagement metrics. Federation. A bot marketplace. A
 role/permission matrix. Threads. `@everyone`. Algorithmic ordering. Unread badges.
-**Telemetry or analytics of any kind.** AI participants in the conversation.
+**Telemetry or analytics of any kind.** A paid tier, a store, or anything else to sell
+you.
 
 The scope discipline is the product.
 
@@ -89,19 +118,23 @@ Other privacy properties that *are* guaranteed:
 
 ## 🤖 The AI stance
 
-**No AI in the conversation.** No AI participants, no suggested replies, no sentiment
-analysis — ever. The planned features (semantic search over history and media, catch-up
-summaries, transcription/alt-text) run **only against a host-configured local endpoint**
-(Ollama-compatible). No cloud default, no cloud fallback; if no endpoint is configured,
-the features don't appear at all.
+**None. No AI features anywhere in Linger.** No participants, no suggested replies, no
+drafting, no sentiment analysis, no summaries, no semantic search, no transcription, and
+no model endpoint — not even a local one.
 
-They are also **the last thing on the roadmap**, on purpose. Nothing here gets built
-until Linger has shipped as a real, working release. A chat app that needs AI to be
-worth using is a chat app that failed at being a chat app.
+An earlier draft of the spec planned a set of local-only, opt-in features for after V1
+shipped. That's cut. Standing up a model alongside a chat app for eight friends is a real
+cost pushed onto whoever is hosting, for something nobody asked for — and a "local only"
+promise is one bad afternoon away from becoming an API key and your friends' messages
+leaving the box. Not having the feature is the only version of that promise that can't
+rot.
 
-A self-hosted Linger server can run all of this on the box. A hosted competitor
-structurally cannot — their version requires shipping your friends' conversations to
-a third party.
+There's also a simpler reason. The value of a friend replying is that a person chose to
+spend attention on you. Put something in the room that also replies and every reply gets
+cheaper, because you can no longer tell what was chosen.
+
+If it's ever revisited it'll be a deliberate decision, written down in
+[SPEC.md §8](SPEC.md) with the reasoning, not a thing that quietly appears in a release.
 
 ## 🚀 Running a server
 
@@ -166,6 +199,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cd client && pnpm check && pnpm exec vite build
+
+# the desktop shell — outside the workspace, so it needs its own pass
+cd client/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 Things that surprise people the first time:
@@ -183,9 +219,16 @@ Things that surprise people the first time:
 - **pnpm comes from corepack** and the version is pinned in `client/package.json`. Run
   pnpm commands from inside the repo so it picks up the pin.
 - **`cargo test --workspace` skips the client shell**, for the same reason. Its tests
-  are `cd client/src-tauri && cargo test`. A few need a real desktop session (an
-  unlocked keyring, for one) and are marked `#[ignore]` — run those with
-  `cargo test -- --ignored` when you're sitting in front of the machine.
+  are `cd client/src-tauri && cargo test`, and CI runs them in the `tauri-shell` job.
+  A few need a real desktop session (an unlocked keyring, for one) and are marked
+  `#[ignore]` — run those with `cargo test -- --ignored` when you're sitting in front
+  of the machine.
+- **The WebSocket connection is not in the WebView.** It lives in the Tauri core
+  (`client/src-tauri/src/gateway.rs`) and sends the frontend two events: a connection
+  status and each sequenced server frame. The frontend has one store,
+  `client/src/lib/gateway.ts`, and no connection code at all. Reconnecting, resume, and
+  sequence accounting are Rust's problem, and they're covered by tests that talk to a
+  real socket.
 - **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
   keyring — Keychain, Credential Manager, or a Secret Service provider like
   gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app
@@ -195,13 +238,13 @@ Current work queue lives in [TASKS.md](TASKS.md).
 
 ## 🗺️ Roadmap
 
-- **V1** — replaces the text half of Discord for one friend group (see [SPEC.md §6](SPEC.md))
+- **V1** — replaces the text half of a big chat platform for one friend group
+  (see [SPEC.md §6](SPEC.md))
 - **V2** — voice rooms, ambient voice, DMs, search, knock, mobile
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
-- **Last, on purpose** — local-AI features and the agent surface
-  ([SPEC.md §8](SPEC.md)). Deliberately behind everything else: none of it starts
-  until Linger has shipped as a real, working, signed release that people are
-  actually using. The core product has to stand on its own first.
+
+There is no AI phase. It was on this list once; it was cut
+([SPEC.md §8](SPEC.md)).
 
 ## 📜 License
 
