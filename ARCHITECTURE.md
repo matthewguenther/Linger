@@ -472,7 +472,8 @@ passes its check.
 | **M1** | Server: auth, invites, rooms, messages | Integration test suite drives the full REST surface with `reqwest`. No UI yet. | 2–3 days |
 | **M2** | Gateway: WS, heartbeat, sequence numbers, resume | Test client survives a forced disconnect mid-stream and replays without gaps or duplicates | 2 days |
 | **M3** | Client: message list, composer, session grouping, aging, density modes | Two clients on one machine exchange messages in real time | 4–5 days |
-| **M4** | Presence + roster + in-room state + entrance sounds | Roster updates live across two clients; sounds play and respect mutes | 3 days |
+| **M4** | Presence + roster + in-room state + statuses | Roster updates live across two clients; a status set on one shows up on the other | 2 days |
+| **M4.5** | Host controls (rooms, invites, server settings), member settings, the server list | A host who has only seen the app can create a server, add a room, invite a friend, and rename the server — no curl, no docs | 2–3 days |
 | **M5** | Activity detection: Windows, X11, KDE/Wayland, macOS | Foreground app appears in the roster on Kubuntu/Plasma 6 Wayland and on Windows | 3–5 days |
 | **M6** | Uploads, media pipeline, the media collection | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
 | **M7** | Styling: names, statuses, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
@@ -485,6 +486,15 @@ Windows. If that is pleasant, the project is real. If Wayland eats the whole eve
 have learned the most important thing about the timeline for the cost of one night, and
 can decide whether activity detection is worth it or whether this is a very good
 self-hosted chat app without it.
+
+**Entrance sounds moved to the end of the queue** (Matt, 2026-08-21). They are still
+V1 (SPEC §6, item 4) — they are simply the last thing built, after M9, and M4's check
+no longer waits on them. `TASKS.md` holds them under *Backburner*.
+
+**M4.5 was added on 2026-08-21**, after the client turned out to have no way to create
+a room, invite anybody, or edit the server — every endpoint for all three has existed
+since M1 with nobody calling it. It also carries the server list from §3 of the spec
+(V1 item 17), which had never been given a task at all.
 
 M8 is not interesting and cannot be skipped. macOS notarization in particular is a
 tedious, version-sensitive slog. Budget the full estimate.

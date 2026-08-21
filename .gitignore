@@ -11,8 +11,12 @@ client/dist/
 # Tauri generated schemas
 client/src-tauri/gen/schemas/
 
-# Local data: a server's entire state lives here — never commit it
+# Local data: a server's entire state lives here — never commit it.
+# `/data/` is where the server writes when you run it from the repo root;
+# `client/data/` is where it lands if you run it from `client/`, and that
+# directory holds the JWT signing key.
 /data/
+/client/data/
 *.db
 *.db-wal
 *.db-shm

@@ -62,7 +62,11 @@ linger.example                         no path: sign in to an existing account
 
 `username`: `[a-z0-9_]{2,24}`, unique, immutable after creation.
 `display_name`: 1–32 chars, mutable.
-`password`: minimum 12 characters. Do not impose composition rules.
+`password`: minimum 8 characters. Do not impose composition rules, do not expire
+passwords, and do not ask for a hint. The floor was 12 until 2026-08-21; it came
+down because the client remembers the password in the OS keyring, so the length
+was friction paid on every fresh install and bought very little. 8 with no
+composition rules is the NIST SP 800-63B floor and the honest answer here.
 
 Refresh-token reuse (presenting an already-rotated token) revokes the token's whole
 family — every token descended from the same login — and forces re-login on that

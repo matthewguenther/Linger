@@ -49,13 +49,16 @@ pub fn display_name(s: &str) -> Result<(), ApiError> {
 }
 
 /// Minimum length only — composition rules are explicitly banned (PROTOCOL §2).
+///
+/// The message counts off the constant rather than spelling the number out, so
+/// lowering the floor cannot leave the copy claiming the old one.
 pub fn password(s: &str) -> Result<(), ApiError> {
     if s.chars().count() >= MIN_PASSWORD_CHARS {
         Ok(())
     } else {
-        Err(ApiError::validation(
-            "Passwords need at least 12 characters.",
-        ))
+        Err(ApiError::validation(format!(
+            "Passwords need at least {MIN_PASSWORD_CHARS} characters."
+        )))
     }
 }
 

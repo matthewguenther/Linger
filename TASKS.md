@@ -86,14 +86,21 @@ task fails its acceptance criteria twice.
   milestone: a "you left off here" line, rooms that change weight instead of
   wearing a number, a "since you were gone" view you pull from the header, and
   the one notification the product allows.
-- ⬜ **M4 — presence, roster, entrance sounds** — started. T-401 landed
+- ⬜ **M4 — presence, roster, statuses** — started. T-401 landed
   2026-08-21: the roster is the card stack the product is about, it moves live
   across clients, and on a narrow window it becomes a strip above the composer
   instead of hiding. **T-402 landed 2026-08-21: focusing a room puts you in it,
   90 seconds of background or sitting still takes you out, ten minutes with no
   input is idle, and occupancy is names in the header and a small stack on the
-  rail.** Next up: T-403 (entrance sound playback).
+  rail.** Verified independently on 2026-08-21: 158 client tests, 124 workspace
+  tests, `pnpm check` clean, no binding drift. **Only T-405 is left in M4** —
+  the entrance-sound tasks moved to the Backburner (below).
+- ⬜ **M4.5 — the shell's missing surfaces** — new, added 2026-08-21. There is no
+  way to add a room from inside the client, no invite screen, no server settings,
+  no member settings, and no server list. T-410, T-411, T-412.
 - ⬜ **M5 … M9** — queued below.
+- ⏬ **Backburner (after M9)** — entrance sounds: T-403, T-404, T-408. Matt's
+  call, 2026-08-21. Still V1, just last.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
   rule 13 is the enforceable version. Do not build any of it back.
@@ -1072,9 +1079,15 @@ test with real disconnects, not mocks.*
     `pnpm dev` window goes quiet after you edit the store, reload it before you
     go looking for a bug.**
 
-## M4 — presence, roster, entrance sounds
+## M4 — presence, roster, statuses
 
-*Milestone check: roster updates live across two clients; sounds play and respect mutes.*
+*Milestone check: roster updates live across two clients, and a status set on one
+shows up on the other.*
+
+**Entrance sounds moved out on 2026-08-21** (Matt). T-403, T-404 and T-408 are the
+last three things on the list now — see *Backburner* near the end of this file.
+The sounds are still V1 (SPEC §6, item 4); they are just not what is in the way.
+M4 therefore finishes on T-405, and its check no longer mentions sound.
 
 - ✅ **T-401 · The roster** — effort: **high** *(landed 2026-08-21)*
   SPEC §3. Card stack, not a name list: styled name, presence dot, room, activity
@@ -1221,20 +1234,89 @@ test with real disconnects, not mocks.*
     checked with a second gateway client sitting in `#garage`: `room.enter`,
     occupancy of one, `presence.update` `in_room`. The header and the rail
     stack light up from those same frames.
-- ⬜ **T-403 · Entrance sound playback** — effort: **medium**
-  SPEC §4.1. Play on `room.enter` for those in the room; per-user cooldown
-  5min/listener;
-  global + per-user mute; quiet hours 22:00–08:00 listener-local default-on;
-  picker UI for bundled sounds.
-- ⬜ **T-404 · Custom sound upload** — effort: **medium**
-  Server: accept ≤2s/≤200KB, transcode to Opus + loudness-normalize (−16 LUFS),
-  **reject long files, never truncate**. Needs ffmpeg in the Docker image — add it.
 - ⬜ **T-405 · Statuses + away UI** — effort: **medium**
   SPEC §4.6. Status editor (line 240, three labeled fields, image ≤512KB at
   400×200), away message supersedes; roster + popover rendering.
-- ⬜ **T-408 · Curate the bundled sounds** — effort: **low** *(Matt-assisted, taste required)*
-  12–16 sounds per `assets/sounds/README.md` rules; `ffmpeg -af loudnorm=I=-16`
-  for normalization; fill the source/license table.
+
+## M4.5 — the parts of the shell nobody has built yet
+
+*Added 2026-08-21, after Matt tried to add a room to a live server and found there
+was no button. Nothing in M0–M4 ever built a way to run a server from inside the
+client, and the server rail in SPEC §3 has never existed at all.*
+
+*Milestone check: a host who has only ever seen the app can create a server, add a
+second room, invite a friend, and rename the server — without curl and without
+reading the docs.*
+
+**Every REST endpoint these tasks need already exists and already has an
+integration test** (T-103, T-104, T-106). This is UI over a finished server: no
+protocol changes, no new wire types, no schema work. If one of these tasks finds
+itself editing `linger-core`, something has gone wrong — stop and ask.
+
+- ⬜ **T-410 · Host controls: rooms, invites, the server itself** — effort: **high**
+  The host's side of the sweep. Everything here is host-only and must be *absent*,
+  not disabled-and-greyed, for a member — a greyed-out control is a role matrix
+  drawn in CSS (AGENTS rule 10, SPEC §2 anti-goals).
+  - **Rooms.** `+ room` on the rail: slug, name, optional topic. Rename and set the
+    topic (`PATCH /rooms/{id}`), archive (`POST /rooms/{id}/archive`), and reorder
+    by `position`. Slug rules and errors come from the server, not a second copy of
+    the regex in TypeScript.
+  - **Invites.** Create, list, revoke (`/invites`). The screen's whole job is to
+    produce a link the host can paste into a text message, so: one obvious copy
+    button, the expiry and use-count in plain words, and revoked ones visibly dead.
+    The link shapes are written down in PROTOCOL §2.2 — use those, do not invent a
+    format.
+  - **The server.** Name and accent key (`PATCH /server`). Accent is a palette key
+    picked from `linger-core::PALETTE`, never a hex field (AGENTS rules 8 and 12).
+  - *Accept:* on a real server, from a fresh host account: make a room, post in it,
+    rename it, archive it and watch it leave the rail; make an invite, register a
+    second account through it, revoke a second invite and watch it stop working;
+    rename the server and see the rail change without a reload.
+  - *Note:* archiving is the only delete this product has. The rail already filters
+    `archived_at`, so an archived room disappears; do not add a "deleted" state.
+
+- ⬜ **T-411 · The member's sweep: settings, empty states, first five minutes** — effort: **medium**
+  The other half, for somebody who is not the host. There is no settings surface in
+  the client at all right now — display name, password, and density all live either
+  nowhere or in a corner of the status bar.
+  - **A settings surface.** Display name and username (`PATCH /me`), change password
+    (`PATCH /me/password`), density mode (already built, currently only reachable
+    from the stream header), sign out. One panel, Console styling, no modal stack.
+  - **Empty and error states, read end to end.** "This server has no rooms yet" is
+    the only one that exists. Walk the whole first run as a new member — paste an
+    invite, register, land in a server, find the rooms, find the roster, find
+    yourself — and fix every dead end and every piece of copy that assumes you
+    already know how the app works.
+  - **Keyboard and focus.** Every control this milestone adds is reachable and
+    operable without a mouse, and focus rings are the one shadow SPEC §5.1 allows.
+  - *Accept:* a person who has not seen the app gets from a pasted invite link to a
+    posted message with no verbal instructions, and can change their display name
+    and see it update in the roster on the other client.
+  - *Note for whoever runs this:* resist inventing new surfaces. The fix for most of
+    these is a sentence of copy or a button in a place that already exists.
+
+- ⬜ **T-412 · The server list (SPEC §3, V1 item 17)** — effort: **high**
+  SPEC §3's layout has a `SERVERS` rail — `● home / ○ work / + add` — and SPEC §6
+  lists "multi-server list in the client" as V1 item 17. **None of it exists.** The
+  client holds exactly one server today: one `baseUrl` in `session.ts`, one keyring
+  entry, one gateway connection in the Tauri core.
+  - Sessions become a list: one keyring entry per server, each with its own tokens,
+    its own account, its own `baseUrl`. Signing out of one must not touch the others.
+  - The Tauri core holds a connection per server, not a global one. Presence, the
+    read-marker map, notify rules and the notifier are all currently module-level
+    singletons in the WebView — they have to become per-server, or the second server
+    will quietly overwrite the first one's state.
+  - The rail lists servers with a live dot; `+ add` is the paste box that already
+    exists (T-301), just reachable from inside the app instead of only before sign-in.
+  - *Accept:* signed into two servers at once, in one window: both dots live, switch
+    between them and the rooms, stream, roster and presence all follow; a message on
+    the background server marks its dot without a count anywhere (SPEC §4.2, AGENTS
+    rule 3); kill one server and the other is unaffected.
+  - **This is the expensive one on the list.** It is a refactor of session, gateway
+    and presence ownership, not a screen. It is also the one V1 feature with no
+    task at all until now, which is why it is written down here rather than left to
+    be discovered again at M8. If the budget is tight, T-410 and T-411 are what make
+    the app usable; this one makes it match the spec.
 
 ## M5 — activity detection
 
@@ -1343,6 +1425,55 @@ current vendor docs, not memory (AGENTS.md).*
   `media.md` index. Job progress endpoint; download via the media origin.
   *Accept:* export a seeded server, unzip, spot-check messages/media; second
   request within the hour gets `RATE_LIMITED`.
+
+---
+
+## Backburner — entrance sounds, last on the list
+
+*Moved here 2026-08-21 by Matt. These three are still V1 (SPEC §6, item 4) and the
+server already fans out `room.enter` to exactly the right people (T-203). They are
+simply the lowest-value thing left, so they go after M9 rather than in the middle of
+M4. Anything that lands before them must not break the frames they rely on.*
+
+- ⬜ **T-403 · Entrance sound playback** — effort: **medium**
+  SPEC §4.1. Play on `room.enter` for those in the room; per-user cooldown
+  5min/listener;
+  global + per-user mute; quiet hours 22:00–08:00 listener-local default-on;
+  picker UI for bundled sounds.
+- ⬜ **T-404 · Custom sound upload** — effort: **medium**
+  Server: accept ≤2s/≤200KB, transcode to Opus + loudness-normalize (−16 LUFS),
+  **reject long files, never truncate**. Needs ffmpeg in the Docker image — add it.
+- ⬜ **T-408 · Curate the bundled sounds** — effort: **low** *(Matt-assisted, taste required)*
+  12–16 sounds per `assets/sounds/README.md` rules; `ffmpeg -af loudnorm=I=-16`
+  for normalization; fill the source/license table.
+
+---
+
+## Decided — the password stays, the friction goes
+
+**Matt, 2026-08-21.** The question was whether a locally-run server needs a
+password at all, since Ventrilo asked for a name and nothing else. Answer: keep
+it, but stop making people think about it.
+
+The password is not protecting the messages — it is protecting *being you*. The
+roster is the product, and the documented deployment is a box on the open
+internet (ARCHITECTURE §7), so name-only would mean anyone who ever received an
+invite link can connect as anybody. What was actually annoying was the
+**12-character floor**, which is friction paid on every fresh install and buys
+very little when the client already keeps the password in the OS keyring.
+
+**Done in the same pass:** the floor is now **8**, which with no composition
+rules is the NIST SP 800-63B position. One constant,
+`linger-core::limits::MIN_PASSWORD_CHARS`; the server's error message counts off
+it instead of spelling the number out, and the two client forms mirror it the
+same way `Stream.tsx` mirrors `MAX_MESSAGE_CHARS`. PROTOCOL §2 says 8 and says
+why.
+
+The two bigger options were considered and **not** taken: making the invite link
+itself the credential (a real change to PROTOCOL §2 and the refresh-token family
+logic), and a host-set no-auth LAN mode (honest for a LAN party, dangerous the
+day the box gets a public IP). If the friction comes back, those are the next
+two rungs, in that order.
 
 ---
 
