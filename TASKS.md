@@ -854,13 +854,13 @@ test with real disconnects, not mocks.*
     `reaction.update` frame is the truth and usually beats the HTTP response
     back; a refusal puts the old group back, which only matters when the socket
     is down.
-  - *`linger-core::REACTIONS` still carries a "confirm the set with Matt"
-    note.* This task ships them as they stand — heart, laugh, wow, cry, fire,
-    skull, up, down, eyes, clap, hundred, sparkles. **Changing the set is a
-    one-line change in `lib.rs` and one in `reactions.ts`**, and a test reads
-    the Rust constant and fails if the two lists drift, so it is safe to
-    revisit. Existing rows in the `reactions` table would keep a key nobody
-    draws; the client skips a key it does not know rather than guessing.
+  - ***The twelve reaction keys are confirmed*** (Matt, 2026-08-20): heart,
+    laugh, wow, cry, fire, skull, up, down, eyes, clap, hundred, sparkles. The
+    "provisional curation" note in `linger-core` is gone. They are written into
+    `reactions` rows from here on, so **changing one is a migration, not an
+    edit** — adding a thirteenth is the safe direction, because a client skips a
+    key it does not know rather than guessing. A test reads the Rust constant
+    and fails if `reactions.ts` drifts from it.
   - *`MAX_MESSAGE_CHARS` is written out in `Stream.tsx` as 8000.* ts-rs exports
     types, not constants, so there is no generated home for it. The server is
     still the authority and refuses anything longer; the copy exists so the
