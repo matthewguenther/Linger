@@ -36,7 +36,12 @@ pub const FONTS: [&str; 12] = [
 
 /// The fixed reaction palette (SPEC §4.8): exactly 12, no custom emoji in V1.
 /// Keys are stable wire identifiers; the glyph shown for each is a client concern.
-/// NOTE: provisional curation — confirm the set with Matt before M3 ships reactions.
+///
+/// **Confirmed by Matt on 2026-08-20**, when T-304 shipped reactions. These keys
+/// are now written into every `reactions` row on every server, so changing one
+/// is a migration, not an edit: existing rows would keep a key no client draws.
+/// Adding a thirteenth is safe — an older client skips a key it does not know
+/// rather than guessing at it.
 pub const REACTIONS: [&str; 12] = [
     "heart", "laugh", "wow", "cry", "fire", "skull", "up", "down", "eyes", "clap", "hundred",
     "sparkles",

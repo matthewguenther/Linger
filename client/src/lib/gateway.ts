@@ -23,6 +23,7 @@ import { useSyncExternalStore } from "react";
 
 import type { ClientFrame } from "../generated/ClientFrame";
 import type { CreateMessageRequest } from "../generated/CreateMessageRequest";
+import type { EditMessageRequest } from "../generated/EditMessageRequest";
 import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
 import type { PresenceEntry } from "../generated/PresenceEntry";
@@ -77,6 +78,12 @@ export interface GatewayState {
   occupancy: Record<string, UserId[]>;
   /** Loaded history, keyed by room id. */
   streams: Record<string, RoomStream>;
+  /**
+   * Who is typing where: room id → user id → when they last said so. Kept as a
+   * moment rather than a boolean because nobody sends a "stopped" — the signal
+   * simply goes stale, and `typistsIn` is what decides when.
+   */
+  typing: Record<string, Record<string, number>>;
 }
 
 const EMPTY: GatewayState = {
@@ -87,6 +94,7 @@ const EMPTY: GatewayState = {
   presence: [],
   occupancy: {},
   streams: {},
+  typing: {},
 };
 
 let state: GatewayState = EMPTY;
@@ -204,6 +212,15 @@ function withStream(
   return { ...current, streams: { ...current.streams, [roomId]: next } };
 }
 
+/** Forget that somebody was typing in a room. */
+function stoppedTyping(current: GatewayState, roomId: RoomId, userId: UserId): GatewayState {
+  const room = current.typing[roomId];
+  if (!room || room[userId] === undefined) return current;
+  const next = { ...room };
+  delete next[userId];
+  return { ...current, typing: { ...current.typing, [roomId]: next } };
+}
+
 /** Apply one server frame. */
 function apply(current: GatewayState, frame: ServerFrame): GatewayState {
   switch (frame.op) {
@@ -222,6 +239,7 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         presence: frame.d.presence,
         occupancy: occupancyFrom(frame.d.presence),
         streams: {},
+        typing: {},
       };
     case "presence.update": {
       const entry = frame.d;
@@ -251,10 +269,16 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
     case "message.create":
     case "message.update": {
       const message = frame.d;
-      return withStream(current, message.room_id, (stream) => ({
+      const next = withStream(current, message.room_id, (stream) => ({
         ...stream,
         messages: mergeMessage(stream.messages, message),
       }));
+      // Saying the thing is how you stop typing it. Without this the line
+      // hangs around for a few seconds after the message it was announcing has
+      // already arrived, which reads as a second message that never comes.
+      return frame.op === "message.create"
+        ? stoppedTyping(next, message.room_id, message.author_id)
+        : next;
     }
     case "message.delete": {
       const { id, room_id } = frame.d;
@@ -267,6 +291,16 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
           held.id === id ? { ...held, body: "", deleted_at: held.deleted_at ?? Date.now() } : held,
         ),
       }));
+    }
+    case "typing": {
+      const { room_id, user_id } = frame.d;
+      return {
+        ...current,
+        typing: {
+          ...current.typing,
+          [room_id]: { ...current.typing[room_id], [user_id]: Date.now() },
+        },
+      };
     }
     case "reaction.update": {
       // The only frame that names a message without naming its room, so the
@@ -459,13 +493,137 @@ export async function loadOlder(api: AuthedApi, roomId: RoomId): Promise<void> {
  * Failures are thrown, not swallowed: the composer is the only thing that knows
  * what the person was typing, so it is the only thing that can tell them.
  */
-export async function sendMessage(api: AuthedApi, roomId: RoomId, body: string): Promise<void> {
-  const request: CreateMessageRequest = { body, reply_to: null, attachment_ids: null };
+export async function sendMessage(
+  api: AuthedApi,
+  roomId: RoomId,
+  body: string,
+  replyTo: MessageId | null = null,
+): Promise<void> {
+  const request: CreateMessageRequest = {
+    body,
+    reply_to: replyTo,
+    attachment_ids: null,
+  };
   const path = `/rooms/${encodeURIComponent(roomId)}/messages`;
   const message = await api.post<Message>(path, request);
   const stream = state.streams[roomId];
   if (connected !== api || !stream) return;
   putStream(roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
+}
+
+/**
+ * Change what a message says. Author only; the server enforces that and
+ * refuses anyone else (PROTOCOL §4).
+ *
+ * Like sending, the answer is folded in directly as well as arriving as a
+ * frame, so an edit lands even with the socket down. Failures are thrown for
+ * the same reason: the edit box is holding the new text.
+ */
+export async function editMessage(
+  api: AuthedApi,
+  message: Message,
+  body: string,
+): Promise<void> {
+  const request: EditMessageRequest = { body };
+  const edited = await api.patch<Message>(`/messages/${encodeURIComponent(message.id)}`, request);
+  const stream = state.streams[edited.room_id];
+  if (connected !== api || !stream) return;
+  putStream(edited.room_id, { ...stream, messages: mergeMessage(stream.messages, edited) });
+}
+
+/**
+ * Delete a message. Author or host (PROTOCOL §4).
+ *
+ * The row stays: a delete is a tombstone, so reply chains still point at
+ * something. The server answers 204 and tells us nothing, so the local copy is
+ * marked the same way the `message.delete` frame marks it.
+ */
+export async function deleteMessage(api: AuthedApi, message: Message): Promise<void> {
+  await api.delete(`/messages/${encodeURIComponent(message.id)}`);
+  if (connected !== api) return;
+  publish(apply(state, { op: "message.delete", d: { id: message.id, room_id: message.room_id } }));
+}
+
+/**
+ * Add or take back one reaction, whichever the person does not already have.
+ *
+ * The server answers 204 with no body, so unlike an edit there is nothing to
+ * fold in — it sends the new group as a `reaction.update` frame instead. That
+ * frame is the truth, and it usually beats the HTTP response back. What happens
+ * here first is a guess at the same answer so the mark moves under the cursor
+ * rather than a round trip later; if the guess is wrong, the frame corrects it.
+ */
+export async function toggleReaction(
+  api: AuthedApi,
+  message: Message,
+  key: string,
+): Promise<void> {
+  const me = state.me;
+  if (!me) return;
+  const held = message.reactions.find((group) => group.key === key);
+  const mine = held?.user_ids.includes(me.id) ?? false;
+
+  const others = held?.user_ids.filter((id) => id !== me.id) ?? [];
+  const guess = mine ? others : [...others, me.id];
+  const guessed = (user_ids: UserId[]): void => {
+    publish(
+      apply(state, {
+        op: "reaction.update",
+        d: { message_id: message.id, key, count: user_ids.length, user_ids },
+      }),
+    );
+  };
+  guessed(guess);
+
+  const path = `/messages/${encodeURIComponent(message.id)}/reactions/${encodeURIComponent(key)}`;
+  try {
+    if (mine) await api.delete(path);
+    else await api.put(path);
+  } catch (error) {
+    // Put it back. With the socket up a frame would have corrected this
+    // anyway, but a refusal while the socket is down would otherwise leave a
+    // mark on screen that the server never accepted.
+    if (connected === api) guessed(held?.user_ids ?? []);
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Typing
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a `typing.start` counts for. The server lets a client send one per
+ * four seconds per room (`RATE_TYPING_PER_ROOM`), so this is that window plus
+ * enough slack for a slow frame — long enough that someone typing steadily
+ * never flickers, short enough that someone who walked away disappears.
+ */
+const TYPING_TTL_MS = 6_000;
+
+/** Who is typing in a room right now, excluding you. Ids, oldest first. */
+export function typistsIn(current: GatewayState, roomId: RoomId, now: number): UserId[] {
+  const room = current.typing[roomId];
+  if (!room) return [];
+  return Object.entries(room)
+    .filter(([userId, at]) => now - at < TYPING_TTL_MS && userId !== current.me?.id)
+    .sort(([, a], [, b]) => a - b)
+    .map(([userId]) => userId);
+}
+
+/** When we last told each room we were writing something. */
+const typingSentAt: Record<string, number> = {};
+
+/**
+ * Tell the room you are writing something. Throttled here as well as on the
+ * server, because being rate-limited is a refusal and there is no reason to
+ * collect one on every keystroke. The server's window is four seconds
+ * (`RATE_TYPING_PER_ROOM`), so this stays just inside it.
+ */
+export function startedTyping(roomId: RoomId): void {
+  const now = Date.now();
+  if (now - (typingSentAt[roomId] ?? 0) < TYPING_TTL_MS - 2_000) return;
+  typingSentAt[roomId] = now;
+  void send({ op: "typing.start", d: { room_id: roomId } });
 }
 
 /** The status bar line (SPEC §5.6): protocol text, never a spinner. */

@@ -17,11 +17,13 @@
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",

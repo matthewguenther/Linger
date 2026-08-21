@@ -42,21 +42,46 @@
   line-height: 1.4;
 }
 
+/* Everything one message owns: the reply line above it, the body, its marks,
+   and the actions that hover over it. Positioned, because the action strip
+   hangs off its top-right corner and must not change its height. */
+.msg {
+  position: relative;
+}
+
+/* Where a jump lands. It fades on its own — there is nothing to dismiss, and
+   it is not accent, which has exactly four jobs and this is not one. */
+.msg[data-flash="true"] .msg-body {
+  background: var(--surface-2);
+  animation: msg-flash 1600ms ease-out forwards;
+}
+
+@keyframes msg-flash {
+  to {
+    background: transparent;
+  }
+}
+
 .msg-body {
   border-left: 3px solid var(--person-rule);
   padding-left: 11px;
   font-family: var(--font-body);
   font-size: var(--text-body-size);
   line-height: var(--text-body-leading);
-  /* Bodies are text, never markup: newlines and runs of spaces survive, and a
-     long unbroken URL wraps instead of pushing the panel wider. */
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   /* Aging, set per message from its timestamp. Body only — the name and the
      timestamp never fade (SPEC §5.6). */
   opacity: var(--age, 1);
   /* The app disables selection; a message is the one thing you copy out of. */
   user-select: text;
+}
+
+/* Space between a body's blocks is padding, never margin — the same rule the
+   rows follow, for a sharper reason: a child's vertical margin can collapse
+   straight out through the parent's box, and the virtualizer measures the box. */
+.msg-body > * + *,
+.md-quote > * + * {
+  padding-top: 6px;
 }
 
 .msg-edited {
@@ -133,4 +158,268 @@
 
 [data-density="irc"] .stream-divider {
   padding: 10px 0;
+}
+
+/* --- markdown ----------------------------------------------------------- */
+
+/*
+ * The rendered body (SPEC §4.7, ARCHITECTURE §7). Everything here is drawn from
+ * a parsed tree of known node kinds — there is no HTML from a message anywhere
+ * in the app — so this stylesheet is the whole visual surface markdown has.
+ *
+ * Mono appears for code, and only for code. SPEC §5.2 lists code beside
+ * timestamps and numerals as one of mono's roles; prose in a body stays sans,
+ * which is the rule AGENTS 11 exists to protect.
+ */
+
+/* Newlines and indentation someone typed survive, and a long unbroken URL
+   wraps instead of pushing the panel wider. */
+.md-p,
+.md-list li {
+  white-space: pre-wrap;
+}
+
+.md-quote {
+  border-left: 2px solid var(--hairline-strong);
+  padding-left: 10px;
+  color: var(--text-secondary);
+}
+
+.md-list {
+  padding-left: 20px;
+}
+
+.md-list li::marker {
+  color: var(--text-faint);
+}
+
+.md-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface-2);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.md-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  line-height: 1.5;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  /* A wide code block scrolls itself rather than widening the panel. */
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--text-faint);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.md-link:hover {
+  text-decoration-color: var(--text-secondary);
+}
+
+/* --- the line saying what a reply answers -------------------------------- */
+
+.msg-reply {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  /* Lines up under the 3px rule and its gutter, so a reply reads as belonging
+     to the message below it rather than floating between two. */
+  padding: 0 0 2px 14px;
+  max-width: 100%;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+button.msg-reply:hover {
+  color: var(--text-secondary);
+}
+
+.reply-mark {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.reply-author {
+  flex: none;
+  color: var(--person-name);
+}
+
+.reply-excerpt {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* --- reactions ----------------------------------------------------------- */
+
+/*
+ * Weight, not numbers (SPEC §4.8). `--weight` runs 0 to 1 and drives size and
+ * how solidly the mark sits on the surface; six people make a bigger, denser
+ * mark than one. No numeral is drawn anywhere — the tally is in the hover title
+ * and the accessible label, and nowhere a reader can accidentally count it.
+ */
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 0 14px;
+}
+
+.reaction {
+  --weight: 0;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: calc(1px + var(--weight) * 2px) calc(5px + var(--weight) * 3px);
+  font-size: calc(12px + var(--weight) * 6px);
+  line-height: 1.1;
+  cursor: pointer;
+  transition: border-color var(--motion-fast);
+}
+
+/* The fill is a layer rather than a blended color so the mark itself never
+   dims — a faint reaction is a small one, not a greyed-out one. */
+.reaction::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+  opacity: calc(0.2 + var(--weight) * 0.8);
+}
+
+.reaction > span {
+  position: relative;
+}
+
+.reaction:hover {
+  border-color: var(--hairline-strong);
+}
+
+/* Yours. Not accent — accent has four jobs and this is not one of them. */
+.reaction[data-mine="true"] {
+  border-color: var(--text-muted);
+}
+
+/* --- message actions ----------------------------------------------------- */
+
+/*
+ * The strip that hovers over a message: react, reply, edit, delete.
+ *
+ * It is absolutely positioned inside the row and never changes the row's
+ * height, which matters more than it looks — the virtualizer measures each row
+ * and a strip that pushed one taller on hover would shift the whole list under
+ * the cursor. It sits inside the row's own bounds rather than above them, so it
+ * is never clipped by the top of the scrolling area.
+ */
+.msg-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast);
+}
+
+.msg:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg-action {
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: var(--text-muted);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  cursor: pointer;
+}
+
+.msg-action:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.msg-action-glyph {
+  font-size: 13px;
+  padding: 1px 3px;
+}
+
+.msg-action-danger:hover {
+  color: var(--text-primary);
+}
+
+/* A refusal, next to the message it was about. */
+.msg-problem {
+  padding: 2px 0 0 14px;
+  color: var(--text-secondary);
+}
+
+/* --- editing in place ---------------------------------------------------- */
+
+.msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+/*
+ * The box borrows the composer's look, but not its `flex: 1` — that is there to
+ * make it fill a *row*, and inside this column it means `flex-basis: 0`, which
+ * beats the height `useAutoGrow` measures and collapses the box to one line.
+ * An eight-line message you can only edit through a slot is not editable.
+ */
+.msg-edit .composer-input {
+  flex: none;
+  display: block;
+  width: 100%;
+}
+
+.msg-edit-hint {
+  color: var(--text-faint);
+}
+
+/* --- IRC mode ------------------------------------------------------------ */
+
+/* One line per message means the trimmings sit on that line's terms: the reply
+   line and the marks line up with the text column, not the timestamp. */
+[data-density="irc"] .msg-reply,
+[data-density="irc"] .reactions {
+  padding-left: 0;
+}
+
+[data-density="irc"] .md-code,
+[data-density="irc"] .md-inline-code {
+  font-size: inherit;
 }

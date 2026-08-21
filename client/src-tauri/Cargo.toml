@@ -43,6 +43,14 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 rand = "0.9"
 
+# Handing a link in a message to the system browser (T-304). The WebView must
+# never navigate itself to a URL somebody typed into a room — that would replace
+# the app with a website — and every platform opens a URL differently, with
+# Windows being the one that is easy to get subtly wrong. The capability in
+# `capabilities/default.json` narrows this to http and https, so it cannot be
+# talked into launching a local file or a program.
+tauri-plugin-opener = "2.5.4"
+
 # OS keyring for the refresh token (ARCHITECTURE §7.3). Features are picked per
 # platform on purpose:
 #

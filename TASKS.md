@@ -80,7 +80,10 @@ task fails its acceptance criteria twice.
   action, and resumes without gaps or duplicates against a real server. T-303
   landed 2026-08-20: the stream is real, two clients on one machine exchanged
   messages in real time, and 10,000 messages of scrollback held 24–43 rows in
-  the DOM. **Next up: T-304 (composer + message actions), then T-305.**
+  the DOM. T-304 landed 2026-08-20: markdown that cannot become markup, a
+  composer you can write a paragraph in, edit/delete/reply, and reactions that
+  read as weight instead of a tally. **Next up: T-305 ("you left off here"),
+  which finishes M3.**
 - ⬜ **M4 … M9** — queued below.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -713,12 +716,168 @@ test with real disconnects, not mocks.*
     animated, so synthetic key presses closer together than ~300ms coalesce and
     scroll far less than a page each.*
 
-- ⬜ **T-304 · Composer + message actions** — effort: **medium**
+- ✅ **T-304 · Composer + message actions** — effort: **medium**
   Markdown (allowlist sanitizer, **no raw HTML passthrough**), send affordance in
   accent, edit/delete/reply, reactions by **weight** (denser/larger mark, count
   only in hover/aria — never rendered as a number).
   *Accept:* XSS attempt (`<img onerror>` etc.) renders inert; reactions show
   weight not numbers.
+
+  ### **Done 2026-08-20.** Both accept criteria hold, and both were checked.
+
+  *The XSS one is checked by test rather than by eye, on purpose. `Markdown` is
+  rendered to the exact markup a browser would be handed
+  (`react-dom/server`), and two assertions run over that string: every element
+  in it has to come from a list of eleven, and every attribute from a list of
+  five. A message body that could contribute one element or one attribute fails
+  them, whatever the trick was — which is a stronger claim than any single
+  screenshot of `<img onerror>` not firing. It was also checked by eye: a room
+  seeded with `<img src=x onerror=…>`, `<script>fetch(…)</script>` and
+  `[click me](javascript:alert(1))` renders all three as the characters that
+  were typed. [`docs/t304-stream.png`](docs/t304-stream.png).*
+
+  *The weight one was checked by eye, because it is a visual claim. One room,
+  eight accounts, the same mark at 1, 2, 3 and 8 reactors: the marks step up in
+  size and the fill gets more solid, and **no numeral is drawn anywhere**.
+  [`docs/t304-reactions.png`](docs/t304-reactions.png) has the twelve-mark strip
+  open above a message carrying marks of three different weights.*
+
+  ### What got built
+
+  - `client/src/stream/markdown.ts` — the parser. Source in, a tree of known
+    node kinds out. **This is the sanitizer**, and it is worth being clear about
+    why: there is no HTML string anywhere between a message body and the
+    screen, so there is nothing to sanitize. `Markdown.tsx` switches over the
+    node union and hands text to React as text. An allowlist you cannot get
+    past beats a denylist you have to keep ahead of.
+  - `client/src/stream/Markdown.tsx` — one element per node kind, and the only
+    place a body reaches an attribute is a link's `href`, which only exists if
+    `safeHref` built it.
+  - `client/src/stream/reactions.ts` — the twelve keys, their glyphs, and the
+    weight curve.
+  - `client/src/lib/external.ts` + `tauri-plugin-opener` — links go to the
+    system browser. See the note below; this is the one judgment call in the
+    task.
+  - `client/src/stream/Stream.tsx` — the composer is a textarea now, and each
+    message grew a hover strip: react / reply / edit / delete.
+  - `client/src/lib/gateway.ts` — `editMessage`, `deleteMessage`,
+    `toggleReaction`, `reply_to` on send, and the typing map.
+  - 48 more tests (69 total). `vitest.config.ts` now includes `.tsx`.
+
+  ### Decisions worth knowing about
+
+  - ***The markdown subset is small and closed.*** Bold, italic,
+    strikethrough, inline code, fenced code, blockquotes, bullet and numbered
+    lists, links, backslash escapes. **No headings, no tables, no images, no
+    raw HTML.** Headings are shouting in a chat window and there is nothing to
+    point an image at until uploads land in M6. It is not CommonMark and does
+    not try to be — CommonMark's emphasis rules are a specification unto
+    themselves. The rule followed instead is that anything ambiguous stays
+    literal: a `*` with no partner is a `*`.
+  - ***`snake_case_name` and `2 * 3 * 4` stay literal*** — word-boundary rules
+    on underscore, and no span opens or closes on whitespace. `__init__` does
+    *not*: with no word character on either end there is nothing to hold the
+    delimiters down, and every markdown anyone has used bolds it. Backticks are
+    the way to write it, and a dunder name belongs in backticks anyway.
+  - ***Mono appears for code, and only for code.*** AGENTS 11 says mono in a
+    message body is a defect; SPEC §5.2 lists code beside timestamps and
+    numerals as one of mono's roles. Prose stays sans. There is a test that
+    counts the mono classes in a rendered body so the exception cannot spread.
+  - ***Reaction weight is logarithmic.*** One to two is the step that means
+    something — somebody agreed. Nine to ten means almost nothing. A linear
+    ramp would spend its whole range on the part nobody cares about. Eight
+    reactors is full weight, which is more than everyone in the kind of room
+    this is for.
+  - ***Delete asks twice, in the strip itself.*** `delete` becomes `delete for
+    good` / `keep`. No modal, no layer, and the row does not change height.
+  - ***The twelve-mark palette takes over the action strip rather than opening
+    a popover.*** A popover inside a virtualized row is either clipped by the
+    scroll container or it changes the row's height, and both are worse than
+    swapping what the strip contains.
+
+  ### The one judgment call: `tauri-plugin-opener`
+
+  *A link in a message has to go somewhere, and a WebView that navigates itself
+  to a URL out of a chat message has replaced the app with a website, session
+  and all. So the click is taken and handed to the system browser. That needs a
+  plugin — every platform opens a URL differently and Windows is the one that
+  is easy to get subtly wrong, which is AGENTS' "where you will be wrong" table
+  exactly.*
+
+  *It does widen the WebView's permission surface, which ARCHITECTURE §7 says
+  to keep minimal, so it is scoped: `capabilities/default.json` allows
+  `opener:allow-open-url` for `http://*` and `https://*` only, enforced in
+  Rust. No `file://`, no launching a program. Two locks: `safeHref` decides
+  what can become a link at all, and the capability decides what can be
+  opened.*
+
+  *SPEC §4.7's "restrained embeds" — a one-line card with favicon, title and
+  domain — is **not** built and is not in any task. It would mean the client
+  fetching a remote page, which is a privacy question worth asking on purpose
+  rather than sliding into.*
+
+  ### Two bugs this found in T-303's work
+
+  - ***A new message did not follow the view down if it was tall.*** The
+    virtualizer's `followOnAppend` aims at a bottom computed from estimated row
+    heights, and a row is an estimate until it has been drawn once. Before
+    markdown every message was a line or two and the error was a few pixels; a
+    message with a code block in it is off by a screenful. Fixed with the same
+    per-frame re-aim the room-entry landing uses, keyed on the *last* row's key
+    so a page of older history loading in above never triggers it.
+  - ***The in-place edit box collapsed to one line.*** It borrows
+    `.composer-input`, which carries `flex: 1` so it fills the composer's
+    *row* — inside the edit form's column that means `flex-basis: 0`, which
+    beats the height the auto-grow measures. An eight-line message you can only
+    edit through a slot is not editable.
+
+  ### Notes for whoever is next
+
+  - *`typing.start` is sent and rendered.* T-302's note nominated T-304 as its
+    first user and the composer was being rewritten anyway, so both halves
+    landed: throttled at 4s to match `RATE_TYPING_PER_ROOM`, and a line above
+    the composer that holds its height whether or not anyone is typing. Nobody
+    sends a "stopped" — the signal goes stale after 6s and `typistsIn` is what
+    decides. Verified with a second gateway client signed in as another
+    account. **T-402 still owns `room.focus`.**
+  - *The action strip's buttons are in the tab order.* That is a real cost —
+    tabbing from the scrollback to the composer now passes through two to four
+    buttons per rendered row (~25–45 rows exist at a time). The alternative was
+    keyboard users being unable to react or reply at all, which is worse. Up
+    arrow in an empty composer edits your last message, which is the habit from
+    every other client and the quick way to reach `edit`. If this needs
+    revisiting, the fix is a roving tabindex driven by which row is active.
+  - *`AuthedApi` gained `put()`* for the endpoints that answer 204 and say
+    nothing, which is both reaction routes.
+  - *A reaction is applied locally before the server answers*, because the mark
+    should move under the cursor rather than a round trip later. The
+    `reaction.update` frame is the truth and usually beats the HTTP response
+    back; a refusal puts the old group back, which only matters when the socket
+    is down.
+  - ***The twelve reaction keys are confirmed*** (Matt, 2026-08-20): heart,
+    laugh, wow, cry, fire, skull, up, down, eyes, clap, hundred, sparkles. The
+    "provisional curation" note in `linger-core` is gone. They are written into
+    `reactions` rows from here on, so **changing one is a migration, not an
+    edit** — adding a thirteenth is the safe direction, because a client skips a
+    key it does not know rather than guessing. A test reads the Rust constant
+    and fails if `reactions.ts` drifts from it.
+  - *`MAX_MESSAGE_CHARS` is written out in `Stream.tsx` as 8000.* ts-rs exports
+    types, not constants, so there is no generated home for it. The server is
+    still the authority and refuses anything longer; the copy exists so the
+    composer can say so before the round trip.
+  - *`@types/node` is now a declared devDependency.* It was already there as a
+    hoisted phantom — the reaction drift test reads a file, which made the
+    dependency real and pnpm noticed.
+  - *Attachments still render as nothing*, and link embeds do not exist. Both
+    are still waiting on M6.
+  - *Testing drove a real desktop over `/dev/uinput`* again (Wayland, no
+    xdotool), plus KWin scripting to place and confirm the window before every
+    screenshot. That scaffolding is throwaway and is not in the repo. Two
+    things worth writing down: **`pkill -f <pattern>` also matches the shell
+    running it** — CLAUDE.md warns about this for `tauri dev` and it is just as
+    true for a test script's own name, so kill by recorded PID; and **a uinput
+    pointer device must stay open while you screenshot**, because tearing it
+    down drops the hover you were trying to capture.
 
 - ⬜ **T-305 · "You left off here"** — effort: **medium**
   SPEC §4.2. Accent divider at last-read, persists for the session; room label

@@ -287,6 +287,13 @@ export class AuthedApi {
     );
   }
 
+  /** For the endpoints that answer 204 and say nothing, like reactions. */
+  put(path: string, body?: unknown): Promise<void> {
+    return this.#withAuth((accessToken) =>
+      requestVoid(this.baseUrl, "PUT", path, { accessToken, body }),
+    );
+  }
+
   delete(path: string): Promise<void> {
     return this.#withAuth((accessToken) =>
       requestVoid(this.baseUrl, "DELETE", path, { accessToken }),
