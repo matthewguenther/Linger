@@ -13,14 +13,17 @@
  * you are already at the end, and history loading in above you must not move
  * what you are reading. Both are the virtualizer's `anchorTo: "end"`.
  *
- * **Nothing renders as HTML.** Message bodies go in as text, so a body that
- * looks like markup is text that looks like markup. Markdown, an allowlist
- * sanitizer, and the message actions are T-304.
+ * **Nothing renders as HTML.** A message body is parsed into typed nodes and
+ * drawn as React elements (`markdown.ts`, `Markdown.tsx`), so markup somebody
+ * typed is text that looks like markup and can never be anything else.
+ *
+ * This file owns the two pieces of state that belong to the room rather than to
+ * any one message: which message you are answering, and which one you are
+ * editing. Both are one-at-a-time and both are dropped when you change rooms.
  */
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type CSSProperties,
-  type FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -28,13 +31,23 @@ import {
   useState,
 } from "react";
 
+import type { MessageId } from "../generated/MessageId";
 import type { Room } from "../generated/Room";
 import type { User } from "../generated/User";
-import { ApiError, type AuthedApi } from "../lib/api";
+import type { AuthedApi } from "../lib/api";
 import { type Density, DENSITIES } from "../lib/density";
-import { loadOlder, openRoom, sendMessage, useGateway } from "../lib/gateway";
-import { buildRows, type StreamRow } from "./rows";
-import { ageOpacity, clockTime, fullTime, sessionLabel } from "./time";
+import {
+  deleteMessage,
+  editMessage,
+  loadOlder,
+  openRoom,
+  setReaction,
+  useGateway,
+} from "../lib/gateway";
+import Composer from "./Composer";
+import MessageRow, { type MessageActions } from "./MessageRow";
+import { buildRows } from "./rows";
+import { sessionLabel } from "./time";
 import "./stream.css";
 
 /**
@@ -54,16 +67,27 @@ interface StreamProps {
 }
 
 export default function Stream({ api, room, users, density, onDensityChange }: StreamProps) {
-  const stream = useGateway().streams[room.id];
+  const gateway = useGateway();
+  const stream = gateway.streams[room.id];
   const loaded = stream !== undefined;
   const now = useNow();
   const scroller = useRef<HTMLDivElement | null>(null);
+
+  const [replyToId, setReplyToId] = useState<MessageId | null>(null);
+  const [editingId, setEditingId] = useState<MessageId | null>(null);
 
   // A room re-opens itself if the store drops it, which happens when a
   // re-identify throws loaded history away.
   useEffect(() => {
     if (!loaded) void openRoom(api, room.id);
   }, [api, room.id, loaded]);
+
+  // Answering somebody in one room and editing something in another are both
+  // states about a message you can no longer see. Drop them at the door.
+  useEffect(() => {
+    setReplyToId(null);
+    setEditingId(null);
+  }, [room.id]);
 
   const people = useMemo(() => new Map(users.map((person) => [person.id, person])), [users]);
 
@@ -74,6 +98,12 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
     () => buildRows(messages ?? [], { group: density !== "irc", atStart }),
     [messages, atStart, density],
   );
+
+  const byId = useMemo(
+    () => new Map((messages ?? []).map((message) => [message.id, message])),
+    [messages],
+  );
+  const replyTo = replyToId === null ? null : (byId.get(replyToId) ?? null);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -142,6 +172,48 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
     }
   }, [api, room.id, stream]);
 
+  const actions = useMemo<MessageActions>(
+    () => ({
+      onReply: (message) => {
+        setEditingId(null);
+        setReplyToId(message.id);
+      },
+      onEditStart: (message) => {
+        setReplyToId(null);
+        setEditingId(message.id);
+      },
+      onEditCancel: () => setEditingId(null),
+      onEditSave: async (message, body) => {
+        await editMessage(api, message.id, body);
+        setEditingId(null);
+      },
+      onDelete: (message) => {
+        // The refusal that matters — someone else's message — is the server's
+        // to make, and it already made it before the button was drawn. A
+        // failure here leaves the message alone, which is the honest outcome.
+        void deleteMessage(api, message.id).catch(() => undefined);
+        if (replyToId === message.id) setReplyToId(null);
+        if (editingId === message.id) setEditingId(null);
+      },
+      onReact: (message, key, on) => {
+        void setReaction(api, message.id, key, on).catch(() => undefined);
+      },
+      onJumpToParent: (parent) => {
+        const index = rows.findIndex((row) => row.kind === "message" && row.key === parent.id);
+        if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" });
+      },
+    }),
+    [api, rows, virtualizer, replyToId, editingId],
+  );
+
+  // Everyone typing here except us: our own keystrokes are not news.
+  const typing = useMemo(() => {
+    const here = gateway.typing[room.id] ?? {};
+    return Object.keys(here)
+      .filter((userId) => userId !== gateway.me?.id)
+      .map((userId) => people.get(userId)?.display_name ?? "someone");
+  }, [gateway.typing, gateway.me, room.id, people]);
+
   const items = virtualizer.getVirtualItems();
 
   return (
@@ -188,7 +260,21 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
                       <span className="divider-label">{sessionLabel(row.at, now)}</span>
                     </p>
                   ) : (
-                    <MessageRow row={row} author={author} now={now} irc={density === "irc"} />
+                    <MessageRow
+                      row={row}
+                      author={author}
+                      people={people}
+                      me={gateway.me}
+                      parent={
+                        row.message.reply_to === null
+                          ? undefined
+                          : byId.get(row.message.reply_to)
+                      }
+                      now={now}
+                      irc={density === "irc"}
+                      editing={editingId === row.message.id}
+                      actions={actions}
+                    />
                   )}
                 </div>
               );
@@ -197,127 +283,15 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
         )}
       </div>
 
-      <Composer api={api} room={room} />
+      <Composer
+        api={api}
+        room={room}
+        replyTo={replyTo}
+        replyToAuthor={replyTo === null ? undefined : people.get(replyTo.author_id)}
+        onClearReply={() => setReplyToId(null)}
+        typing={typing}
+      />
     </main>
-  );
-}
-
-function MessageRow({
-  row,
-  author,
-  now,
-  irc,
-}: {
-  row: Extract<StreamRow, { kind: "message" }>;
-  author: User | undefined;
-  now: number;
-  irc: boolean;
-}) {
-  const { message, head } = row;
-  const name = author?.display_name ?? "someone";
-  const deleted = message.deleted_at !== null;
-  const nameStyle: CSSProperties = {
-    fontWeight: author?.style.weight ?? 500,
-    fontStyle: author?.style.italic === true ? "italic" : "normal",
-  };
-  const time = (
-    <time
-      className="msg-time meta"
-      dateTime={new Date(message.created_at).toISOString()}
-      title={fullTime(message.created_at)}
-    >
-      {clockTime(message.created_at, irc)}
-    </time>
-  );
-
-  const body = deleted ? (
-    <span className="msg-gone">deleted</span>
-  ) : (
-    <>
-      {message.body}
-      {message.edited_at === null ? null : <span className="msg-edited meta">edited</span>}
-    </>
-  );
-
-  // One line per message, timestamps in a fixed-width gutter, the aligned nick
-  // column mIRC had (SPEC §5, §5.6). No group header, because there is no group.
-  if (irc) {
-    return (
-      <div className="msg-body">
-        {time}
-        <span className="irc-name" style={nameStyle}>
-          {name}
-        </span>
-        <span className="irc-text">{body}</span>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {head ? (
-        <p className="msg-head">
-          <span className="msg-author" style={nameStyle}>
-            {name}
-          </span>
-          {time}
-        </p>
-      ) : null}
-      {/* Aging is one custom property, computed from the timestamp and applied
-          to the body only — never the name, never the time (SPEC §5.6). */}
-      <div className="msg-body" style={{ "--age": ageOpacity(message.created_at, now) }}>
-        {body}
-      </div>
-    </>
-  );
-}
-
-function Composer({ api, room }: { api: AuthedApi; room: Room }) {
-  const [draft, setDraft] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-
-  // Switching rooms should not carry a half-typed line into the new one.
-  useEffect(() => {
-    setDraft("");
-    setProblem(null);
-  }, [room.id]);
-
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    const body = draft.trim();
-    if (body.length === 0 || sending) return;
-    setSending(true);
-    try {
-      await sendMessage(api, room.id, body);
-      setDraft("");
-      setProblem(null);
-    } catch (error) {
-      // The composer is the only thing holding what they typed, so it is the
-      // only thing that can tell them it did not go — and it keeps the text.
-      setProblem(error instanceof ApiError ? error.message : "Couldn't reach the server.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <form className="composer" onSubmit={(event) => void submit(event)}>
-      {problem ? <p className="composer-problem meta">{problem}</p> : null}
-      <div className="composer-row">
-        <input
-          className="composer-input"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={`say something in #${room.slug}`}
-          aria-label={`message #${room.slug}`}
-          autoComplete="off"
-        />
-        <button className="composer-send" type="submit" disabled={draft.trim().length === 0}>
-          send
-        </button>
-      </div>
-    </form>
   );
 }
 
@@ -386,4 +360,3 @@ function useNow(): number {
   }, []);
   return now;
 }
-

@@ -73,6 +73,9 @@ These terms are used everywhere — UI, code, docs, error messages:
 
 - 🪑 **Rooms you're in** — focusing a room means you're in it; others see
   occupancy, and each person has a personal **entrance sound** that plays on arrival
+- 💬 **Text that behaves** — markdown, edits, deletes and replies. A message body is
+  parsed into elements and never into HTML, so something that looks like markup stays
+  text that looks like markup
 - 👥 **A roster-forward layout** — people are the primary surface, not a gutter; each
   friend is a card showing presence, room, activity, and their status
 - 🔕 **No unread counts** — a "you left off here" line and a subtle label-weight change,
@@ -235,6 +238,16 @@ Things that surprise people the first time:
   row's own box and a margin sits outside it. And a row's height is a guess until it
   has been drawn once, so anything that scrolls to a position has to keep re-aiming as
   the real heights arrive; jumping once lands in the wrong place.
+- **Message bodies never become HTML.** There is no sanitizer library here and no
+  `dangerouslySetInnerHTML` anywhere in `client/`. `src/stream/markdown.ts` parses a body
+  into typed nodes and `Markdown.tsx` draws those nodes as React elements, so a message
+  containing `<img onerror=…>` renders as those characters. One
+  `dangerouslySetInnerHTML` would undo that in a single line, which is why there are
+  none in the codebase to copy from.
+- **A link in a message opens in the system browser**, never in the app. A WebView that
+  follows an `href` replaces Linger with a web page and there is no back button, so
+  links go to the OS through `tauri-plugin-opener` — narrowed to http, https and mailto
+  in `client/src-tauri/capabilities/default.json`.
 - **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
   keyring — Keychain, Credential Manager, or a Secret Service provider like
   gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app

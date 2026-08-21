@@ -43,6 +43,14 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 rand = "0.9"
 
+# Opening a link from a message in the system browser. A WebView that follows an
+# `href` navigates away from the app and never comes back, so links have to be
+# handed to the OS instead — and handing a string to the OS is the kind of
+# platform-specific quoting problem AGENTS' "where you will be wrong" table is
+# about, so this is the official plugin rather than a `Command::new("xdg-open")`.
+# `capabilities/default.json` narrows it to http, https and mailto.
+tauri-plugin-opener = "2.5.4"
+
 # OS keyring for the refresh token (ARCHITECTURE §7.3). Features are picked per
 # platform on purpose:
 #

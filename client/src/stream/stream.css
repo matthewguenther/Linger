@@ -42,18 +42,25 @@
   line-height: 1.4;
 }
 
-.msg-body {
+/*
+ * Everything that belongs to one message sits inside the person's rule: what
+ * they said, what it answers, and what people did about it. The rule is on this
+ * wrapper rather than on the body so a reply line and a row of reactions are
+ * inside it too, and so aging can apply to the body alone.
+ */
+.msg-block {
   border-left: 3px solid var(--person-rule);
   padding-left: 11px;
+}
+
+.msg-body {
   font-family: var(--font-body);
   font-size: var(--text-body-size);
   line-height: var(--text-body-leading);
-  /* Bodies are text, never markup: newlines and runs of spaces survive, and a
-     long unbroken URL wraps instead of pushing the panel wider. */
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   /* Aging, set per message from its timestamp. Body only — the name and the
-     timestamp never fade (SPEC §5.6). */
+     timestamp never fade (SPEC §5.6), and neither does a reaction, which is
+     somebody else's and is not aging. */
   opacity: var(--age, 1);
   /* The app disables selection; a message is the one thing you copy out of. */
   user-select: text;
@@ -66,6 +73,259 @@
 .msg-gone {
   color: var(--text-faint);
   font-style: italic;
+}
+
+/* --- markdown ------------------------------------------------------------
+ *
+ * Mono here is not a violation of "mono is metadata-only" — SPEC §5.2 puts code
+ * on the mono side of the table with the timestamps. It stops at code: a body
+ * with a code span in it is sans type with one mono word in it, which is the
+ * point of having the distinction at all.
+ *
+ * Every gap below is padding. The virtualizer measures each row's own box, and
+ * a margin sits outside it (see the note at the top of this file).
+ */
+
+.md-p {
+  /* Newlines and runs of spaces survive, and a long unbroken URL wraps rather
+     than pushing the panel wider. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-p + .md-p,
+.md-p + .md-quote,
+.md-p + .md-pre,
+.md-p + .md-list,
+.md-quote + *,
+.md-pre + *,
+.md-list + * {
+  padding-top: 6px;
+}
+
+.md-quote {
+  border-left: 2px solid var(--hairline-strong);
+  padding-left: 9px;
+  color: var(--text-secondary);
+}
+
+.md-list {
+  padding-left: 22px;
+  list-style-position: outside;
+}
+
+.md-list li::marker {
+  color: var(--text-faint);
+}
+
+.md-code {
+  font-family: var(--font-mono);
+  /* Mono runs large next to sans at the same size; this lands them level. */
+  font-size: 0.92em;
+  background: var(--surface-2);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.md-pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  line-height: 1.5;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: 7px 9px;
+  /* Wrapping rather than scrolling on purpose: the stream owns the only
+     scrollbar in this panel, and a row that can scroll is a row whose measured
+     height stops meaning anything. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A link is not accent-colored. Accent has exactly four jobs (SPEC §5.3) and
+ * this is not one of them, so the underline carries it instead.
+ */
+.md-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: text-decoration-color var(--motion-fast);
+}
+
+.md-link:hover {
+  text-decoration-color: var(--text-secondary);
+}
+
+/* --- what a message replies to ------------------------------------------ */
+
+.msg-reply {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 0 2px;
+  background: none;
+  border: 0;
+  text-align: left;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color var(--motion-fast);
+}
+
+.msg-reply:hover {
+  color: var(--text-secondary);
+}
+
+.msg-reply-who {
+  flex: none;
+  color: var(--person-name);
+  opacity: 0.7;
+}
+
+/* The quoted words are somebody's message, so they are in the reading face —
+   only the marker and the name beside them are metadata. */
+.msg-reply-said {
+  font-family: var(--font-ui);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* --- editing in place ---------------------------------------------------- */
+
+.msg-editor-field {
+  width: 100%;
+  resize: none;
+  font-family: var(--font-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+}
+
+.msg-editor-hint {
+  padding-top: 3px;
+}
+
+/* --- reactions (SPEC §4.8) -----------------------------------------------
+ *
+ * Weight, never a number. `--weight` is a step from 0 to 4 and it moves two
+ * things at once: the glyph gets larger and the mark behind it gets more solid.
+ * Six people are visibly heavier than one without anybody counting.
+ */
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 5px;
+}
+
+.reaction {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  /* The mark itself grows, not just the glyph inside it. */
+  padding: 1px calc(5px + var(--weight, 0) * 1px);
+  line-height: 1.35;
+  font-size: calc(12px + var(--weight, 0) * 2px);
+  cursor: pointer;
+  transition: border-color var(--motion-fast);
+}
+
+.reaction::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--surface-2);
+  opacity: calc(0.35 + var(--weight, 0) * 0.16);
+}
+
+.reaction > span {
+  position: relative;
+}
+
+.reaction[data-mine="true"] {
+  border-color: var(--hairline-strong);
+}
+
+.reaction:hover {
+  border-color: var(--text-muted);
+}
+
+/* --- message actions ------------------------------------------------------
+ *
+ * Pinned out of flow, so showing it never changes a row's measured height. It
+ * is always in the DOM — invisible and un-clickable at rest, so it costs
+ * nothing to a mouse, and reachable the moment the keyboard tabs into it.
+ */
+
+.msg-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast);
+}
+
+.stream-row[data-head="true"] .msg-actions {
+  top: var(--group-gap);
+}
+
+.stream-row:hover .msg-actions,
+.stream-row:focus-within .msg-actions,
+.msg-actions[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The strip overhangs the message above it, so a hovered row comes forward. */
+.stream-row:hover,
+.stream-row:focus-within {
+  z-index: 1;
+}
+
+.msg-action {
+  background: none;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 1px 5px;
+  color: var(--text-faint);
+  /* No `font: inherit` here: the shorthand would reset the face this button's
+     `meta` class just set, and these labels are metadata (SPEC §5.2). */
+  cursor: pointer;
+  transition: color var(--motion-fast);
+}
+
+.msg-action:hover {
+  color: var(--text-primary);
+  background: var(--surface-1);
+}
+
+.msg-action-label {
+  padding: 0 4px;
+  color: var(--text-secondary);
+}
+
+.msg-pick {
+  font-size: 14px;
+  padding: 0 3px;
+  line-height: 1.3;
 }
 
 /* --- session dividers -------------------------------------------------- */
@@ -102,11 +362,14 @@
  * mIRC had, then the text. No grouping, no aging, no effects (SPEC §5.6).
  * The gutter is fixed-width for free — mono type and a padded hour.
  */
+[data-density="irc"] .msg-block {
+  border-left: 0;
+  padding-left: 0;
+}
+
 [data-density="irc"] .msg-body {
   display: flex;
   gap: 8px;
-  border-left: 0;
-  padding-left: 0;
   opacity: 1;
 }
 
@@ -133,4 +396,22 @@
 
 [data-density="irc"] .stream-divider {
   padding: 10px 0;
+}
+
+/* One line per message means the reply mark and the reactions ride along on
+   that line rather than each claiming one of their own. */
+[data-density="irc"] .msg-reply {
+  display: inline-flex;
+  width: auto;
+  padding: 0 6px 0 0;
+}
+
+[data-density="irc"] .msg-reply-said {
+  max-width: 24ch;
+}
+
+[data-density="irc"] .reactions {
+  display: inline-flex;
+  padding: 0 0 0 6px;
+  vertical-align: middle;
 }

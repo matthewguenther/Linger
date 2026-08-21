@@ -23,6 +23,7 @@ import { useSyncExternalStore } from "react";
 
 import type { ClientFrame } from "../generated/ClientFrame";
 import type { CreateMessageRequest } from "../generated/CreateMessageRequest";
+import type { EditMessageRequest } from "../generated/EditMessageRequest";
 import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
 import type { PresenceEntry } from "../generated/PresenceEntry";
@@ -33,6 +34,7 @@ import type { ServerFrame } from "../generated/ServerFrame";
 import type { User } from "../generated/User";
 import type { UserId } from "../generated/UserId";
 import type { AuthedApi } from "./api";
+import { TYPING_INTERVAL_MS, TYPING_TTL_MS } from "./limits";
 
 /**
  * Mirrors `Status` in `src-tauri/src/gateway.rs`. Allowed to be hand-written:
@@ -77,6 +79,12 @@ export interface GatewayState {
   occupancy: Record<string, UserId[]>;
   /** Loaded history, keyed by room id. */
   streams: Record<string, RoomStream>;
+  /**
+   * Who is mid-sentence: room id → user id → when their last `typing` frame
+   * landed. Entries age out of here rather than being counted or badged — it is
+   * a line of text above the composer and nothing else.
+   */
+  typing: Record<string, Record<string, number>>;
 }
 
 const EMPTY: GatewayState = {
@@ -87,6 +95,7 @@ const EMPTY: GatewayState = {
   presence: [],
   occupancy: {},
   streams: {},
+  typing: {},
 };
 
 let state: GatewayState = EMPTY;
@@ -222,6 +231,7 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         presence: frame.d.presence,
         occupancy: occupancyFrom(frame.d.presence),
         streams: {},
+        typing: {},
       };
     case "presence.update": {
       const entry = frame.d;
@@ -290,9 +300,84 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
       }
       return next;
     }
+    case "typing": {
+      const { room_id, user_id } = frame.d;
+      // A frame, not a state: the server says "this person just typed", and how
+      // long that stays true is ours to decide. `sweepTyping` ages it out.
+      return {
+        ...current,
+        typing: {
+          ...current.typing,
+          [room_id]: { ...current.typing[room_id], [user_id]: Date.now() },
+        },
+      };
+    }
     default:
       return current;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Typing
+// ---------------------------------------------------------------------------
+
+/**
+ * One timer for the whole app, running only while somebody is typing.
+ *
+ * The alternative — a timer per person, or a render loop that re-checks the
+ * clock — is more moving parts for a line of text that is wrong for at most two
+ * seconds either way.
+ */
+let typingSweep: number | null = null;
+
+function sweepTyping(): void {
+  const cutoff = Date.now() - TYPING_TTL_MS;
+  const fresh: Record<string, Record<string, number>> = {};
+  let anyone = false;
+  let changed = false;
+  for (const [roomId, people] of Object.entries(state.typing)) {
+    const kept: Record<string, number> = {};
+    for (const [userId, at] of Object.entries(people)) {
+      if (at > cutoff) {
+        kept[userId] = at;
+        anyone = true;
+      } else {
+        changed = true;
+      }
+    }
+    if (Object.keys(kept).length > 0) fresh[roomId] = kept;
+  }
+  if (changed) publish({ ...state, typing: fresh });
+  if (!anyone && typingSweep !== null) {
+    window.clearInterval(typingSweep);
+    typingSweep = null;
+  }
+}
+
+function startTypingSweep(): void {
+  if (typingSweep !== null) return;
+  typingSweep = window.setInterval(sweepTyping, 2000);
+}
+
+function stopTypingSweep(): void {
+  if (typingSweep === null) return;
+  window.clearInterval(typingSweep);
+  typingSweep = null;
+}
+
+/** When we last told the server we were typing, per room. */
+const toldServer = new Map<string, number>();
+
+/**
+ * Say that we are typing in a room, at most as often as the server will accept
+ * (PROTOCOL §8: one per 4 seconds). Silent when there is no connection — a
+ * typing frame is worth nothing the moment it is late.
+ */
+export async function startTyping(roomId: RoomId): Promise<void> {
+  const now = Date.now();
+  if (now - (toldServer.get(roomId) ?? 0) < TYPING_INTERVAL_MS) return;
+  toldServer.set(roomId, now);
+  await send({ op: "typing.start", d: { room_id: roomId } });
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +437,9 @@ export async function connect(api: AuthedApi): Promise<void> {
       await listen<ServerFrame>("gateway:frame", (event) => {
         if (connected !== following) return;
         publish(apply(state, event.payload));
+        // Ageing a typing entry out is a side effect, so it stays out of the
+        // fold. The sweep stops itself once nobody is typing.
+        if (event.payload.op === "typing") startTypingSweep();
       }),
     ];
     // A disconnect that landed while we were attaching: don't leak listeners.
@@ -376,6 +464,8 @@ export async function connect(api: AuthedApi): Promise<void> {
 export async function disconnect(): Promise<void> {
   connected = null;
   givenToken = null;
+  stopTypingSweep();
+  toldServer.clear();
   for (const off of unlisteners) off();
   unlisteners = [];
   publish(EMPTY);
@@ -459,13 +549,115 @@ export async function loadOlder(api: AuthedApi, roomId: RoomId): Promise<void> {
  * Failures are thrown, not swallowed: the composer is the only thing that knows
  * what the person was typing, so it is the only thing that can tell them.
  */
-export async function sendMessage(api: AuthedApi, roomId: RoomId, body: string): Promise<void> {
-  const request: CreateMessageRequest = { body, reply_to: null, attachment_ids: null };
+export async function sendMessage(
+  api: AuthedApi,
+  roomId: RoomId,
+  body: string,
+  replyTo: MessageId | null = null,
+): Promise<void> {
+  const request: CreateMessageRequest = { body, reply_to: replyTo, attachment_ids: null };
   const path = `/rooms/${encodeURIComponent(roomId)}/messages`;
   const message = await api.post<Message>(path, request);
-  const stream = state.streams[roomId];
+  fold(api, message);
+  // Whatever we were mid-sentence about, we have now said it.
+  toldServer.delete(roomId);
+}
+
+/** Fold one message the server just handed back into the room that holds it. */
+function fold(api: AuthedApi, message: Message): void {
+  const stream = state.streams[message.room_id];
   if (connected !== api || !stream) return;
-  putStream(roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
+  putStream(message.room_id, {
+    ...stream,
+    messages: mergeMessage(stream.messages, message),
+  });
+}
+
+/**
+ * Change what a message says. Only its author may, and the server is the one
+ * that decides that — an `ApiError` here is the answer, not a bug.
+ *
+ * Like sending, this folds the response in as well as waiting for the frame, so
+ * an edit lands even with the socket down.
+ */
+export async function editMessage(
+  api: AuthedApi,
+  messageId: MessageId,
+  body: string,
+): Promise<void> {
+  const request: EditMessageRequest = { body };
+  const message = await api.patch<Message>(`/messages/${encodeURIComponent(messageId)}`, request);
+  fold(api, message);
+}
+
+/**
+ * Take a message back. It becomes a tombstone rather than disappearing, so
+ * anything replying to it still has something to point at (PROTOCOL §4).
+ *
+ * The DELETE answers 204 with no body, so the local copy is tombstoned here by
+ * the same rule the `message.delete` frame uses.
+ */
+export async function deleteMessage(api: AuthedApi, messageId: MessageId): Promise<void> {
+  await api.delete(`/messages/${encodeURIComponent(messageId)}`);
+  if (connected !== api) return;
+  let next = state;
+  for (const roomId of Object.keys(state.streams)) {
+    next = withStream(next, roomId, (stream) =>
+      stream.messages.some((held) => held.id === messageId)
+        ? {
+            ...stream,
+            messages: stream.messages.map((held) =>
+              held.id === messageId
+                ? { ...held, body: "", deleted_at: held.deleted_at ?? Date.now() }
+                : held,
+            ),
+          }
+        : stream,
+    );
+  }
+  if (next !== state) publish(next);
+}
+
+/**
+ * Add or take back one of your reactions.
+ *
+ * The server answers 204 and then tells everyone — us included — what the group
+ * now holds. We move our own name in or out first anyway, because a reaction
+ * that waits for a round trip feels like a button that didn't work, and the
+ * frame overwrites this with the canonical answer a moment later.
+ */
+export async function setReaction(
+  api: AuthedApi,
+  messageId: MessageId,
+  key: string,
+  on: boolean,
+): Promise<void> {
+  const path = `/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(key)}`;
+  if (on) await api.put(path);
+  else await api.delete(path);
+
+  const me = state.me;
+  if (connected !== api || me === null) return;
+  let next = state;
+  for (const roomId of Object.keys(state.streams)) {
+    next = withStream(next, roomId, (stream) => {
+      if (!stream.messages.some((held) => held.id === messageId)) return stream;
+      return {
+        ...stream,
+        messages: stream.messages.map((held) => {
+          if (held.id !== messageId) return held;
+          const group = held.reactions.find((candidate) => candidate.key === key);
+          const others = (group?.user_ids ?? []).filter((id) => id !== me.id);
+          const user_ids = on ? [...others, me.id] : others;
+          return {
+            ...held,
+            reactions: applyReaction(held.reactions, { key, count: user_ids.length, user_ids }),
+          };
+        }),
+      };
+    });
+  }
+  if (next !== state) publish(next);
 }
 
 /** The status bar line (SPEC §5.6): protocol text, never a spinner. */
