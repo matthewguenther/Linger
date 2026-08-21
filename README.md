@@ -238,6 +238,12 @@ Things that surprise people the first time:
   row's own box and a margin sits outside it. And a row's height is a guess until it
   has been drawn once, so anything that scrolls to a position has to keep re-aiming as
   the real heights arrive; jumping once lands in the wrong place.
+- **The only thing that interrupts you is somebody naming you.** A mention, or a person
+  you ticked in `notify me when`, raises a desktop notification through
+  `tauri-plugin-notification`. Nothing else does, and there is no badge for one to hang
+  off. On Linux that means a notification service on the session bus — Plasma, GNOME and
+  `dunst` all provide one. Without one, or if you turn notifications off at the OS level,
+  the message still arrives in the stream; you just don't get interrupted about it.
 - **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
   keyring — Keychain, Credential Manager, or a Secret Service provider like
   gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app

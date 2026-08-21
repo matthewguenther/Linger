@@ -120,6 +120,74 @@
   white-space: nowrap;
 }
 
+/* --- you left off here -------------------------------------------------- */
+
+/*
+ * The line that replaces the badge (SPEC §4.2). Accent, which SPEC §5.3 spends
+ * on exactly four things and this is the first of them.
+ *
+ * Deliberately not shaped like a session divider: that one centres its label
+ * between two hairlines, and this one hangs its label at the left edge where
+ * the message text starts, with the rule running off to the right. They mean
+ * different things and they should not be mistaken for each other at a glance.
+ */
+.left-off {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(var(--group-gap) * 0.75) 0 calc(var(--group-gap) * 0.5);
+}
+
+.left-off::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.left-off-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* --- mentions ----------------------------------------------------------- */
+
+/*
+ * Somebody's name inside a message body.
+ *
+ * Weight, not colour. The palette belongs to names in a header and in the
+ * roster; painting one here would mean a value out of somebody's profile
+ * reaching into a body's markup, and the body is the one place this client
+ * keeps free of attributes it did not choose. Accent is out for a different
+ * reason — it has four jobs and this is not one of them.
+ */
+.mention {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Your own name. A raised chip, so it is findable when you scroll past it. */
+.mention-me {
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+  padding: 0 3px;
+  /* Without this a mention that wraps loses the chip on the second line. */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* The marker half of SPEC §4.2's one exception: a message that names you stays
+   findable by eye, without a count and without a badge. */
+.msg[data-names-me="true"] .msg-body {
+  background: var(--surface-1);
+  padding-right: 8px;
+}
+
 /* --- IRC mode ---------------------------------------------------------- */
 
 /*

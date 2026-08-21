@@ -187,6 +187,10 @@ pub fn run() {
         // Links in a message go to the system browser, never to this window.
         // The capability file narrows the plugin to http and https.
         .plugin(tauri_plugin_opener::init())
+        // The one thing allowed to interrupt somebody: a message that names
+        // them, or one from a person they asked to hear from (SPEC §4.2).
+        // There are no other notifications and no unread badge to attach one to.
+        .plugin(tauri_plugin_notification::init())
         .manage(Connection::default())
         .invoke_handler(tauri::generate_handler![
             activity_probe,

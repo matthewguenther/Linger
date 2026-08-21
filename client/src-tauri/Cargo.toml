@@ -51,6 +51,14 @@ rand = "0.9"
 # talked into launching a local file or a program.
 tauri-plugin-opener = "2.5.4"
 
+# A desktop notification when somebody names you (SPEC §4.2, T-305). This is
+# the only push in the product — there is no badge and no unread count for one
+# to hang off. Same reasoning as the opener above: every platform raises a
+# notification differently and none of it is worth hand-rolling. On Linux it
+# talks to the freedesktop notification service over zbus, so it adds no system
+# package to anybody's build.
+tauri-plugin-notification = "2"
+
 # OS keyring for the refresh token (ARCHITECTURE §7.3). Features are picked per
 # platform on purpose:
 #
