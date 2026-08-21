@@ -32,7 +32,10 @@ pub const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
 pub const USERNAME_PATTERN: &str = "^[a-z0-9_]{2,24}$";
 pub const ROOM_SLUG_PATTERN: &str = "^[a-z0-9-]{1,32}$";
 pub const MAX_DISPLAY_NAME_CHARS: usize = 32;
-pub const MIN_PASSWORD_CHARS: usize = 12;
+/// Minimum only. No composition rules, no expiry (PROTOCOL §2). The client
+/// keeps the password in the OS keyring, so a long floor is friction on every
+/// fresh install rather than security anybody gets.
+pub const MIN_PASSWORD_CHARS: usize = 8;
 pub const INVITE_CODE_CHARS: usize = 12;
 
 /// Gateway (PROTOCOL §8).

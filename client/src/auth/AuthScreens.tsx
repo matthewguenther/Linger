@@ -17,6 +17,14 @@ import { ApiError, PublicApi } from "../lib/api";
 import { hostOf, parsePastedLink } from "../lib/link";
 import "./auth.css";
 
+/**
+ * `linger-core::limits::MIN_PASSWORD_CHARS`. The server is the authority and
+ * refuses anything shorter; this copy exists so the form can grey the button
+ * out before the round trip rather than after it. Minimum length is the only
+ * rule — no symbols, no digits, no expiry (PROTOCOL §2).
+ */
+const MIN_PASSWORD_CHARS = 8;
+
 type Step =
   | { name: "connect" }
   | { name: "login"; baseUrl: string; serverName: string | null }
@@ -234,7 +242,7 @@ function Register({
       <Field label="display name" value={displayName} onChange={setDisplayName} />
       <Field
         label="password"
-        hint="At least 12 characters. No silly rules about symbols."
+        hint={`At least ${MIN_PASSWORD_CHARS} characters. No silly rules about symbols.`}
         value={password}
         onChange={setPassword}
         type="password"
@@ -243,7 +251,7 @@ function Register({
       <button
         className="auth-go"
         type="submit"
-        disabled={busy || !username || !displayName || password.length < 12}
+        disabled={busy || !username || !displayName || password.length < MIN_PASSWORD_CHARS}
       >
         {busy ? "joining…" : "join"}
       </button>
@@ -303,7 +311,7 @@ function Setup({
       <Field label="display name" value={displayName} onChange={setDisplayName} />
       <Field
         label="password"
-        hint="At least 12 characters."
+        hint={`At least ${MIN_PASSWORD_CHARS} characters.`}
         value={password}
         onChange={setPassword}
         type="password"
@@ -312,7 +320,7 @@ function Setup({
       <button
         className="auth-go"
         type="submit"
-        disabled={busy || !serverName || !username || !displayName || password.length < 12}
+        disabled={busy || !serverName || !username || !displayName || password.length < MIN_PASSWORD_CHARS}
       >
         {busy ? "setting up…" : "set up this server"}
       </button>

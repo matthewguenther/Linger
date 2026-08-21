@@ -1449,6 +1449,34 @@ M4. Anything that lands before them must not break the frames they rely on.*
 
 ---
 
+## Decided — the password stays, the friction goes
+
+**Matt, 2026-08-21.** The question was whether a locally-run server needs a
+password at all, since Ventrilo asked for a name and nothing else. Answer: keep
+it, but stop making people think about it.
+
+The password is not protecting the messages — it is protecting *being you*. The
+roster is the product, and the documented deployment is a box on the open
+internet (ARCHITECTURE §7), so name-only would mean anyone who ever received an
+invite link can connect as anybody. What was actually annoying was the
+**12-character floor**, which is friction paid on every fresh install and buys
+very little when the client already keeps the password in the OS keyring.
+
+**Done in the same pass:** the floor is now **8**, which with no composition
+rules is the NIST SP 800-63B position. One constant,
+`linger-core::limits::MIN_PASSWORD_CHARS`; the server's error message counts off
+it instead of spelling the number out, and the two client forms mirror it the
+same way `Stream.tsx` mirrors `MAX_MESSAGE_CHARS`. PROTOCOL §2 says 8 and says
+why.
+
+The two bigger options were considered and **not** taken: making the invite link
+itself the credential (a real change to PROTOCOL §2 and the refresh-token family
+logic), and a host-set no-auth LAN mode (honest for a LAN party, dangerous the
+day the box gets a public IP). If the friction comes back, those are the next
+two rungs, in that order.
+
+---
+
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M8 is painful.
