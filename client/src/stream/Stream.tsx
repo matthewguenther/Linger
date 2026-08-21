@@ -1,7 +1,7 @@
 /**
  * The message stream: the room you are looking at.
  *
- * Three things here are load-bearing.
+ * Four things here are load-bearing.
  *
  * **It is virtualized from day one** (AGENTS). Ten thousand messages is one
  * evening in a room that gets used, and a list that renders all of them is a
@@ -13,26 +13,48 @@
  * you are already at the end, and history loading in above you must not move
  * what you are reading. Both are the virtualizer's `anchorTo: "end"`.
  *
- * **Nothing renders as HTML.** Message bodies go in as text, so a body that
- * looks like markup is text that looks like markup. Markdown, an allowlist
- * sanitizer, and the message actions are T-304.
+ * **Nothing renders as HTML.** Message bodies are parsed into a tree of known
+ * node kinds and drawn as React elements (`markdown.ts`, `Markdown.tsx`), so a
+ * body that looks like markup is text that looks like markup.
+ *
+ * **Reactions are weight, never numbers** (SPEC §4.8). The count comes down the
+ * wire and goes into the hover text and the accessible label; it is never drawn
+ * as a numeral.
  */
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type CSSProperties,
   type FormEvent,
+  type KeyboardEvent,
+  type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 
+import type { Message } from "../generated/Message";
+import type { MessageId } from "../generated/MessageId";
 import type { Room } from "../generated/Room";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { type Density, DENSITIES } from "../lib/density";
-import { loadOlder, openRoom, sendMessage, useGateway } from "../lib/gateway";
+import {
+  deleteMessage,
+  editMessage,
+  loadOlder,
+  openRoom,
+  sendMessage,
+  startedTyping,
+  toggleReaction,
+  typistsIn,
+  useGateway,
+} from "../lib/gateway";
+import Markdown from "./Markdown";
+import { plainText } from "./markdown";
+import { REACTIONS, reactionOf, reactionTitle, reactionWeight } from "./reactions";
 import { buildRows, type StreamRow } from "./rows";
 import { ageOpacity, clockTime, fullTime, sessionLabel } from "./time";
 import "./stream.css";
@@ -44,6 +66,29 @@ import "./stream.css";
  */
 const BACKFILL_MARGIN_PX = 1200;
 
+/**
+ * `linger-core::limits::MAX_MESSAGE_CHARS`. The server is the authority and
+ * refuses anything longer; this copy exists so the composer can say so before
+ * the round trip rather than after it.
+ */
+const MAX_MESSAGE_CHARS = 8000;
+
+/** How much of a quoted message the reply line shows before it trails off. */
+const REPLY_EXCERPT_CHARS = 140;
+
+/**
+ * What a message row can ask the stream to do. The two that talk to the server
+ * hand back the promise rather than swallowing it, because the row is where a
+ * refusal has to be shown — it is the thing the person was pointing at.
+ */
+interface Actions {
+  reply: (message: Message) => void;
+  edit: (message: Message) => void;
+  react: (message: Message, key: string) => Promise<void>;
+  remove: (message: Message) => Promise<void>;
+  jumpTo: (id: MessageId) => void;
+}
+
 interface StreamProps {
   api: AuthedApi;
   room: Room;
@@ -54,7 +99,9 @@ interface StreamProps {
 }
 
 export default function Stream({ api, room, users, density, onDensityChange }: StreamProps) {
-  const stream = useGateway().streams[room.id];
+  const gateway = useGateway();
+  const stream = gateway.streams[room.id];
+  const me = gateway.me;
   const loaded = stream !== undefined;
   const now = useNow();
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -74,6 +121,28 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
     () => buildRows(messages ?? [], { group: density !== "irc", atStart }),
     [messages, atStart, density],
   );
+
+  // Replies point at a message by id, and a reply line has to show what it is
+  // answering, so the loaded history needs to be addressable both ways.
+  const byId = useMemo(() => new Map((messages ?? []).map((held) => [held.id, held])), [messages]);
+  const rowOf = useMemo(() => {
+    const index = new Map<MessageId, number>();
+    rows.forEach((row, at) => {
+      if (row.kind === "message") index.set(row.message.id, at);
+    });
+    return index;
+  }, [rows]);
+
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [editing, setEditing] = useState<MessageId | null>(null);
+  const [flash, setFlash] = useState<MessageId | null>(null);
+
+  // A half-written reply belongs to the room it was written in.
+  useEffect(() => {
+    setReplyTo(null);
+    setEditing(null);
+    setFlash(null);
+  }, [room.id]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -126,6 +195,37 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
     return () => cancelAnimationFrame(pending);
   }, [room.id, rows.length, virtualizer]);
 
+  // Following a new message down is not one scroll, for the same reason
+  // walking into a room is not: a row is an estimated height until it has been
+  // drawn once, so the virtualizer's own `followOnAppend` aims at a bottom
+  // computed from a guess and lands short by however much the guess was wrong.
+  // Before markdown every message was a line or two and the error was a few
+  // pixels. A message with a code block in it is off by a screenful.
+  //
+  // So re-aim per frame until the last row is really drawn — and only when the
+  // bottom is what you were looking at. Keying this on the *last* row means a
+  // page of older history loading in above never triggers it: that changes how
+  // many rows there are without changing which one is last.
+  const lastKey = rows[rows.length - 1]?.key;
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element || rows.length === 0 || !landing.current.done) return;
+    if (element.scrollHeight - element.scrollTop - element.clientHeight > element.clientHeight) {
+      return;
+    }
+    let frames = 0;
+    let pending = 0;
+    const step = (): void => {
+      virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
+      const drawn = virtualizer.getVirtualItems();
+      frames += 1;
+      if (drawn[drawn.length - 1]?.index === rows.length - 1 || frames >= 30) return;
+      pending = requestAnimationFrame(step);
+    };
+    pending = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(pending);
+  }, [lastKey, rows.length, virtualizer]);
+
   const backfill = useCallback(() => {
     const element = scroller.current;
     if (!element || element.scrollTop > BACKFILL_MARGIN_PX) return;
@@ -141,6 +241,42 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
       void loadOlder(api, room.id);
     }
   }, [api, room.id, stream]);
+
+  const actions: Actions = useMemo(
+    () => ({
+      reply: (message) => {
+        setEditing(null);
+        setReplyTo(message);
+      },
+      edit: (message) => {
+        setReplyTo(null);
+        setEditing(message.id);
+      },
+      react: (message, key) => toggleReaction(api, message, key),
+      remove: (message) => deleteMessage(api, message),
+      jumpTo: (id) => {
+        const index = rowOf.get(id);
+        if (index === undefined) return;
+        virtualizer.scrollToIndex(index, { align: "center" });
+        // The message you jumped to is somewhere in the middle of a screen of
+        // other messages, so say which one it was. It fades on its own; there
+        // is nothing to dismiss.
+        setFlash(id);
+        window.setTimeout(() => setFlash((current) => (current === id ? null : current)), 1600);
+      },
+    }),
+    [api, rowOf, virtualizer],
+  );
+
+  // The composer's Up-arrow shortcut, and the keyboard's only route to editing.
+  const lastMine = useMemo(() => {
+    const held = messages ?? [];
+    for (let at = held.length - 1; at >= 0; at -= 1) {
+      const message = held[at];
+      if (message && message.author_id === me?.id && message.deleted_at === null) return message;
+    }
+    return null;
+  }, [messages, me?.id]);
 
   const items = virtualizer.getVirtualItems();
 
@@ -188,7 +324,22 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
                       <span className="divider-label">{sessionLabel(row.at, now)}</span>
                     </p>
                   ) : (
-                    <MessageRow row={row} author={author} now={now} irc={density === "irc"} />
+                    <MessageRow
+                      api={api}
+                      row={row}
+                      author={author}
+                      me={me}
+                      people={people}
+                      repliedTo={
+                        row.message.reply_to === null ? undefined : byId.get(row.message.reply_to)
+                      }
+                      now={now}
+                      irc={density === "irc"}
+                      editing={editing === row.message.id}
+                      flashing={flash === row.message.id}
+                      onEditDone={() => setEditing(null)}
+                      actions={actions}
+                    />
                   )}
                 </div>
               );
@@ -197,25 +348,69 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
         )}
       </div>
 
-      <Composer api={api} room={room} />
+      <Typing roomId={room.id} people={people} />
+
+      <Composer
+        api={api}
+        room={room}
+        replyTo={replyTo}
+        onClearReply={() => setReplyTo(null)}
+        onEditLast={() => {
+          if (lastMine) actions.edit(lastMine);
+        }}
+      />
     </main>
   );
 }
 
+// ---------------------------------------------------------------------------
+// One message
+// ---------------------------------------------------------------------------
+
 function MessageRow({
+  api,
   row,
   author,
+  me,
+  people,
+  repliedTo,
   now,
   irc,
+  editing,
+  flashing,
+  onEditDone,
+  actions,
 }: {
+  api: AuthedApi;
   row: Extract<StreamRow, { kind: "message" }>;
   author: User | undefined;
+  me: User | null;
+  people: Map<string, User>;
+  repliedTo: Message | undefined;
   now: number;
   irc: boolean;
+  editing: boolean;
+  flashing: boolean;
+  onEditDone: () => void;
+  actions: Actions;
 }) {
   const { message, head } = row;
   const name = author?.display_name ?? "someone";
   const deleted = message.deleted_at !== null;
+  const [picking, setPicking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  // A delete the server refuses, or a reaction that didn't land, has to say so
+  // next to the message it was aimed at. Anywhere else and it reads as being
+  // about something you are not looking at.
+  const run = (work: Promise<void>): void => {
+    setProblem(null);
+    void work.catch((error: unknown) => {
+      setProblem(error instanceof ApiError ? error.message : "Couldn't reach the server.");
+    });
+  };
+
   const nameStyle: CSSProperties = {
     fontWeight: author?.style.weight ?? 500,
     fontStyle: author?.style.italic === true ? "italic" : "normal",
@@ -232,50 +427,345 @@ function MessageRow({
 
   const body = deleted ? (
     <span className="msg-gone">deleted</span>
+  ) : editing ? (
+    <EditBox api={api} message={message} onDone={onEditDone} />
   ) : (
-    <>
-      {message.body}
-      {message.edited_at === null ? null : <span className="msg-edited meta">edited</span>}
-    </>
+    <Markdown
+      source={message.body}
+      trailing={
+        message.edited_at === null ? undefined : <span className="msg-edited meta">edited</span>
+      }
+    />
   );
 
-  // One line per message, timestamps in a fixed-width gutter, the aligned nick
-  // column mIRC had (SPEC §5, §5.6). No group header, because there is no group.
-  if (irc) {
-    return (
-      <div className="msg-body">
-        {time}
-        <span className="irc-name" style={nameStyle}>
-          {name}
-        </span>
-        <span className="irc-text">{body}</span>
-      </div>
-    );
-  }
+  const mine = me !== null && message.author_id === me.id;
+  const bodyStyle: CSSProperties = { "--age": ageOpacity(message.created_at, now) };
 
   return (
-    <>
-      {head ? (
-        <p className="msg-head">
-          <span className="msg-author" style={nameStyle}>
+    <div
+      className="msg"
+      data-flash={flashing ? "true" : undefined}
+      onMouseLeave={() => {
+        setPicking(false);
+        setConfirming(false);
+      }}
+    >
+      {repliedTo === undefined && message.reply_to === null ? null : (
+        <ReplyLine target={repliedTo} people={people} onJump={actions.jumpTo} />
+      )}
+
+      {/* One line per message, timestamps in a fixed-width gutter, the aligned
+          nick column mIRC had (SPEC §5, §5.6). No group header, because there
+          is no group. */}
+      {irc ? (
+        <div className="msg-body">
+          {time}
+          <span className="irc-name" style={nameStyle}>
             {name}
           </span>
-          {time}
-        </p>
-      ) : null}
-      {/* Aging is one custom property, computed from the timestamp and applied
-          to the body only — never the name, never the time (SPEC §5.6). */}
-      <div className="msg-body" style={{ "--age": ageOpacity(message.created_at, now) }}>
-        {body}
-      </div>
-    </>
+          <span className="irc-text">{body}</span>
+        </div>
+      ) : (
+        <>
+          {head ? (
+            <p className="msg-head">
+              <span className="msg-author" style={nameStyle}>
+                {name}
+              </span>
+              {time}
+            </p>
+          ) : null}
+          {/* Aging is one custom property, computed from the timestamp and
+              applied to the body only — never the name, never the time
+              (SPEC §5.6). */}
+          <div className="msg-body" style={bodyStyle}>
+            {body}
+          </div>
+        </>
+      )}
+
+      {problem ? <p className="msg-problem meta">{problem}</p> : null}
+
+      {message.reactions.length === 0 ? null : (
+        <Reactions
+          message={message}
+          me={me}
+          people={people}
+          onReact={(target, key) => run(actions.react(target, key))}
+        />
+      )}
+
+      {deleted || editing ? null : (
+        <div className="msg-actions">
+          {picking ? (
+            REACTIONS.map((reaction) => (
+              <button
+                key={reaction.key}
+                type="button"
+                className="msg-action msg-action-glyph"
+                title={reaction.label}
+                aria-label={`react with ${reaction.label}`}
+                onClick={() => {
+                  run(actions.react(message, reaction.key));
+                  setPicking(false);
+                }}
+              >
+                {reaction.glyph}
+              </button>
+            ))
+          ) : (
+            <>
+              {/* Twelve fixed marks, not an emoji picker (SPEC §4.8) — they
+                  take over this same strip rather than opening a layer, which
+                  keeps the row the height it already was. */}
+              <button
+                type="button"
+                className="msg-action meta"
+                onClick={() => setPicking(true)}
+                aria-label={`react to ${name}'s message`}
+              >
+                react
+              </button>
+              <button
+                type="button"
+                className="msg-action meta"
+                onClick={() => actions.reply(message)}
+                aria-label={`reply to ${name}`}
+              >
+                reply
+              </button>
+              {mine ? (
+                <button
+                  type="button"
+                  className="msg-action meta"
+                  onClick={() => actions.edit(message)}
+                >
+                  edit
+                </button>
+              ) : null}
+              {mine || me?.is_host === true ? (
+                confirming ? (
+                  <>
+                    <button
+                      type="button"
+                      className="msg-action msg-action-danger meta"
+                      onClick={() => run(actions.remove(message))}
+                    >
+                      delete for good
+                    </button>
+                    <button
+                      type="button"
+                      className="msg-action meta"
+                      onClick={() => setConfirming(false)}
+                    >
+                      keep
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="msg-action meta"
+                    onClick={() => setConfirming(true)}
+                  >
+                    delete
+                  </button>
+                )
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
-function Composer({ api, room }: { api: AuthedApi; room: Room }) {
+/** The line above a reply saying what it is answering. */
+function ReplyLine({
+  target,
+  people,
+  onJump,
+}: {
+  target: Message | undefined;
+  people: Map<string, User>;
+  onJump: (id: MessageId) => void;
+}) {
+  // The message being answered may simply not be loaded — it is older than the
+  // pages we hold. Saying so is better than pretending the reply is a normal
+  // message, because the indent already told you it isn't.
+  if (target === undefined) {
+    return (
+      <p className="msg-reply meta">
+        <span className="reply-mark">↩</span> an earlier message
+      </p>
+    );
+  }
+  const who = people.get(target.author_id)?.display_name ?? "someone";
+  const excerpt =
+    target.deleted_at !== null ? "deleted" : shorten(plainText(target.body), REPLY_EXCERPT_CHARS);
+  return (
+    <button type="button" className="msg-reply meta" onClick={() => onJump(target.id)}>
+      <span className="reply-mark">↩</span>
+      <span className="reply-author">{who}</span>
+      <span className="reply-excerpt">{excerpt}</span>
+    </button>
+  );
+}
+
+function shorten(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit).trimEnd()}…`;
+}
+
+/**
+ * The marks on a message.
+ *
+ * Each one's `--weight` runs 0 to 1 and CSS turns it into size and density. No
+ * numeral appears: the tally lives in the hover title and the accessible label,
+ * which is where SPEC §4.8 puts it.
+ */
+function Reactions({
+  message,
+  me,
+  people,
+  onReact,
+}: {
+  message: Message;
+  me: User | null;
+  people: Map<string, User>;
+  onReact: (message: Message, key: string) => void;
+}) {
+  return (
+    <div className="reactions">
+      {message.reactions.map((group) => {
+        // A key this build has never heard of is skipped rather than guessed
+        // at, so a newer server adding a thirteenth mark doesn't draw a blank.
+        const reaction = reactionOf(group.key);
+        if (!reaction) return null;
+        const names = group.user_ids.map((id) => people.get(id)?.display_name ?? "someone");
+        const mine = me !== null && group.user_ids.includes(me.id);
+        const counted = `${group.count} ${group.count === 1 ? "person" : "people"}`;
+        return (
+          <button
+            key={group.key}
+            type="button"
+            className="reaction"
+            data-mine={mine ? "true" : undefined}
+            style={{ "--weight": reactionWeight(group.count) }}
+            title={reactionTitle(names, reaction.label)}
+            aria-pressed={mine}
+            aria-label={`${reaction.label}, ${counted}`}
+            onClick={() => onReact(message, group.key)}
+          >
+            <span aria-hidden="true">{reaction.glyph}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Editing in place. Enter saves, Escape gives up, the text survives a refusal. */
+function EditBox({
+  api,
+  message,
+  onDone,
+}: {
+  api: AuthedApi;
+  message: Message;
+  onDone: () => void;
+}) {
+  const [draft, setDraft] = useState(message.body);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const box = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    element.focus();
+    // The cursor belongs at the end of what is already there, not the start:
+    // most edits are a fix at the end or an afterthought.
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, []);
+
+  useAutoGrow(box, draft);
+
+  const save = async (): Promise<void> => {
+    const body = draft.trim();
+    if (saving) return;
+    if (body === message.body.trim()) {
+      onDone();
+      return;
+    }
+    if (body.length === 0) {
+      setProblem("An empty message is a delete, and that is a different button.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await editMessage(api, message, body);
+      onDone();
+    } catch (error) {
+      setProblem(error instanceof ApiError ? error.message : "Couldn't reach the server.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form
+      className="msg-edit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <textarea
+        ref={box}
+        className="composer-input"
+        rows={1}
+        value={draft}
+        maxLength={MAX_MESSAGE_CHARS}
+        aria-label="edit this message"
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onDone();
+            return;
+          }
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            void save();
+          }
+        }}
+      />
+      {problem ? <p className="composer-problem meta">{problem}</p> : null}
+      <p className="msg-edit-hint meta">enter saves · escape cancels</p>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The composer
+// ---------------------------------------------------------------------------
+
+function Composer({
+  api,
+  room,
+  replyTo,
+  onClearReply,
+  onEditLast,
+}: {
+  api: AuthedApi;
+  room: Room;
+  replyTo: Message | null;
+  onClearReply: () => void;
+  onEditLast: () => void;
+}) {
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const box = useRef<HTMLTextAreaElement | null>(null);
 
   // Switching rooms should not carry a half-typed line into the new one.
   useEffect(() => {
@@ -283,15 +773,23 @@ function Composer({ api, room }: { api: AuthedApi; room: Room }) {
     setProblem(null);
   }, [room.id]);
 
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
+  // Choosing to reply is choosing to type, so put the cursor where the typing
+  // goes.
+  useEffect(() => {
+    if (replyTo) box.current?.focus();
+  }, [replyTo]);
+
+  useAutoGrow(box, draft);
+
+  const submit = async (): Promise<void> => {
     const body = draft.trim();
     if (body.length === 0 || sending) return;
     setSending(true);
     try {
-      await sendMessage(api, room.id, body);
+      await sendMessage(api, room.id, body, replyTo?.id ?? null);
       setDraft("");
       setProblem(null);
+      onClearReply();
     } catch (error) {
       // The composer is the only thing holding what they typed, so it is the
       // only thing that can tell them it did not go — and it keeps the text.
@@ -301,15 +799,59 @@ function Composer({ api, room }: { api: AuthedApi; room: Room }) {
     }
   };
 
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key === "Escape" && replyTo) {
+      event.preventDefault();
+      onClearReply();
+      return;
+    }
+    // Up arrow in an empty box edits the last thing you said. It is the habit
+    // from every other chat client, and it is the only way to reach `edit`
+    // without a mouse.
+    if (event.key === "ArrowUp" && draft === "") {
+      event.preventDefault();
+      onEditLast();
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void submit();
+    }
+  };
+
+  const left = MAX_MESSAGE_CHARS - draft.length;
+
   return (
-    <form className="composer" onSubmit={(event) => void submit(event)}>
+    <form
+      className="composer"
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      {replyTo ? (
+        <p className="composer-reply meta">
+          <span className="reply-mark">↩</span>
+          <span className="reply-excerpt">{shorten(plainText(replyTo.body), 90)}</span>
+          <button type="button" className="composer-reply-drop" onClick={onClearReply}>
+            don’t reply
+          </button>
+        </p>
+      ) : null}
       {problem ? <p className="composer-problem meta">{problem}</p> : null}
       <div className="composer-row">
-        <input
+        <textarea
+          ref={box}
           className="composer-input"
+          rows={1}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={`say something in #${room.slug}`}
+          maxLength={MAX_MESSAGE_CHARS}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            if (event.target.value !== "") startedTyping(room.id);
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={replyTo ? "say something back" : `say something in #${room.slug}`}
           aria-label={`message #${room.slug}`}
           autoComplete="off"
         />
@@ -317,8 +859,64 @@ function Composer({ api, room }: { api: AuthedApi; room: Room }) {
           send
         </button>
       </div>
+      {/* Only near the ceiling. A counter that is always on is a scold. */}
+      {left <= 200 ? (
+        <p className="composer-room meta">{left} characters left</p>
+      ) : null}
     </form>
   );
+}
+
+/**
+ * Grow a textarea to fit what is in it, up to the height CSS allows.
+ *
+ * Resetting to `auto` first is the whole trick: `scrollHeight` is the content's
+ * height *or* the box's, whichever is larger, so measuring without collapsing
+ * it first means the box can grow and never shrink.
+ */
+function useAutoGrow(box: RefObject<HTMLTextAreaElement | null>, value: string): void {
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [box, value]);
+}
+
+/**
+ * Who is writing something, above the composer.
+ *
+ * Nobody sends a "stopped typing" — the signal goes stale instead — so this
+ * checks the clock on its own rather than waiting for a frame that is never
+ * coming. Two seconds is under the six the signal lives for, so the line
+ * disappears within a beat of the person stopping.
+ */
+function Typing({ roomId, people }: { roomId: string; people: Map<string, User> }) {
+  const gateway = useGateway();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const names = typistsIn(gateway, roomId, now).map(
+    (id) => people.get(id)?.display_name ?? "someone",
+  );
+  // The line holds its space whether or not anyone is typing. A row that
+  // appears and disappears would shove the composer up and down while you are
+  // aiming at it.
+  return (
+    <p className="typing meta" aria-live="polite">
+      {names.length === 0 ? "" : `${listOf(names)} ${names.length === 1 ? "is" : "are"} typing…`}
+    </p>
+  );
+}
+
+function listOf(names: readonly string[]): string {
+  if (names.length === 1) return names[0] ?? "";
+  if (names.length > 3) return `${names.length} people`;
+  const last = names[names.length - 1] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${last}`;
 }
 
 function DensityPicker({
@@ -386,4 +984,3 @@ function useNow(): number {
   }, []);
   return now;
 }
-

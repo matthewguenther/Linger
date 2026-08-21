@@ -98,6 +98,9 @@
   gap: 8px;
 }
 
+/* A textarea, not a single line: messages have paragraphs, code blocks and
+   lists in them now. It grows with what is in it (`useAutoGrow`) until it hits
+   the ceiling here, and then scrolls itself rather than eating the room. */
 .composer-input {
   flex: 1;
   min-width: 0;
@@ -106,7 +109,12 @@
   border-radius: var(--radius-control);
   color: var(--text-primary);
   font: inherit;
+  font-family: var(--font-ui);
+  line-height: 1.5;
   padding: 8px 10px;
+  max-height: 40vh;
+  overflow-y: auto;
+  resize: none;
 }
 
 .composer-input::placeholder {
@@ -139,6 +147,59 @@
 .composer-problem {
   color: var(--text-secondary);
   padding-bottom: 6px;
+}
+
+/* What you are answering, above the box you are answering it in. */
+.composer-reply {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 6px;
+  color: var(--text-muted);
+}
+
+.composer-reply .reply-excerpt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.composer-reply-drop {
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-faint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-reply-drop:hover {
+  color: var(--text-secondary);
+}
+
+/* How much room is left, and only when there is nearly none. A counter that is
+   always on is a scold, and this app does not keep score (SPEC §2). */
+.composer-room {
+  padding-top: 4px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+/*
+ * Who is writing something. The line keeps its height whether or not anyone is
+ * — a row that appeared and vanished would shove the composer up and down while
+ * you were aiming at it.
+ */
+.typing {
+  height: 16px;
+  padding: 0 var(--gutter);
+  color: var(--text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .roster {

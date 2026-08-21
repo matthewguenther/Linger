@@ -3,5 +3,11 @@
   "identifier": "default",
   "description": "Minimum permission surface for the main window (ARCHITECTURE §7).",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+    }
+  ]
 }

@@ -184,6 +184,9 @@ fn gateway_send(connection: State<'_, Connection>, frame: ClientFrame) -> bool {
 /// Entry point shared by main.rs and (later) mobile.
 pub fn run() {
     tauri::Builder::default()
+        // Links in a message go to the system browser, never to this window.
+        // The capability file narrows the plugin to http and https.
+        .plugin(tauri_plugin_opener::init())
         .manage(Connection::default())
         .invoke_handler(tauri::generate_handler![
             activity_probe,
