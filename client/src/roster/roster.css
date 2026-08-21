@@ -1,0 +1,318 @@
+/*
+ * The roster panel: a card stack down the right-hand side, or a horizontal
+ * strip above the composer when the window is too narrow for a column
+ * (SPEC §3, §5.5). One set of cards; the layout attribute decides which way
+ * they run.
+ *
+ * Cards are separated by full-bleed hairlines, not drawn as boxes: panels butt
+ * against each other and nothing floats (SPEC §5.1). The 2px rule down the left
+ * of each card is the person's own color, the same one their messages carry in
+ * the stream, so a person reads as one person across both panels.
+ */
+
+.roster {
+  grid-area: roster;
+  background: var(--surface-1);
+  border-left: 1px solid var(--hairline);
+  padding: var(--gutter);
+  overflow-y: auto;
+}
+
+/* The switch between the two things this column is: who is around, and who you
+   have asked to hear from. It sits on the panel label's own line rather than
+   taking a row of its own. */
+.roster-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.roster-switch {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.roster-switch:hover {
+  color: var(--text-secondary);
+}
+
+.roster-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+/* Full-bleed: the hairline and the color rule reach the panel's edges, so the
+   stack reads as structure rather than as a column of floating tiles. */
+.person {
+  margin: 0 calc(var(--gutter) * -1);
+  padding: 7px var(--gutter) 8px calc(var(--gutter) - 2px);
+  border-top: 1px solid var(--hairline);
+  border-left: 2px solid var(--person-rule);
+}
+
+.roster-list > .person:first-child {
+  border-top: 0;
+}
+
+.person[data-open="true"] {
+  background: var(--surface-2);
+}
+
+/* Gone quiets the rule but never the name: the color is how you know who it is,
+   and a card you cannot identify at a glance is a card doing nothing. */
+.person[data-state="offline"] {
+  --person-rule: var(--hairline);
+}
+
+.person[data-state="offline"] .person-name {
+  opacity: 0.75;
+}
+
+.person-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+button.person-head {
+  cursor: pointer;
+}
+
+/* There is a status under this one. A quiet mark, because most cards have
+   nothing to open and a row of affordances would be a row of noise. */
+button.person-head::after {
+  content: "…";
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+button.person-head:hover::after,
+button.person-head[aria-expanded="true"]::after {
+  color: var(--text-secondary);
+}
+
+.person-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--person-name);
+  font-size: var(--text-label-size);
+  line-height: 1.4;
+}
+
+/* Sits with the name rather than out at the edge: it is part of reading who
+   this is, not a second column. */
+.person-you {
+  flex: none;
+  color: var(--text-faint);
+}
+
+/* Presence, as a dot. The word is beside it for a screen reader (`sr-only`),
+   so state is never carried by shape alone. */
+.person-dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.person[data-state="in_room"] .person-dot {
+  background: var(--text-primary);
+}
+
+/* Hollow: here, but not at the keyboard. */
+.person[data-state="idle"] .person-dot,
+.person[data-state="away"] .person-dot {
+  background: none;
+  border-color: var(--text-muted);
+}
+
+.person[data-state="offline"] .person-dot {
+  background: none;
+  border-color: var(--text-faint);
+}
+
+/* Everything under the name lines up with the name, not with the dot. */
+.person-lines {
+  padding-left: 13px;
+}
+
+.person-where,
+.person-activity {
+  color: var(--text-secondary);
+  font-size: var(--text-label-size);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.activity-mark {
+  margin-right: 5px;
+  color: var(--text-muted);
+}
+
+.person-since {
+  padding-top: 1px;
+}
+
+/* When they were last here, and what they left — SPEC §3 draws these on one
+   line. The duration is mono because it is a numeral; the message is not,
+   because it is something a person wrote. */
+.person-gone {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.person-gone .meta {
+  flex: none;
+}
+
+.person-away {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--text-label-size);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* The status, opened: their line in their own styling, then the labeled
+   fields (SPEC §4.6). */
+.person-status {
+  padding: 5px 0 2px 13px;
+}
+
+.status-line {
+  color: var(--person-name);
+  font-size: var(--text-label-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.status-fields {
+  display: grid;
+  gap: 1px;
+  padding-top: 4px;
+}
+
+.status-field {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.status-field dt {
+  flex: none;
+}
+
+.status-field dd {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-label-size);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow windows: the same cards, along instead of down (SPEC §3).
+   Never a hamburger, never hidden — it is the panel the product is about.
+   --------------------------------------------------------------------------- */
+
+.roster[data-layout="strip"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  border-left: 0;
+  border-top: 1px solid var(--hairline);
+  padding: 4px var(--gutter) 5px;
+  /* The card row scrolls; the strip itself does not. */
+  overflow: hidden;
+}
+
+/* No panel label in a strip: the cards say what they are, and a label row
+   would cost a line of the stream to say it again. */
+.roster[data-layout="strip"] .panel-label {
+  display: none;
+}
+
+.roster[data-layout="strip"] .roster-head {
+  order: 2;
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+}
+
+.roster[data-layout="strip"] .placeholder {
+  order: 1;
+  margin: 0;
+  align-self: center;
+}
+
+.roster[data-layout="strip"] .roster-list {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.roster[data-layout="strip"] .person {
+  flex: none;
+  max-width: 180px;
+  margin: 0;
+  padding: 2px 12px 2px 7px;
+  border-top: 0;
+}
+
+/* A chip shows its name and one line under it, whichever line came first —
+   where they are, else what they are doing, else how long they have been gone.
+   Opening one gives it the whole card. */
+.roster[data-layout="strip"] .person:not([data-open="true"]) .person-lines > * ~ * {
+  display: none;
+}
+
+.roster[data-layout="strip"] .person-lines > *,
+.roster[data-layout="strip"] .person-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roster[data-layout="strip"] .person[data-open="true"] {
+  max-width: 300px;
+}
+
+.roster[data-layout="strip"] .person[data-open="true"] .person-lines > *,
+.roster[data-layout="strip"] .person[data-open="true"] .person-status {
+  white-space: normal;
+}
+
+/* The notify rules are a list, and a list cannot be a strip. It gets the width
+   and a ceiling instead. */
+.roster[data-layout="strip"] .roster-notify {
+  order: 3;
+  flex-basis: 100%;
+  max-height: 38vh;
+  overflow-y: auto;
+}

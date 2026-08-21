@@ -28,6 +28,7 @@ import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
 import type { NotifyRule } from "../generated/NotifyRule";
 import type { PresenceEntry } from "../generated/PresenceEntry";
+import type { PresenceState } from "../generated/PresenceState";
 import type { ReactionGroup } from "../generated/ReactionGroup";
 import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
@@ -116,6 +117,16 @@ export interface GatewayState {
   leftOff: Record<string, MessageId>;
   /** "Always notify me when this person posts" (SPEC §4.2). */
   notifyRules: NotifyRule[];
+  /**
+   * User id → when this client watched their connection go away.
+   *
+   * The roster says how long somebody has been gone, and the server is no help
+   * for the people who left while we were watching: it writes `last_seen_at` on
+   * disconnect and never pushes the new value. Our own observation is the
+   * fresher of the two, so it is kept. A fresh `ready` throws it away, because
+   * the users it carries are freshly read from the database.
+   */
+  offlineAt: Record<string, number>;
 }
 
 const EMPTY: GatewayState = {
@@ -131,6 +142,7 @@ const EMPTY: GatewayState = {
   newest: {},
   leftOff: {},
   notifyRules: [],
+  offlineAt: {},
 };
 
 let state: GatewayState = EMPTY;
@@ -182,6 +194,27 @@ function occupancyFrom(presence: PresenceEntry[]): Record<string, UserId[]> {
     (rooms[entry.room_id] ??= []).push(entry.user_id);
   }
   return rooms;
+}
+
+/**
+ * Keep `offlineAt` in step with one presence change. Pure, and separate,
+ * because "when did they go" is the only thing on a roster card the server
+ * does not tell us outright.
+ */
+function markOffline(
+  held: Record<string, number>,
+  userId: UserId,
+  was: PresenceState,
+  now: PresenceState,
+): Record<string, number> {
+  if (now === "offline") {
+    if (was === "offline") return held;
+    return { ...held, [userId]: Date.now() };
+  }
+  if (held[userId] === undefined) return held;
+  const next = { ...held };
+  delete next[userId];
+  return next;
 }
 
 /**
@@ -285,6 +318,7 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         occupancy: occupancyFrom(frame.d.presence),
         streams: {},
         typing: {},
+        offlineAt: {},
         // `read` and `leftOff` survive: one is a copy of something the server
         // is holding for us, and the other is where this session started, which
         // a reconnect does not change.
@@ -292,9 +326,14 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
       };
     case "presence.update": {
       const entry = frame.d;
+      const was = current.presence.find((p) => p.user_id === entry.user_id)?.state ?? "offline";
       return {
         ...current,
         presence: upsert(current.presence, entry, (p) => p.user_id === entry.user_id),
+        // Note the moment somebody drops off, and forget it when they come
+        // back. Only the *transition* sets it: a second offline frame for
+        // somebody already gone must not restart their clock.
+        offlineAt: markOffline(current.offlineAt, entry.user_id, was, entry.state),
       };
     }
     case "user.update": {

@@ -238,6 +238,12 @@ Things that surprise people the first time:
   row's own box and a margin sits outside it. And a row's height is a guess until it
   has been drawn once, so anything that scrolls to a position has to keep re-aiming as
   the real heights arrive; jumping once lands in the wrong place.
+- **The roster is one component rendered in one of two places** (`client/src/roster/`).
+  Wide windows get it as the right-hand column; under 880px it renders inside the stream
+  column as a horizontal strip above the composer, and it is never hidden or folded into
+  a menu. React decides which — `client/src/lib/layout.ts` holds the only copy of that
+  width and the frame carries the answer as `data-narrow` — so there is no media query
+  to go looking for, and nothing is rendered twice.
 - **The only thing that interrupts you is somebody naming you.** A mention, or a person
   you ticked in `notify me when`, raises a desktop notification through
   `tauri-plugin-notification`. Nothing else does, and there is no badge for one to hang

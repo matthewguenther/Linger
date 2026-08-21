@@ -30,6 +30,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
   type RefObject,
   useCallback,
   useEffect,
@@ -45,6 +46,7 @@ import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
+import { useNow } from "../lib/clock";
 import { type Density, DENSITIES } from "../lib/density";
 import {
   deleteMessage,
@@ -60,6 +62,7 @@ import {
   typistsIn,
   useGateway,
 } from "../lib/gateway";
+import { nameStyle, personStyle } from "../lib/names";
 import { peopleList } from "../notify/rules";
 import Markdown, { type MentionLookup } from "./Markdown";
 import { mentionHandles, plainText } from "./markdown";
@@ -115,9 +118,22 @@ interface StreamProps {
   users: User[];
   density: Density;
   onDensityChange: (density: Density) => void;
+  /**
+   * The roster, on a window too narrow to give it a column of its own. It
+   * belongs here rather than in the frame because SPEC §3 puts the strip
+   * *above the composer*, and the composer is in this file.
+   */
+  roster?: ReactNode;
 }
 
-export default function Stream({ api, room, users, density, onDensityChange }: StreamProps) {
+export default function Stream({
+  api,
+  room,
+  users,
+  density,
+  onDensityChange,
+  roster,
+}: StreamProps) {
   const gateway = useGateway();
   const stream = gateway.streams[room.id];
   const me = gateway.me;
@@ -472,6 +488,8 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
         )}
       </div>
 
+      {roster}
+
       <Typing roomId={room.id} people={people} />
 
       <Composer
@@ -544,10 +562,7 @@ function MessageRow({
     });
   };
 
-  const nameStyle: CSSProperties = {
-    fontWeight: author?.style.weight ?? 500,
-    fontStyle: author?.style.italic === true ? "italic" : "normal",
-  };
+  const authorName = nameStyle(author);
   const time = (
     <time
       className="msg-time meta"
@@ -595,7 +610,7 @@ function MessageRow({
       {irc ? (
         <div className="msg-body">
           {time}
-          <span className="irc-name" style={nameStyle}>
+          <span className="irc-name" style={authorName}>
             {name}
           </span>
           <span className="irc-text">{body}</span>
@@ -604,7 +619,7 @@ function MessageRow({
         <>
           {head ? (
             <p className="msg-head">
-              <span className="msg-author" style={nameStyle}>
+              <span className="msg-author" style={authorName}>
                 {name}
               </span>
               {time}
@@ -1149,46 +1164,4 @@ function DensityPicker({
       ))}
     </div>
   );
-}
-
-/**
- * The two colors a person carries: the 3px rule beside their messages, and
- * their name.
- *
- * Both point at a palette variable rather than a color. M7 generates those
- * variables from `linger-core::PALETTE`, the one place the sixteen colors are
- * defined — so this file never learns what "azure" looks like, and the stream
- * picks up real colors the moment that stylesheet exists.
- */
-function personStyle(author: User | undefined): CSSProperties {
-  const key = paletteKey(author);
-  if (key === null) {
-    return { "--person-rule": "var(--hairline-strong)", "--person-name": "var(--text-primary)" };
-  }
-  return {
-    "--person-rule": `var(--name-${key}, var(--hairline-strong))`,
-    "--person-name": `var(--name-${key}, var(--text-primary))`,
-  };
-}
-
-function paletteKey(author: User | undefined): string | null {
-  if (!author) return null;
-  // A gradient name takes its rule from the first of its two colors. Painting
-  // the gradient itself is M7's, along with the palette these keys name.
-  const fill = author.style.fill;
-  const key = fill.kind === "solid" ? fill.color : fill.from;
-  // The server validates keys against linger-core::PALETTE (AGENTS rule 8);
-  // this is the second lock on the door, because the key is about to become
-  // part of a CSS variable name and user content is hostile (ARCHITECTURE §7).
-  return /^[a-z]{2,16}$/.test(key) ? key : null;
-}
-
-/** `Date.now()`, refreshed every minute, so bodies fade as they age. */
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
 }
