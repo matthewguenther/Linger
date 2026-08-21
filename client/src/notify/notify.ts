@@ -30,6 +30,7 @@ import {
 import type { RoomId } from "../generated/RoomId";
 import type { ServerFrame } from "../generated/ServerFrame";
 import type { GatewayState } from "../lib/gateway";
+import { isLooking } from "../lib/looking";
 import { plainText } from "../stream/markdown";
 import { notificationText, notifyReason } from "./rules";
 
@@ -72,8 +73,10 @@ export function considerFrame(frame: ServerFrame, snapshot: GatewayState): void 
 
   const message = frame.d;
   if (notifyReason(message, me, snapshot.notifyRules) === null) return;
-  // You are looking right at it.
-  if (viewing === message.room_id && focused()) return;
+  // You are looking right at it. `isLooking` is the same clock the
+  // read-marker uses: the window has your attention, not merely a room
+  // selected on a second monitor.
+  if (viewing === message.room_id && isLooking()) return;
 
   const slug = snapshot.rooms.find((room) => room.id === message.room_id)?.slug ?? "a room";
   const name =
@@ -97,15 +100,6 @@ function flush(): void {
     const { title, body } = notificationText(batch.slug, batch.names, batch.excerpt);
     void show(title, body);
   }
-}
-
-/**
- * Whether the window has the user's attention. Not `document.visibilityState`:
- * a window can be fully visible on a second monitor while you are typing
- * somewhere else, and in that case you have not read anything.
- */
-function focused(): boolean {
-  return typeof document !== "undefined" && document.hasFocus();
 }
 
 /**

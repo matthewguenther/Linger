@@ -197,6 +197,37 @@ function occupancyFrom(presence: PresenceEntry[]): Record<string, UserId[]> {
 }
 
 /**
+ * Move one person in the occupancy map to match their presence. Presence
+ * and occupancy frames arrive a beat apart, so rebuilding the *whole* map
+ * from presence would drop anyone whose occupancy we have already seen and
+ * whose presence we have not.
+ */
+function occupancyWith(
+  occupancy: Record<string, UserId[]>,
+  entry: PresenceEntry,
+): Record<string, UserId[]> {
+  let changed = false;
+  const next: Record<string, UserId[]> = {};
+  for (const [roomId, ids] of Object.entries(occupancy)) {
+    if (!ids.includes(entry.user_id)) {
+      next[roomId] = ids;
+      continue;
+    }
+    changed = true;
+    const without = ids.filter((id) => id !== entry.user_id);
+    if (without.length > 0) next[roomId] = without;
+  }
+  if (entry.room_id !== null) {
+    const held = next[entry.room_id] ?? [];
+    if (!held.includes(entry.user_id)) {
+      next[entry.room_id] = [...held, entry.user_id];
+      changed = true;
+    }
+  }
+  return changed ? next : occupancy;
+}
+
+/**
  * Keep `offlineAt` in step with one presence change. Pure, and separate,
  * because "when did they go" is the only thing on a roster card the server
  * does not tell us outright.
@@ -327,9 +358,14 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
     case "presence.update": {
       const entry = frame.d;
       const was = current.presence.find((p) => p.user_id === entry.user_id)?.state ?? "offline";
+      const presence = upsert(current.presence, entry, (p) => p.user_id === entry.user_id);
       return {
         ...current,
-        presence: upsert(current.presence, entry, (p) => p.user_id === entry.user_id),
+        presence,
+        // Occupancy frames arrive a beat earlier. Fold this person into
+        // the map without rebuilding it, so someone whose occupancy we
+        // already have is not dropped while theirs is still on the wire.
+        occupancy: occupancyWith(current.occupancy, entry),
         // Note the moment somebody drops off, and forget it when they come
         // back. Only the *transition* sets it: a second offline frame for
         // somebody already gone must not restart their clock.

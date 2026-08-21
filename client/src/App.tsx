@@ -30,7 +30,10 @@ import {
 } from "./lib/gateway";
 import { useNarrow } from "./lib/layout";
 import { hostOf } from "./lib/link";
+import { personStyle } from "./lib/names";
+import { occupancyLine, occupantsOf, STACK_VISIBLE } from "./lib/occupancy";
 import { useSession } from "./lib/session";
+import { setPresenceLive, setPresenceRoom, startPresence } from "./lib/watchPresence";
 import { resetNotifications, setViewing } from "./notify/notify";
 import Roster from "./roster/Roster";
 import Stream from "./stream/Stream";
@@ -90,7 +93,9 @@ function Console({
 
   useEffect(() => {
     void connect(api);
+    const stop = startPresence();
     return () => {
+      stop();
       resetNotifications();
       void disconnect();
     };
@@ -125,7 +130,15 @@ function Console({
   // Nothing interrupts you about the room you are already reading.
   useEffect(() => {
     setViewing(open?.id ?? null);
+    setPresenceRoom(open?.id ?? null);
   }, [open?.id]);
+
+  // A fresh `ready` is a new session on the server: we are `around` until
+  // this clock re-announces the room. Anything short of ready is not a
+  // connection worth sending presence on.
+  useEffect(() => {
+    setPresenceLive(gateway.status.kind === "ready");
+  }, [gateway.status.kind]);
 
   const status = statusText(gateway.status);
   const statusDetail = gateway.status.kind === "waiting" ? gateway.status.reason : undefined;
@@ -159,7 +172,15 @@ function Console({
                     data-new={hasNewActivity(gateway, room.id) ? "true" : undefined}
                     onClick={() => setOpenRoomId(room.id)}
                   >
-                    #{room.slug}
+                    <span className="room-slug">#{room.slug}</span>
+                    <RoomStack
+                      people={occupantsOf(
+                        room.id,
+                        gateway.occupancy,
+                        gateway.presence,
+                        gateway.users,
+                      )}
+                    />
                   </button>
                 </li>
               ))}
@@ -206,5 +227,31 @@ function Console({
         </span>
       </footer>
     </div>
+  );
+}
+
+/**
+ * The small stack of who is in a room, on the rail (SPEC §4.1).
+ *
+ * Dots, not faces: there are no avatars in this app, and the rail is not
+ * allowed colored icon squares either. Five is as many as the column will
+ * hold without crowding the name; the rest live in the accessible label,
+ * never as a "+N".
+ */
+function RoomStack({ people }: { people: User[] }) {
+  if (people.length === 0) return null;
+  const visible = people.slice(0, STACK_VISIBLE);
+  const label = `${occupancyLine(people)} in the room`;
+  return (
+    <span className="room-stack" aria-label={label} title={occupancyLine(people)}>
+      {visible.map((person) => (
+        <span
+          key={person.id}
+          className="room-stack-dot"
+          style={personStyle(person)}
+          aria-hidden="true"
+        />
+      ))}
+    </span>
   );
 }

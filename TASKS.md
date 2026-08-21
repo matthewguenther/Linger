@@ -89,7 +89,10 @@ task fails its acceptance criteria twice.
 - ⬜ **M4 — presence, roster, entrance sounds** — started. T-401 landed
   2026-08-21: the roster is the card stack the product is about, it moves live
   across clients, and on a narrow window it becomes a strip above the composer
-  instead of hiding. **Next up: T-402 (in-room mechanics).**
+  instead of hiding. **T-402 landed 2026-08-21: focusing a room puts you in it,
+  90 seconds of background or sitting still takes you out, ten minutes with no
+  input is idle, and occupancy is names in the header and a small stack on the
+  rail.** Next up: T-403 (entrance sound playback).
 - ⬜ **M5 … M9** — queued below.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -1150,10 +1153,74 @@ test with real disconnects, not mocks.*
     otherwise, with nothing to say why. And KWin's scripting console is how you
     focus and resize the window from a script: `workspace.windowList()`,
     `workspace.activeWindow = w`, and assigning `w.frameGeometry`.
-- ⬜ **T-402 · In-room mechanics** — effort: **medium**
+- ✅ **T-402 · In-room mechanics** — effort: **medium** *(landed 2026-08-21)*
   Focus = in the room (send `room.focus`), background/idle >90s = leave it
   (`room.focus` with `null`), input-idle >10min = `idle` state. Header occupancy
   `#garage · Matt, Callie`; sidebar mini-stacks.
+
+  ### What got built
+
+  - `client/src/lib/presence.ts` — the deciding, as pure functions over a clock:
+    whether you are still here, which room you should be in, and the next frame
+    to send. 26 tests, including the 90-second leave, a brief alt-tab that must
+    not bounce occupancy, and idle that only fires once the room is already left.
+  - `client/src/lib/watchPresence.ts` — watches the window, holds the last thing
+    we sent, and talks to the gateway. A fresh `ready` is a new session: we are
+    `around` with no room until this clock re-announces.
+  - `client/src/lib/occupancy.ts` — who is in a room, as people and as
+    `Matt, Callie`. Commas, not "and", matching SPEC §4.1. 9 tests.
+  - `client/src/lib/looking.ts` — whether the window has your attention, shared
+    by the read-marker and the notifier so they cannot disagree.
+  - Header occupancy and a rail stack of dots in the person's own color. Five
+    dots is as many as the column will hold; the rest live in the accessible
+    label, never as a "+N".
+
+  ### The three decisions worth knowing
+
+  - ***Two clocks, not one.*** Sitting still for 90 seconds takes you out of the
+    room even if the window is still focused. Putting the app in the background
+    starts its own 90-second clock from the moment of the blur, so a brief
+    alt-tab does not bounce occupancy. Ten minutes with no input is `idle`, and
+    that clock is input only — backgrounding does not pretend to be a keystroke.
+  - ***Leave the room, then go idle.*** `room.focus` is what the server uses to
+    set `in_room` / `around`. Sending `presence.update idle` while still holding
+    a room would show somebody as idle *in* the room. So at ten minutes the
+    first frame is a leave, if one is still owed, and the second is idle.
+  - ***`away` is left alone.*** T-405 owns that word. `room.focus` with `null`
+    would set the server to `around` and wipe it, so this file will not send
+    anything over the top of `away`.
+
+  ### Notes for whoever is next
+
+  - *T-403 plays the sound on `room.enter`.* The server already sends that
+    frame only to people in the room (T-203). This task is what makes "in the
+    room" true for a real client, so entrance sounds now have someone to play
+    for. Playback, mutes, and quiet hours are still T-403.
+  - *T-405 should not send `away` while still in a room without leaving first.*
+    The server sets `around` on any `room.focus` with `null`, which would wipe
+    the away state. Leave, then away — the same order idle uses.
+  - *T-501's activity poller should keep sending the registry id on
+    `presence.update`.* Idle (and the around that follows it) currently sends
+    `activity: null`, because there is no activity to report yet. Once the
+    poller is running, a `presence.update` here would clear the line until the
+    next poll; sending the last known id along, or letting the poller own every
+    `presence.update`, is the fix. Don't invent a window title to fill it.
+  - *The read-marker and the notifier now ask `isLooking()`* instead of
+    `document.hasFocus()` on their own. Sitting still for 90 seconds drops you
+    from occupancy; it does not unread the room. Looking at a message is still
+    looking at it.
+  - *The occupancy line is names, never a count.* A long list ellipsizes in the
+    header. The rail stack draws at most five dots and puts every name in the
+    accessible label.
+  - *A leftover `room.sit` in a server comment was renamed to `room.focus`.*
+    Vocabulary only; behavior was already `room.focus`.
+  - *The 90-second and ten-minute edges are tested as arithmetic, not slept
+    through.* The live desktop window opened to the paste-link screen against a
+    real server; driving sign-in from this session was not possible (no
+    compositor scripting, no injected keystrokes). Occupancy on the wire was
+    checked with a second gateway client sitting in `#garage`: `room.enter`,
+    occupancy of one, `presence.update` `in_room`. The header and the rail
+    stack light up from those same frames.
 - ⬜ **T-403 · Entrance sound playback** — effort: **medium**
   SPEC §4.1. Play on `room.enter` for those in the room; per-user cooldown
   5min/listener;
