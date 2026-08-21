@@ -20,6 +20,10 @@
  * **Reactions are weight, never numbers** (SPEC §4.8). The count comes down the
  * wire and goes into the hover text and the accessible label; it is never drawn
  * as a numeral.
+ *
+ * **Nothing here counts anything** (SPEC §4.2). Where you left off is a line in
+ * the stream, not a number beside a room name, and "since you were gone" is
+ * something you pull from the header rather than something that arrives.
  */
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -38,13 +42,17 @@ import {
 import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
 import type { Room } from "../generated/Room";
+import type { RoomId } from "../generated/RoomId";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { type Density, DENSITIES } from "../lib/density";
 import {
   deleteMessage,
   editMessage,
+  enterRoom,
   loadOlder,
+  loadUntil,
+  markRead,
   openRoom,
   sendMessage,
   startedTyping,
@@ -52,8 +60,9 @@ import {
   typistsIn,
   useGateway,
 } from "../lib/gateway";
-import Markdown from "./Markdown";
-import { plainText } from "./markdown";
+import { peopleList } from "../notify/rules";
+import Markdown, { type MentionLookup } from "./Markdown";
+import { mentionHandles, plainText } from "./markdown";
 import { REACTIONS, reactionOf, reactionTitle, reactionWeight } from "./reactions";
 import { buildRows, type StreamRow } from "./rows";
 import { ageOpacity, clockTime, fullTime, sessionLabel } from "./time";
@@ -75,6 +84,16 @@ const MAX_MESSAGE_CHARS = 8000;
 
 /** How much of a quoted message the reply line shows before it trails off. */
 const REPLY_EXCERPT_CHARS = 140;
+
+/**
+ * How close to the bottom counts as having seen the newest message. A couple of
+ * lines of slack, because a scroll that lands a pixel short is still a person
+ * looking at the end of the room.
+ */
+const BOTTOM_MARGIN_PX = 48;
+
+/** How many people "since you were gone" names before it trails off. */
+const SINCE_NAMES = 5;
 
 /**
  * What a message row can ask the stream to do. The two that talk to the server
@@ -112,14 +131,39 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
     if (!loaded) void openRoom(api, room.id);
   }, [api, room.id, loaded]);
 
+  // Walking in is what pins the "you left off here" line. Keyed on the room
+  // alone so it happens once per visit rather than once per message that
+  // arrives while you are standing there.
+  useEffect(() => {
+    enterRoom(room.id);
+  }, [room.id]);
+
   const people = useMemo(() => new Map(users.map((person) => [person.id, person])), [users]);
+
+  // A mention names a username, because that is the thing that is unique on a
+  // server and the thing somebody actually typed.
+  const byHandle = useMemo(
+    () => new Map(users.map((person) => [person.username, person])),
+    [users],
+  );
+  const mentions = useCallback<MentionLookup>(
+    (handle) => {
+      const person = byHandle.get(handle);
+      if (person === undefined) return null;
+      return { name: person.display_name, me: person.id === me?.id };
+    },
+    [byHandle, me?.id],
+  );
 
   const messages = stream?.messages;
   const atStart = stream?.atStart ?? false;
+  // Pinned when the room was opened and never moved after that, so the line
+  // stays somewhere you can find your way back to (SPEC §4.2).
+  const leftOff = gateway.leftOff[room.id] ?? null;
   const rows = useMemo(
     // IRC mode is one self-contained line per message, so it does not group.
-    () => buildRows(messages ?? [], { group: density !== "irc", atStart }),
-    [messages, atStart, density],
+    () => buildRows(messages ?? [], { group: density !== "irc", atStart, leftOff }),
+    [messages, atStart, density, leftOff],
   );
 
   // Replies point at a message by id, and a reply line has to show what it is
@@ -136,12 +180,14 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<MessageId | null>(null);
   const [flash, setFlash] = useState<MessageId | null>(null);
+  const [since, setSince] = useState(false);
 
   // A half-written reply belongs to the room it was written in.
   useEffect(() => {
     setReplyTo(null);
     setEditing(null);
     setFlash(null);
+    setSince(false);
   }, [room.id]);
 
   const virtualizer = useVirtualizer({
@@ -226,11 +272,51 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
     return () => cancelAnimationFrame(pending);
   }, [lastKey, rows.length, virtualizer]);
 
+  /**
+   * You have read what you can see.
+   *
+   * Two conditions, and the second one is the one people forget: the newest
+   * message has to be on screen, *and* the window has to have your attention. A
+   * room sitting open on a second monitor while you type somewhere else has not
+   * been read, and marking it read would quietly eat the line that tells you
+   * where you stopped.
+   */
+  const noteRead = useCallback(() => {
+    const element = scroller.current;
+    const newest = messages?.[messages.length - 1];
+    if (!element || newest === undefined || !document.hasFocus()) return;
+    if (element.scrollHeight - element.scrollTop - element.clientHeight > BOTTOM_MARGIN_PX) return;
+    markRead(api, room.id, newest.id);
+  }, [api, room.id, messages]);
+
+  useEffect(() => {
+    noteRead();
+    window.addEventListener("focus", noteRead);
+    return () => window.removeEventListener("focus", noteRead);
+  }, [noteRead]);
+
   const backfill = useCallback(() => {
+    noteRead();
     const element = scroller.current;
     if (!element || element.scrollTop > BACKFILL_MARGIN_PX) return;
     void loadOlder(api, room.id);
-  }, [api, room.id]);
+  }, [api, room.id, noteRead]);
+
+  // Where "go to where you left off" goes.
+  const leftOffRow = useMemo(() => rows.findIndex((row) => row.kind === "left-off"), [rows]);
+  const goToLeftOff = useCallback(() => {
+    if (leftOffRow < 0) return;
+    // The same re-aim the rest of this file does, and for the same reason: a
+    // row is an estimated height until it has been drawn, so one jump lands
+    // near the target rather than on it.
+    let frames = 0;
+    const step = (): void => {
+      virtualizer.scrollToIndex(leftOffRow, { align: "start" });
+      frames += 1;
+      if (frames < 6) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }, [leftOffRow, virtualizer]);
 
   // A room whose first page doesn't fill the window needs the next one before
   // anybody scrolls, or there is nothing to scroll.
@@ -279,14 +365,44 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
   }, [messages, me?.id]);
 
   const items = virtualizer.getVirtualItems();
+  const newest = gateway.newest[room.id];
+  // Something happened here after you stopped reading. The header offers to
+  // tell you about it; nothing pushes it at you (SPEC §4.2).
+  const strayed = leftOff !== null && newest !== undefined && newest > leftOff;
 
   return (
     <main className="stream">
       <header className="stream-header">
         <span className="room-name">#{room.slug}</span>
         {room.topic ? <span className="room-topic meta">{room.topic}</span> : null}
+        {strayed ? (
+          <button
+            type="button"
+            className="since-pull meta"
+            aria-expanded={since}
+            onClick={() => setSince((open) => !open)}
+          >
+            since you were gone
+          </button>
+        ) : null}
         <DensityPicker density={density} onChange={onDensityChange} />
       </header>
+
+      {strayed && since && leftOff !== null ? (
+        <SinceYouWereGone
+          api={api}
+          roomId={room.id}
+          leftOff={leftOff}
+          messages={messages ?? []}
+          atStart={atStart}
+          people={people}
+          now={now}
+          onGo={() => {
+            setSince(false);
+            goToLeftOff();
+          }}
+        />
+      ) : null}
 
       {/* `tabIndex` is not decoration: scrollback has to be reachable without a
           mouse, and focused, this takes arrow keys and Page Up like any other
@@ -323,6 +439,13 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
                     <p className="stream-divider">
                       <span className="divider-label">{sessionLabel(row.at, now)}</span>
                     </p>
+                  ) : row.kind === "left-off" ? (
+                    // The whole of what replaces the badge. One line, in accent,
+                    // which SPEC §5.3 spends on exactly four things and this is
+                    // the first of them.
+                    <p className="left-off">
+                      <span className="left-off-label">you left off here</span>
+                    </p>
                   ) : (
                     <MessageRow
                       api={api}
@@ -330,6 +453,7 @@ export default function Stream({ api, room, users, density, onDensityChange }: S
                       author={author}
                       me={me}
                       people={people}
+                      mentions={mentions}
                       repliedTo={
                         row.message.reply_to === null ? undefined : byId.get(row.message.reply_to)
                       }
@@ -373,6 +497,7 @@ function MessageRow({
   author,
   me,
   people,
+  mentions,
   repliedTo,
   now,
   irc,
@@ -386,6 +511,7 @@ function MessageRow({
   author: User | undefined;
   me: User | null;
   people: Map<string, User>;
+  mentions: MentionLookup;
   repliedTo: Message | undefined;
   now: number;
   irc: boolean;
@@ -397,6 +523,13 @@ function MessageRow({
   const { message, head } = row;
   const name = author?.display_name ?? "someone";
   const deleted = message.deleted_at !== null;
+  // The marker half of SPEC §4.2's one exception: a message that names you is
+  // findable by eye when you scroll back through a room, not just by the
+  // notification you may have missed.
+  const namesMe = useMemo(
+    () => me !== null && !deleted && mentionHandles(message.body).includes(me.username),
+    [message.body, me, deleted],
+  );
   const [picking, setPicking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -432,6 +565,7 @@ function MessageRow({
   ) : (
     <Markdown
       source={message.body}
+      mentions={mentions}
       trailing={
         message.edited_at === null ? undefined : <span className="msg-edited meta">edited</span>
       }
@@ -445,6 +579,7 @@ function MessageRow({
     <div
       className="msg"
       data-flash={flashing ? "true" : undefined}
+      data-names-me={namesMe ? "true" : undefined}
       onMouseLeave={() => {
         setPicking(false);
         setConfirming(false);
@@ -576,6 +711,79 @@ function MessageRow({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Since you were gone", pulled from the room header.
+ *
+ * SPEC §4.2 is specific that this is something you ask for and never something
+ * that arrives, so it does not exist until you open it. What it tells you is
+ * *who* has spoken and *when* it started — never how much, because how much is
+ * the number this whole app exists to not show you. A count would also be the
+ * one thing here that is a lie, since the client only holds the pages it has
+ * fetched.
+ *
+ * Opening it reaches back through history until the message you stopped at is
+ * loaded, which is what lets the "you left off here" line be drawn at all when
+ * you have been away longer than one page.
+ */
+function SinceYouWereGone({
+  api,
+  roomId,
+  leftOff,
+  messages,
+  atStart,
+  people,
+  now,
+  onGo,
+}: {
+  api: AuthedApi;
+  roomId: RoomId;
+  leftOff: MessageId;
+  messages: readonly Message[];
+  atStart: boolean;
+  people: Map<string, User>;
+  now: number;
+  onGo: () => void;
+}) {
+  useEffect(() => {
+    void loadUntil(api, roomId, leftOff);
+  }, [api, roomId, leftOff]);
+
+  const found = atStart || messages.some((message) => message.id <= leftOff);
+  const after = messages.filter(
+    (message) => message.id > leftOff && message.deleted_at === null,
+  );
+
+  // Everyone who has spoken since, in the order they first did.
+  const names: string[] = [];
+  for (const message of after) {
+    const who = people.get(message.author_id)?.display_name ?? "someone";
+    if (!names.includes(who)) names.push(who);
+  }
+  const opened = after[0];
+
+  return (
+    <section className="since" aria-label="since you were gone">
+      {!found ? (
+        <p className="meta">looking back…</p>
+      ) : opened === undefined ? (
+        <p className="meta">nothing since.</p>
+      ) : (
+        <>
+          <p className="since-who">
+            {names.length > SINCE_NAMES
+              ? `${peopleList(names.slice(0, SINCE_NAMES))} and others`
+              : peopleList(names)}
+            <span className="since-when meta">{sessionLabel(opened.created_at, now)}</span>
+          </p>
+          <button type="button" className="since-go meta" onClick={onGo}>
+            go to where you left off
+          </button>
+        </>
+      )}
+    </section>
   );
 }
 

@@ -73,8 +73,8 @@ task fails its acceptance criteria twice.
 - ✅ **T-006 — the vocabulary change** (2026-08-19): the coined words are gone,
   ahead of M3 writing any UI copy. Full mapping and the presence-naming call are
   recorded under the task below.
-- ⬜ **M3 — client: message stream** — started, and **the milestone check
-  passes** (2026-08-20). T-301 landed 2026-08-19 (sign in, and stay signed in).
+- ✅ **M3 — client: message stream** (2026-08-21). The milestone check passed on
+  2026-08-20. T-301 landed 2026-08-19 (sign in, and stay signed in).
   T-302 landed 2026-08-19: the client holds a live gateway connection from the
   Tauri core, survives the server being killed and restarted with no user
   action, and resumes without gaps or duplicates against a real server. T-303
@@ -82,8 +82,11 @@ task fails its acceptance criteria twice.
   messages in real time, and 10,000 messages of scrollback held 24–43 rows in
   the DOM. T-304 landed 2026-08-20: markdown that cannot become markup, a
   composer you can write a paragraph in, edit/delete/reply, and reactions that
-  read as weight instead of a tally. **Next up: T-305 ("you left off here"),
-  which finishes M3.**
+  read as weight instead of a tally. T-305 landed 2026-08-21 and finished the
+  milestone: a "you left off here" line, rooms that change weight instead of
+  wearing a number, a "since you were gone" view you pull from the header, and
+  the one notification the product allows. **Next up: M4 — presence, roster,
+  entrance sounds (T-401).**
 - ⬜ **M4 … M9** — queued below.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -879,13 +882,189 @@ test with real disconnects, not mocks.*
     pointer device must stay open while you screenshot**, because tearing it
     down drops the hover you were trying to capture.
 
-- ⬜ **T-305 · "You left off here"** — effort: **medium**
+- ✅ **T-305 · "You left off here"** — effort: **medium**
   SPEC §4.2. Accent divider at last-read, persists for the session; room label
   weight change (60%→100% opacity, nothing else); "since you were gone" pulled
   from the room header; mention notifications (person-to-person only — there is
   no `@everyone` to implement); notify-rules settings UI.
   *Accept:* manual two-client script in the task notes; grep the diff for badge/
   count regressions.
+
+  ### **Done 2026-08-21.** M3 is finished.
+
+  ### The two-client script that was run
+
+  *A clean server on `127.0.0.1:8421` from an empty data directory, two
+  `linger-client` windows side by side on one machine, signed in as different
+  people (Matt is the host, Callie joined on an invite), two rooms `#garage` and
+  `#porch`, and a handful of messages already in `#garage`. Every step below was
+  run for real and checked.*
+
+  1. *Matt sits in `#garage` with the window focused, then clicks `#porch`.*
+     `GET /read` on the server now answers with the id of the last message in
+     `#garage` — a position, not a number, and the only shape that endpoint has.
+  2. *Callie says three things in `#garage`, the last one `@matt come and look
+     when you can`.* Matt is in `#porch`, so nothing on his screen changes except
+     the weight of the `#garage` label in the rail.
+  3. *A desktop notification appears on Matt's machine.* Checked on the bus
+     rather than by eye, because a screenshot of a notification is a race:
+     `busctl --user monitor org.freedesktop.Notifications` catches
+     `Notify("linger-client", "Callie in #garage", "@matt the kettle is on")`.
+     **An ordinary message in the same room produced no `Notify` call at all**,
+     and neither did a mention that arrived while Matt was looking straight at
+     `#garage` with the window focused.
+  4. *The label weight was measured rather than eyeballed*, because 60% of a
+     grey is not obviously different from 100% of it in a screenshot. The
+     `#garage` label's brightest pixels read `(143,150,162)` with something
+     unseen in the room and `(98,104,113)` once it had been read — the same
+     colour at full and at 60%, which is `--text-secondary` `#8b929e` over the
+     rail. No dot appeared, no number, no colour change.
+  5. *Matt clicks back into `#garage`.* `YOU LEFT OFF HERE` is drawn in accent
+     above the first message he had not seen, the two messages naming him carry a
+     raised background, and `@matt` renders as a mark rather than as four
+     characters. [`docs/t305-left-off.png`](docs/t305-left-off.png).
+  6. *He pulls `since you were gone` from the room header.* It says who has
+     spoken and when it started — `Callie · this afternoon` — and offers `go to
+     where you left off`, which scrolls to the line. It never says how much.
+  7. *`notify` in the roster, expand Callie, tick `#porch`.* The rule is on the
+     server immediately (`GET /me/notify-rules` →
+     `{target_user_id: callie, room_id: porch}`), and Callie's next message in
+     `#porch` — **with nobody named in it** — raised
+     `Notify(…, "Callie in #porch", "no name in this one at all")` while Matt was
+     sitting in `#garage`. [`docs/t305-notify-rules.png`](docs/t305-notify-rules.png).
+
+  *The badge/count grep is clean. Every hit for `badge`, `unread`, `count` or
+  `tally` in the diff is a comment saying there isn't one; no line of code
+  computes a difference between two message ids, and nothing new renders a
+  numeral. The two numerals that do exist in the stream are older and sanctioned:
+  a reaction's tally in its `aria-label` (SPEC §4.8) and "N people are typing".*
+
+  ### What got built
+
+  - `client/src/lib/gateway.ts` — the store now holds four more things: where you
+    have read to in each room (`read`), the newest message that exists in each
+    room (`newest`), where the line is pinned (`leftOff`), and your notify rules.
+    Plus `markRead`, `loadUntil`, `enterRoom`, and the rule endpoints.
+  - `client/src/stream/rows.ts` — the "you left off here" line is a row, the same
+    way a session divider is.
+  - `client/src/stream/markdown.ts` — a `mention` node, and `mentionHandles`.
+  - `client/src/stream/Markdown.tsx` — draws a mention, or doesn't.
+  - `client/src/notify/rules.ts` — the whole list of reasons anything is allowed
+    to interrupt you. Pure, and tested, so the list can't quietly grow.
+  - `client/src/notify/notify.ts` — the batching and the OS call.
+  - `client/src/notify/NotifyRules.tsx` — the settings panel, in the roster
+    column.
+  - `client/src/App.tsx` — the label weight, and the roster column's second mode.
+  - 34 more tests (103 total).
+
+  ### Decisions worth knowing about
+
+  - ***The line is pinned when you walk into a room, and never moves while you
+    are standing in it.*** That is the reading of SPEC §4.2 that survives
+    contact: a line that crept along as you read would be a line you could never
+    use to find your way back, and a line pinned once at app start would be
+    telling you about this morning by the evening. So it is per visit. Leaving
+    the room and coming back pins it again, which is what makes it mean anything
+    the second time.
+  - ***The line is only drawn when the client holds the message on both sides of
+    it.*** Otherwise it would sit at the top of a page of history and claim that
+    is where you stopped, when really it is where the last fetch happened to end.
+    Pulling "since you were gone" is what reaches further back — up to ten pages,
+    and then it stops, because a line a thousand messages up is not somewhere
+    anyone is scrolling to.
+  - ***"Since you were gone" says who and when, never how much.*** A count there
+    would be the badge in a coat, and it would also be the one dishonest number
+    in the app, since the client only holds the pages it has fetched.
+  - ***A mention is matched on the username, not the display name.*** The
+    username is what is unique on a server and what somebody actually typed.
+    `@matthews` is not a mention of `matt` — the pattern would happily stop short
+    otherwise, and a notification landing on the wrong person's name is worse
+    than no notification. `@Matt` is not one either: usernames are lowercase and
+    the server rejects rather than normalises, so that is a word, not a name.
+  - ***A mention is found by walking the parsed tree, not by scanning the
+    text.*** So `` `@matt` `` in backticks is code, and does not ring anybody's
+    phone. `@` also joined the list of characters a backslash makes literal.
+  - ***A mention is weight, not colour.*** Names are painted from the palette
+    everywhere else, but doing it inside a message body would mean a value out of
+    somebody's profile reaching into the body's markup — and the body is the one
+    place this client keeps free of attributes it did not choose itself. Accent
+    was out for a different reason: it has four jobs (SPEC §5.3) and the "you
+    left off here" line is the one it spends here.
+  - ***The first message under the line shows its author's name*** even when the
+    same person was already talking. A run of unattributed lines under the line
+    is the one place grouping costs more than it saves.
+  - ***You have read a room when its newest message is on screen* and *the window
+    has your attention.*** A room left open on a second monitor while you type
+    somewhere else has not been read, and marking it read would quietly eat the
+    line. The write is debounced to the one-per-five-seconds PROTOCOL §4 allows,
+    fails silently, and never retries — the next `GET /read` is the truth, and a
+    red line in the UI because a bookmark did not save would be worse than the
+    bookmark not saving.
+  - ***Notifications are batched per room for 1.2 seconds.*** A resume replays
+    everything that happened while the socket was down, and thirty notifications
+    from one burst is the behaviour this app exists to not have.
+
+  ### The judgment call: `tauri-plugin-notification`
+
+  *SPEC §4.2 says a mention "produces a real notification", and a real
+  notification is an OS one. That needs a plugin — the same shape of decision
+  T-304 made for `tauri-plugin-opener`, and for the same reason: every platform
+  raises a notification differently and none of it is worth hand-rolling. It is
+  scoped in `capabilities/default.json` to `notification:default` and nothing
+  else. On Linux it talks to the freedesktop notification service over zbus, so
+  it adds no system package to anybody's build; the README says what happens when
+  there is no notification daemon (nothing breaks, you just don't get
+  interrupted). Permission is asked for once and a refusal is final and silent —
+  somebody who turned notifications off has already said what they want.*
+
+  ### Notes for whoever is next
+
+  - *There is no `@` autocomplete in the composer.* You have to know the
+    username. That is a real rough edge and it is deliberately not in this task —
+    it touches the composer's keyboard handling, where Up-arrow already means
+    "edit my last message". Worth its own small task.
+  - *The roster column has two modes now* — who's around, and the notify rules —
+    switched by a `notify` / `done` button on the panel label's line. **T-401
+    rebuilds the roster's contents and should keep that switch**, or move it
+    somewhere better; a settings screen for one setting would be a screen too
+    many.
+  - *`AuthedApi.delete()` takes an optional body*, because `DELETE
+    /me/notify-rules` identifies the rule in JSON rather than in the path.
+  - *`GET /read` answers a map, and `linger-core`'s `ReadMap` is a type alias, so
+    `ts-rs` has nothing to export for it.* The client writes
+    `Record<RoomId, MessageId>` out of two generated types, which is a
+    composition of wire types rather than a hand-written one. If a third map-typed
+    endpoint shows up it is probably worth making it a struct.
+  - *`newest` exists because the server computes a room's `last_message_id` when
+    it is asked for and never pushes a new one.* `ready` seeds it and
+    `message.create` keeps it up to date. If a future frame ever changes what the
+    newest message in a room is — a delete that tombstones the last one, say —
+    that is the place to fix it. Today a tombstone leaves the label bright until
+    you look, which is the harmless direction.
+  - *The whole feature reads the clock from `document.hasFocus()`.* **T-402 owns
+    `room.focus` upstream and the idle states**, and when it lands it will have a
+    better answer for "is this person actually here". The read-marker rule should
+    move onto it rather than keeping its own.
+  - *Testing drove two real windows over `/dev/uinput`* again (Wayland, no
+    xdotool), with KWin scripting to place them. Three things worth writing down.
+    **KWin 6's window list is `workspace.windowList()`**, not `workspace.windows`
+    — the latter throws a bare "Type error" into the journal and nothing else.
+    **A loaded KWin script runs once**; to run it again, unload it by name and
+    load it again. And **two clients on one machine share one keyring entry**, so
+    the second one to refresh its token spends the first one's, the family gets
+    revoked exactly as designed, and a window you were not touching drops to the
+    sign-in screen. That is the reuse protection working, not a bug — but it
+    makes a two-client script on one box fiddly, and it is worth knowing before
+    you spend twenty minutes on it.
+  - *One dead end, recorded so nobody re-walks it.* Partway through the manual
+    run a client stopped applying `message.create` frames while its status stayed
+    `ready`. It looked like a bug in this task and it is not: a raw WebSocket
+    client proved the server was fanning out, fresh clients were fine, and
+    signing out and back in did not reproduce it. The most likely cause is Vite's
+    HMR replacing `lib/gateway.ts` under a running window, which resets that
+    module's `state` and `connected` and orphans the Tauri listeners. **If a
+    `pnpm dev` window goes quiet after you edit the store, reload it before you
+    go looking for a bug.**
 
 ## M4 — presence, roster, entrance sounds
 

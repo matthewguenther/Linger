@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { type Block, type Inline, parseMarkdown, plainText, safeHref } from "./markdown";
+import {
+  type Block,
+  type Inline,
+  mentionHandles,
+  parseMarkdown,
+  plainText,
+  safeHref,
+} from "./markdown";
 
 /** The text of a body with the formatting flattened, for terse assertions. */
 function textOf(source: string): string {
@@ -229,5 +236,55 @@ describe("plainText", () => {
 
   it("uses a link's label, not its address", () => {
     expect(plainText("see [the porch](https://linger.example/porch)")).toBe("see the porch");
+  });
+});
+
+describe("mentions", () => {
+  it("finds a name at the start of a word", () => {
+    expect(mentionHandles("morning @callie")).toEqual(["callie"]);
+    expect(mentionHandles("@callie!")).toEqual(["callie"]);
+    expect(mentionHandles("(@callie)")).toEqual(["callie"]);
+  });
+
+  it("is not an email address", () => {
+    expect(mentionHandles("write to matt@example.com")).toEqual([]);
+  });
+
+  it("does not stop short inside a longer word", () => {
+    // The shape `[a-z0-9_]{2,24}` would happily match `matt` out of `matthews`,
+    // and that would put a notification on the wrong person's name.
+    expect(mentionHandles("@matthews")).toEqual(["matthews"]);
+  });
+
+  it("holds usernames to the shape the server enforces", () => {
+    // Uppercase is not a username here: the server rejects rather than
+    // normalizes, so `@Callie` is a word somebody typed.
+    expect(mentionHandles("@Callie")).toEqual([]);
+    expect(mentionHandles("@a")).toEqual([]);
+    expect(mentionHandles("@m_42")).toEqual(["m_42"]);
+  });
+
+  it("is not a mention inside code", () => {
+    expect(mentionHandles("`@callie`")).toEqual([]);
+    expect(mentionHandles("```\n@callie\n```")).toEqual([]);
+  });
+
+  it("is not a mention when it was escaped", () => {
+    expect(mentionHandles("\\@callie")).toEqual([]);
+    expect(textOf("\\@callie")).toBe("@callie");
+  });
+
+  it("finds names inside formatting, quotes and lists", () => {
+    expect(mentionHandles("**@callie** said")).toEqual(["callie"]);
+    expect(mentionHandles("> @callie said")).toEqual(["callie"]);
+    expect(mentionHandles("- ask @callie")).toEqual(["callie"]);
+  });
+
+  it("reports each name once, in the order they appear", () => {
+    expect(mentionHandles("@dave and @callie and @dave")).toEqual(["dave", "callie"]);
+  });
+
+  it("flattens back to the characters that were typed", () => {
+    expect(plainText("hey @callie look")).toBe("hey @callie look");
   });
 });

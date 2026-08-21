@@ -294,9 +294,11 @@ export class AuthedApi {
     );
   }
 
-  delete(path: string): Promise<void> {
+  /** `body` is for the two routes that identify what to remove in JSON rather
+   *  than in the path — removing a notify rule is one (PROTOCOL §5). */
+  delete(path: string, body?: unknown): Promise<void> {
     return this.#withAuth((accessToken) =>
-      requestVoid(this.baseUrl, "DELETE", path, { accessToken }),
+      requestVoid(this.baseUrl, "DELETE", path, { accessToken, body }),
     );
   }
 

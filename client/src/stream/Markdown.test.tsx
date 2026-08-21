@@ -16,10 +16,21 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import Markdown from "./Markdown";
+import Markdown, { type MentionLookup } from "./Markdown";
 
 function render(source: string): string {
   return renderToStaticMarkup(<Markdown source={source} />);
+}
+
+/** A server with two people on it: `matt` is you, `callie` is not. */
+const lookup: MentionLookup = (handle) => {
+  if (handle === "matt") return { name: "Matt", me: true };
+  if (handle === "callie") return { name: "Callie", me: false };
+  return null;
+};
+
+function renderWithPeople(source: string): string {
+  return renderToStaticMarkup(<Markdown source={source} mentions={lookup} />);
 }
 
 /** Every element in the markup. Escaped text has no `<` in it, so it is skipped
@@ -39,7 +50,20 @@ function attributesIn(markup: string): Set<string> {
 }
 
 /** What `Markdown.tsx` is allowed to draw, and nothing else. */
-const ELEMENTS = ["p", "blockquote", "pre", "code", "ul", "ol", "li", "strong", "em", "del", "a"];
+const ELEMENTS = [
+  "p",
+  "blockquote",
+  "pre",
+  "code",
+  "ul",
+  "ol",
+  "li",
+  "strong",
+  "em",
+  "del",
+  "a",
+  "span",
+];
 const ATTRIBUTES = ["class", "href", "title", "rel", "start"];
 
 function assertInert(source: string): string {
@@ -138,5 +162,42 @@ describe("formatting", () => {
     // else — this is the test that keeps the exception from spreading.
     const markup = render("plain words `code` more words");
     expect(markup.match(/md-(inline-)?code/g)?.length).toBe(1);
+  });
+});
+
+describe("mentions", () => {
+  it("marks a name it knows, and says whose it is on the hover", () => {
+    const markup = renderWithPeople("morning @callie");
+    expect(markup).toContain('<span class="mention" title="Callie">@callie</span>');
+  });
+
+  it("marks your own name differently, because that is the whole point", () => {
+    const markup = renderWithPeople("@matt did you see this");
+    expect(markup).toContain('class="mention mention-me"');
+  });
+
+  it("leaves a name nobody answers to as the characters that were typed", () => {
+    const markup = renderWithPeople("@nobody are you there");
+    expect(markup).not.toContain("mention");
+    expect(markup).toContain("@nobody");
+  });
+
+  it("cannot reach an attribute it did not choose", () => {
+    // A display name is somebody else's text, and the hover is the one place it
+    // lands. React escapes it into the value it was given rather than letting it
+    // close the quote and start a second attribute — this is that, spelled out.
+    const evil: MentionLookup = () => ({ name: '" onmouseover="alert(1)', me: false });
+    const markup = renderToStaticMarkup(<Markdown source="@callie" mentions={evil} />);
+    expect(markup).toContain(
+      '<span class="mention" title="&quot; onmouseover=&quot;alert(1)">@callie</span>',
+    );
+  });
+
+  it("stays out of an inline code span, where an @ is just a character", () => {
+    expect(renderWithPeople("`@matt`")).not.toContain("mention");
+  });
+
+  it("stays out of a code block too", () => {
+    expect(renderWithPeople("```\n@matt\n```")).not.toContain("mention");
   });
 });

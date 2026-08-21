@@ -34,7 +34,13 @@ export type Inline =
   | { kind: "em"; children: Inline[] }
   | { kind: "strike"; children: Inline[] }
   /** `href` has already been through `safeHref`; `title` is the real target. */
-  | { kind: "link"; href: string; text: string; children: Inline[] };
+  | { kind: "link"; href: string; text: string; children: Inline[] }
+  /**
+   * `@someone`. The parser does not know who is on this server, so it records
+   * the handle and stops there — `Markdown.tsx` is where a handle either
+   * resolves to a person or falls back to the characters that were typed.
+   */
+  | { kind: "mention"; handle: string };
 
 export type Block =
   | { kind: "paragraph"; children: Inline[] }
@@ -58,7 +64,7 @@ const NUMBERED = /^ {0,3}(\d{1,9})[.)] +(.*)$/;
 
 /** Characters a backslash can make literal. The CommonMark set, minus the
  *  punctuation this subset never gives meaning to. */
-const ESCAPABLE = "\\`*_~[]()>#+-.!";
+const ESCAPABLE = "\\`*_~[]()>#+-.!@";
 
 /** Schemes a link may use. Everything else renders as plain text. */
 const SAFE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
@@ -205,6 +211,14 @@ const EMPHASIS: readonly { open: string; kind: "strong" | "em" | "strike" }[] = 
 
 const AUTOLINK = /^https?:\/\/[^\s<>]+/i;
 
+/**
+ * `@someone`, using the username shape the server enforces
+ * (`crates/linger-server/src/validate.rs`: `[a-z0-9_]{2,24}`). Usernames are
+ * lowercase and the server rejects rather than normalizes, so `@Matt` is not a
+ * mention of `matt` — it is the word somebody typed.
+ */
+const MENTION = /^@([a-z0-9_]{2,24})/;
+
 function isWordChar(ch: string | undefined): boolean {
   return ch !== undefined && /[\p{L}\p{N}_]/u.test(ch);
 }
@@ -296,6 +310,16 @@ function parseInline(source: string, depth: number): Inline[] {
       }
     }
 
+    if (ch === "@") {
+      const found = matchMention(source, at);
+      if (found) {
+        flush();
+        nodes.push(found.node);
+        at = found.next;
+        continue;
+      }
+    }
+
     plain += ch;
     at += 1;
   }
@@ -378,6 +402,24 @@ function matchAutolink(source: string, at: number): Match | null {
   };
 }
 
+/**
+ * A mention, or nothing.
+ *
+ * Two boundaries, both there to stop a notification landing on the wrong
+ * person. A mention starts a word, so `you@example.com` is an address. And the
+ * handle has to *end* a word, so `@matthews` is not a mention of `matt` — the
+ * pattern would happily stop short otherwise.
+ */
+function matchMention(source: string, at: number): Match | null {
+  if (isWordChar(source[at - 1])) return null;
+  const found = MENTION.exec(source.slice(at));
+  const handle = found?.[1];
+  if (handle === undefined) return null;
+  const next = at + 1 + handle.length;
+  if (isWordChar(source[next])) return null;
+  return { node: { kind: "mention", handle }, next };
+}
+
 function countOf(text: string, ch: string): number {
   let total = 0;
   for (const found of text) if (found === ch) total += 1;
@@ -457,6 +499,8 @@ function flattenInline(nodes: readonly Inline[]): string {
         case "text":
         case "code":
           return node.text;
+        case "mention":
+          return `@${node.handle}`;
         case "link":
           return flattenInline(node.children);
         case "strong":
@@ -466,4 +510,59 @@ function flattenInline(nodes: readonly Inline[]): string {
       }
     })
     .join("");
+}
+
+// ---------------------------------------------------------------------------
+// Mentions
+// ---------------------------------------------------------------------------
+
+/**
+ * Every handle a body mentions, in the order they appear, each one once.
+ *
+ * This walks the parsed tree rather than scanning the text, so what earns
+ * somebody a notification is exactly what draws a mention on screen. It is the
+ * difference that matters: `` `@matt` `` is a code span, so it is not a mention,
+ * and no regex over the raw body would know that.
+ */
+export function mentionHandles(source: string): string[] {
+  const found: string[] = [];
+  collectBlocks(parseMarkdown(source), found);
+  return [...new Set(found)];
+}
+
+function collectBlocks(blocks: readonly Block[], into: string[]): void {
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "paragraph":
+        collectInline(block.children, into);
+        break;
+      case "quote":
+        collectBlocks(block.children, into);
+        break;
+      case "code":
+        break;
+      case "list":
+        for (const item of block.items) collectInline(item, into);
+        break;
+    }
+  }
+}
+
+function collectInline(nodes: readonly Inline[], into: string[]): void {
+  for (const node of nodes) {
+    switch (node.kind) {
+      case "mention":
+        into.push(node.handle);
+        break;
+      case "link":
+      case "strong":
+      case "em":
+      case "strike":
+        collectInline(node.children, into);
+        break;
+      case "text":
+      case "code":
+        break;
+    }
+  }
 }

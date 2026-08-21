@@ -13,10 +13,22 @@
  * one of mono's roles alongside timestamps and numerals; prose in a message
  * body stays sans, which is the rule AGENTS 11 is protecting.
  */
-import { type ReactNode, useMemo } from "react";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
 
 import { openExternal } from "../lib/external";
 import { type Block, type Inline, parseMarkdown } from "./markdown";
+
+/**
+ * Turning `@handle` into a person, or not.
+ *
+ * The parser has no idea who is on this server, so this is the step that
+ * decides. A handle nobody answers to renders as the characters that were
+ * typed — the same rule the rest of the file follows for anything it does not
+ * recognise.
+ */
+export type MentionLookup = (handle: string) => { name: string; me: boolean } | null;
+
+const Mentions = createContext<MentionLookup | null>(null);
 
 /**
  * Render one message body.
@@ -30,15 +42,17 @@ import { type Block, type Inline, parseMarkdown } from "./markdown";
 export default function Markdown({
   source,
   trailing,
+  mentions = null,
 }: {
   source: string;
   trailing?: ReactNode;
+  mentions?: MentionLookup | null;
 }) {
   const blocks = useMemo(() => parseMarkdown(source), [source]);
   const last = blocks.length - 1;
   const inline = trailing !== undefined && blocks[last]?.kind === "paragraph";
   return (
-    <>
+    <Mentions.Provider value={mentions}>
       {blocks.map((block, index) => (
         <BlockView
           key={index}
@@ -47,7 +61,7 @@ export default function Markdown({
         />
       ))}
       {inline ? null : trailing}
-    </>
+    </Mentions.Provider>
   );
 }
 
@@ -102,9 +116,29 @@ function InlineView({ nodes }: { nodes: readonly Inline[] }) {
 }
 
 function InlineNode({ node }: { node: Inline }) {
+  const lookup = useContext(Mentions);
   switch (node.kind) {
     case "text":
       return <>{node.text}</>;
+    case "mention": {
+      const person = lookup?.(node.handle) ?? null;
+      // Nobody by that name: it is a word with an @ in front of it, and that is
+      // how it renders.
+      if (person === null) return <>@{node.handle}</>;
+      // The handle is what gets drawn, not the display name — a display name
+      // can contain spaces, and a mark whose end you cannot see is a mark you
+      // cannot trust. The name is on the hover instead.
+      //
+      // Deliberately not painted in the person's palette color: that would put
+      // a value from someone's profile into a message body's markup, and the
+      // body is the one place this client keeps free of attributes it did not
+      // choose itself.
+      return (
+        <span className={person.me ? "mention mention-me" : "mention"} title={person.name}>
+          @{node.handle}
+        </span>
+      );
+    }
     case "code":
       return <code className="md-inline-code">{node.text}</code>;
     case "strong":

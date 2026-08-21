@@ -32,9 +32,11 @@ function message(author: string, at: number): Message {
 }
 
 function shape(rows: StreamRow[]): string[] {
-  return rows.map((row) =>
-    row.kind === "divider" ? "divider" : row.head ? `head:${row.message.author_id}` : "cont",
-  );
+  return rows.map((row) => {
+    if (row.kind === "divider") return "divider";
+    if (row.kind === "left-off") return "left-off";
+    return row.head ? `head:${row.message.author_id}` : "cont";
+  });
 }
 
 const grouped = { group: true, atStart: false };
@@ -116,5 +118,79 @@ describe("buildRows", () => {
       atStart: false,
     });
     expect(shape(rows)).toEqual(["head:matt", "divider", "head:matt"]);
+  });
+});
+
+describe("the you-left-off-here line", () => {
+  it("goes above the first message newer than the marker", () => {
+    const messages = [
+      message("a", 0),
+      message("a", MINUTE),
+      message("b", 2 * MINUTE),
+      message("b", 3 * MINUTE),
+    ];
+    const marker = messages[1]?.id ?? "";
+    expect(shape(buildRows(messages, { ...grouped, leftOff: marker }))).toEqual([
+      "head:a",
+      "cont",
+      "left-off",
+      "head:b",
+      "cont",
+    ]);
+  });
+
+  it("is not drawn when the marker is older than everything loaded", () => {
+    // Otherwise the line would sit at the top of a page of history and claim
+    // that is where you stopped, when really it is where the fetch ended.
+    const messages = [message("a", 0), message("a", MINUTE)];
+    expect(shape(buildRows(messages, { ...grouped, leftOff: "m0000" }))).toEqual([
+      "head:a",
+      "cont",
+    ]);
+  });
+
+  it("is drawn at the very top once there is nothing older to load", () => {
+    const messages = [message("a", 0), message("a", MINUTE)];
+    const rows = buildRows(messages, { group: true, atStart: true, leftOff: "m0000" });
+    expect(shape(rows)).toEqual(["divider", "left-off", "head:a", "cont"]);
+  });
+
+  it("is not drawn when you have read to the end", () => {
+    const messages = [message("a", 0), message("a", MINUTE)];
+    const marker = messages[1]?.id ?? "";
+    expect(shape(buildRows(messages, { ...grouped, leftOff: marker }))).toEqual([
+      "head:a",
+      "cont",
+    ]);
+  });
+
+  it("appears once, however much is unread", () => {
+    const messages = [message("a", 0), message("b", MINUTE), message("c", 2 * MINUTE)];
+    const marker = messages[0]?.id ?? "";
+    const rows = buildRows(messages, { ...grouped, leftOff: marker });
+    expect(rows.filter((row) => row.kind === "left-off")).toHaveLength(1);
+  });
+
+  it("sits below a session divider, not above it", () => {
+    // The divider is about time passing. The line is about this exact message,
+    // so it is the last thing before it.
+    const messages = [message("a", 0), message("b", 4 * HOUR)];
+    const marker = messages[0]?.id ?? "";
+    expect(shape(buildRows(messages, { ...grouped, leftOff: marker }))).toEqual([
+      "head:a",
+      "divider",
+      "left-off",
+      "head:b",
+    ]);
+  });
+
+  it("makes the first unseen message say who said it", () => {
+    // Same author either side, so grouping would normally hide the name — and a
+    // run of unattributed lines under the line is the one place that costs more
+    // than it saves.
+    const messages = [message("a", 0), message("a", MINUTE)];
+    const marker = messages[0]?.id ?? "";
+    const rows = buildRows(messages, { ...grouped, leftOff: marker });
+    expect(shape(rows)).toEqual(["head:a", "left-off", "head:a"]);
   });
 });

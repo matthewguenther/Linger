@@ -26,13 +26,16 @@ import type { CreateMessageRequest } from "../generated/CreateMessageRequest";
 import type { EditMessageRequest } from "../generated/EditMessageRequest";
 import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
+import type { NotifyRule } from "../generated/NotifyRule";
 import type { PresenceEntry } from "../generated/PresenceEntry";
 import type { ReactionGroup } from "../generated/ReactionGroup";
 import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
 import type { ServerFrame } from "../generated/ServerFrame";
+import type { UpdateReadMarkerRequest } from "../generated/UpdateReadMarkerRequest";
 import type { User } from "../generated/User";
 import type { UserId } from "../generated/UserId";
+import { considerFrame } from "../notify/notify";
 import type { AuthedApi } from "./api";
 
 /**
@@ -84,6 +87,35 @@ export interface GatewayState {
    * simply goes stale, and `typistsIn` is what decides when.
    */
   typing: Record<string, Record<string, number>>;
+  /**
+   * Room id → the newest message you have read, as far as the server knows.
+   *
+   * This is a *position*, never a quantity. Nothing in this file, and nothing
+   * downstream of it, subtracts two of these to get a number — SPEC §4.2 is the
+   * whole point of the app and a count is the thing it refuses to have.
+   */
+  read: Record<string, MessageId>;
+  /**
+   * Room id → the newest message that exists. Seeded from `ready` and kept up
+   * to date by `message.create`, because the server computes a room's
+   * `last_message_id` when it is asked for and never pushes a new one.
+   *
+   * Compared against `read`, this is the whole of the label-weight change: a
+   * room either has something in it you have not seen, or it does not.
+   */
+  newest: Record<string, MessageId>;
+  /**
+   * Room id → the message the "you left off here" line sits after.
+   *
+   * Pinned the first time you open the room in this run of the app and then
+   * left alone, even as you read past it. That is SPEC §4.2's "persists until
+   * scrolled past and stays visible for the rest of the session": a line that
+   * moved while you were reading would be a line you could never use to find
+   * your way back to where you started.
+   */
+  leftOff: Record<string, MessageId>;
+  /** "Always notify me when this person posts" (SPEC §4.2). */
+  notifyRules: NotifyRule[];
 }
 
 const EMPTY: GatewayState = {
@@ -95,6 +127,10 @@ const EMPTY: GatewayState = {
   occupancy: {},
   streams: {},
   typing: {},
+  read: {},
+  newest: {},
+  leftOff: {},
+  notifyRules: [],
 };
 
 let state: GatewayState = EMPTY;
@@ -128,6 +164,15 @@ function upsert<T>(list: T[], item: T, sameAs: (candidate: T) => boolean): T[] {
   const next = [...list];
   next[at] = item;
   return next;
+}
+
+/** The newest message in each room, as `ready` describes them. */
+function newestFrom(rooms: Room[]): Record<string, MessageId> {
+  const newest: Record<string, MessageId> = {};
+  for (const room of rooms) {
+    if (room.last_message_id !== null) newest[room.id] = room.last_message_id;
+  }
+  return newest;
 }
 
 function occupancyFrom(presence: PresenceEntry[]): Record<string, UserId[]> {
@@ -240,6 +285,10 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         occupancy: occupancyFrom(frame.d.presence),
         streams: {},
         typing: {},
+        // `read` and `leftOff` survive: one is a copy of something the server
+        // is holding for us, and the other is where this session started, which
+        // a reconnect does not change.
+        newest: newestFrom(frame.d.rooms),
       };
     case "presence.update": {
       const entry = frame.d;
@@ -269,10 +318,17 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
     case "message.create":
     case "message.update": {
       const message = frame.d;
-      const next = withStream(current, message.room_id, (stream) => ({
+      let next = withStream(current, message.room_id, (stream) => ({
         ...stream,
         messages: mergeMessage(stream.messages, message),
       }));
+      // Rooms nobody has opened have no stream to fold this into, and they are
+      // exactly the rooms whose label has to change weight. So the newest id is
+      // tracked separately from the history.
+      const held = next.newest[message.room_id];
+      if (frame.op === "message.create" && (held === undefined || held < message.id)) {
+        next = { ...next, newest: { ...next.newest, [message.room_id]: message.id } };
+      }
       // Saying the thing is how you stop typing it. Without this the line
       // hangs around for a few seconds after the message it was announcing has
       // already arrived, which reads as a second message that never comes.
@@ -386,6 +442,10 @@ export async function connect(api: AuthedApi): Promise<void> {
       await listen<ServerFrame>("gateway:frame", (event) => {
         if (connected !== following) return;
         publish(apply(state, event.payload));
+        // After the fold, never before: whether a message is worth interrupting
+        // somebody for depends on who they are and what rules they have, and
+        // the snapshot is where both of those live.
+        considerFrame(event.payload, state);
       }),
     ];
     // A disconnect that landed while we were attaching: don't leak listeners.
@@ -472,6 +532,35 @@ export async function openRoom(api: AuthedApi, roomId: RoomId): Promise<void> {
   if (connected !== api || state.streams[roomId]) return;
   putStream(roomId, { messages: [], atStart: false, loading: true });
   await fetchPage(api, roomId, null);
+}
+
+/**
+ * How far back "since you were gone" is willing to reach. Ten pages is a
+ * thousand messages; past that the line is somewhere you are not going to
+ * scroll to anyway, and the alternative is a loop that pulls a year of history
+ * because somebody was on holiday.
+ */
+const MAX_CATCHUP_PAGES = 10;
+
+/**
+ * Load older pages until `id` is inside the loaded range.
+ *
+ * This is what makes "since you were gone" work when you have been away longer
+ * than one page: the "you left off here" line can only be drawn once the client
+ * holds the message on *both* sides of it, or it would be marking the top of a
+ * page rather than the place you stopped.
+ */
+export async function loadUntil(api: AuthedApi, roomId: RoomId, id: MessageId): Promise<void> {
+  for (let page = 0; page < MAX_CATCHUP_PAGES; page += 1) {
+    const stream = state.streams[roomId];
+    if (connected !== api || !stream || stream.atStart) return;
+    const oldest = stream.messages[0];
+    if (oldest !== undefined && oldest.id <= id) return;
+    await loadOlder(api, roomId);
+    // `loadOlder` declines while a page is already in flight. Nothing changed,
+    // so asking again in a tight loop would only spin.
+    if (state.streams[roomId] === stream) return;
+  }
 }
 
 /** Fetch the page before the oldest message held. Safe to call repeatedly. */
@@ -584,6 +673,135 @@ export async function toggleReaction(
     // anyway, but a refusal while the socket is down would otherwise leave a
     // mark on screen that the server never accepted.
     if (connected === api) guessed(held?.user_ids ?? []);
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Read markers, and where you left off
+// ---------------------------------------------------------------------------
+
+/**
+ * You walked into a room: pin the "you left off here" line where you were.
+ *
+ * Call this once per entry and never per render. Inside a visit the line has to
+ * hold still while you read past it, or it is not a mark you can find your way
+ * back to. Walking out and back in is a different matter — that is a new visit,
+ * and pinning it again is the only way the line means anything the second time.
+ */
+export function enterRoom(roomId: RoomId): void {
+  const marker = state.read[roomId];
+  if (marker === undefined || state.leftOff[roomId] === marker) return;
+  publish({ ...state, leftOff: { ...state.leftOff, [roomId]: marker } });
+}
+
+/**
+ * Fetch where you had got to in every room.
+ *
+ * `GET /read` answers with positions, not counts, and there is no endpoint that
+ * would answer with a count (PROTOCOL §4). A failure is quiet: the worst case
+ * is a session with no "you left off here" line, which is the app being less
+ * helpful, not the app being wrong.
+ */
+export async function loadReadMarkers(api: AuthedApi): Promise<void> {
+  let map: Record<string, MessageId>;
+  try {
+    map = await api.get<Record<string, MessageId>>("/read");
+  } catch {
+    return;
+  }
+  if (connected !== api) return;
+  // Pin from the server's copy rather than the merged one. This answer and the
+  // gateway's `ready` race on every cold start, so by the time it lands the open
+  // room may already have been marked read — and the whole point of the line is
+  // where you were *before* this session began.
+  const leftOff = { ...state.leftOff };
+  for (const [roomId, id] of Object.entries(map)) {
+    leftOff[roomId] ??= id;
+  }
+  publish({ ...state, read: { ...map, ...state.read }, leftOff });
+}
+
+/** PROTOCOL §4: at most one read-marker write per five seconds per room. */
+const READ_DEBOUNCE_MS = 5_000;
+
+const readSentAt: Record<string, number> = {};
+const readTimers: Record<string, number> = {};
+
+function flushRead(api: AuthedApi, roomId: RoomId): void {
+  const last_read_id = state.read[roomId];
+  if (connected !== api || last_read_id === undefined) return;
+  readSentAt[roomId] = Date.now();
+  const body: UpdateReadMarkerRequest = { last_read_id };
+  // Nothing shows a failure and nothing retries. The marker is a convenience,
+  // the next `GET /read` is the truth, and a red line in the UI because a
+  // bookmark did not save would be worse than the bookmark not saving.
+  void api.put(`/rooms/${encodeURIComponent(roomId)}/read`, body).catch(() => undefined);
+}
+
+/**
+ * Say you have read up to here.
+ *
+ * Moves only forward, and never moves the "you left off here" line — that one
+ * was pinned when you walked in and stays where it is for the session.
+ */
+export function markRead(api: AuthedApi, roomId: RoomId, messageId: MessageId): void {
+  const held = state.read[roomId];
+  if (held !== undefined && held >= messageId) return;
+  publish({ ...state, read: { ...state.read, [roomId]: messageId } });
+
+  if (readTimers[roomId] !== undefined) return;
+  const since = Date.now() - (readSentAt[roomId] ?? 0);
+  if (since >= READ_DEBOUNCE_MS) {
+    flushRead(api, roomId);
+    return;
+  }
+  readTimers[roomId] = window.setTimeout(() => {
+    delete readTimers[roomId];
+    flushRead(api, roomId);
+  }, READ_DEBOUNCE_MS - since);
+}
+
+/** True when a room holds something you have not seen (SPEC §4.2: weight, not a number). */
+export function hasNewActivity(current: GatewayState, roomId: RoomId): boolean {
+  const newest = current.newest[roomId];
+  if (newest === undefined) return false;
+  const read = current.read[roomId];
+  return read === undefined || read < newest;
+}
+
+// ---------------------------------------------------------------------------
+// Notify rules
+// ---------------------------------------------------------------------------
+
+function sameRule(a: NotifyRule, b: NotifyRule): boolean {
+  return a.target_user_id === b.target_user_id && a.room_id === b.room_id;
+}
+
+/** "Always notify me when this person posts" — the whole list (SPEC §4.2). */
+export async function loadNotifyRules(api: AuthedApi): Promise<void> {
+  const rules = await api.get<NotifyRule[]>("/me/notify-rules");
+  if (connected !== api) return;
+  publish({ ...state, notifyRules: rules });
+}
+
+/**
+ * Turn one rule on or off. The local copy moves first so the switch answers
+ * under the finger; a refusal puts it back and is thrown for the panel to show.
+ */
+export async function setNotifyRule(
+  api: AuthedApi,
+  rule: NotifyRule,
+  on: boolean,
+): Promise<void> {
+  const before = state.notifyRules;
+  const without = before.filter((held) => !sameRule(held, rule));
+  publish({ ...state, notifyRules: on ? [...without, rule] : without });
+  try {
+    if (on) await api.put("/me/notify-rules", rule);
+    else await api.delete("/me/notify-rules", rule);
+  } catch (error) {
+    if (connected === api) publish({ ...state, notifyRules: before });
     throw error;
   }
 }

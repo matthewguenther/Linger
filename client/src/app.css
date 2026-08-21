@@ -207,6 +207,75 @@
   background: var(--surface-1);
   border-left: 1px solid var(--hairline);
   padding: var(--gutter);
+  overflow-y: auto;
+}
+
+/* The column has two modes — who is around, and who you want to hear from. The
+   switch sits on the panel label's own line rather than taking a row. */
+.roster-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.roster-switch {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.roster-switch:hover {
+  color: var(--text-secondary);
+}
+
+/*
+ * "Since you were gone", pulled from the room header (SPEC §4.2). It is a
+ * control, not a notice: nothing opens it but a click, and it says who and
+ * when, never how many.
+ */
+.since-pull {
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.since-pull:hover,
+.since-pull[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.since {
+  padding: 8px var(--gutter);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.since-who {
+  font-size: var(--text-label-size);
+  color: var(--text-primary);
+}
+
+.since-when {
+  margin-left: 8px;
+}
+
+.since-go {
+  background: none;
+  border: 0;
+  padding: 4px 0 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.since-go:hover {
+  color: var(--text-primary);
 }
 
 .status-bar {
@@ -251,6 +320,8 @@
 .room-item {
   display: block;
   width: 100%;
+  opacity: 0.6;
+  transition: opacity var(--motion-base);
   text-align: left;
   background: none;
   border: 0;
@@ -271,6 +342,18 @@
 .room-item[aria-current="true"] {
   border-left-color: var(--accent);
   color: var(--text-primary);
+}
+
+/*
+ * The whole of "there is something in this room you have not seen" (SPEC §4.2):
+ * the label's weight goes from 60% to 100%. No number, no dot, no color change.
+ * Those are all the badge wearing a different coat, and the badge is the thing
+ * this app deleted on purpose.
+ */
+.room-item[data-new="true"],
+.room-item[aria-current="true"],
+.room-item:hover {
+  opacity: 1;
 }
 
 .roster-name {
