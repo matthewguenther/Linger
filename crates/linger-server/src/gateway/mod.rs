@@ -112,7 +112,7 @@ impl Gateway {
     }
 
     /// Apply a client `presence.update`. Room membership only changes via
-    /// `room.sit`, so it is carried over from the existing entry.
+    /// `room.focus`, so it is carried over from the existing entry.
     fn apply_presence(
         &self,
         user_id: UserId,

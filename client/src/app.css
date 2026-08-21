@@ -54,9 +54,25 @@
   border-bottom: 1px solid var(--hairline);
 }
 
+.room-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  flex: 1;
+  min-width: 0;
+}
+
 .room-name {
+  flex: none;
   font-size: 14px;
   font-weight: 500;
+}
+
+.room-occupancy {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .room-topic {
@@ -297,7 +313,9 @@
 }
 
 .room-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 3px 0;
   color: var(--text-secondary);
@@ -313,6 +331,39 @@
   padding-left: calc(var(--gutter) - 2px);
   font: inherit;
   cursor: pointer;
+}
+
+.room-slug {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Who is in the room, as a small stack of dots (SPEC §4.1). The person's
+ * own color, the same one their name uses, so the stack is the same people
+ * the roster is showing — never a row of generic pips. No "+N": the rest
+ * of a long list lives in the accessible label.
+ */
+.room-stack {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.room-stack-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--person-name);
+  border: 1px solid var(--surface-1);
+  margin-left: -2px;
+}
+
+.room-stack-dot:first-child {
+  margin-left: 0;
 }
 
 .room-item:hover {

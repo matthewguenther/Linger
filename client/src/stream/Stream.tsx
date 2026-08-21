@@ -62,7 +62,9 @@ import {
   typistsIn,
   useGateway,
 } from "../lib/gateway";
+import { isLooking } from "../lib/looking";
 import { nameStyle, personStyle } from "../lib/names";
+import { occupancyLine, occupantsOf } from "../lib/occupancy";
 import { peopleList } from "../notify/rules";
 import Markdown, { type MentionLookup } from "./Markdown";
 import { mentionHandles, plainText } from "./markdown";
@@ -292,15 +294,16 @@ export default function Stream({
    * You have read what you can see.
    *
    * Two conditions, and the second one is the one people forget: the newest
-   * message has to be on screen, *and* the window has to have your attention. A
-   * room sitting open on a second monitor while you type somewhere else has not
-   * been read, and marking it read would quietly eat the line that tells you
-   * where you stopped.
+   * message has to be on screen, *and* the window has to have your attention
+   * (`isLooking`, the same clock occupancy uses). A room sitting open on a
+   * second monitor while you type somewhere else has not been read, and
+   * marking it read would quietly eat the line that tells you where you
+   * stopped.
    */
   const noteRead = useCallback(() => {
     const element = scroller.current;
     const newest = messages?.[messages.length - 1];
-    if (!element || newest === undefined || !document.hasFocus()) return;
+    if (!element || newest === undefined || !isLooking()) return;
     if (element.scrollHeight - element.scrollTop - element.clientHeight > BOTTOM_MARGIN_PX) return;
     markRead(api, room.id, newest.id);
   }, [api, room.id, messages]);
@@ -385,11 +388,17 @@ export default function Stream({
   // Something happened here after you stopped reading. The header offers to
   // tell you about it; nothing pushes it at you (SPEC §4.2).
   const strayed = leftOff !== null && newest !== undefined && newest > leftOff;
+  const who = occupancyLine(
+    occupantsOf(room.id, gateway.occupancy, gateway.presence, users),
+  );
 
   return (
     <main className="stream">
       <header className="stream-header">
-        <span className="room-name">#{room.slug}</span>
+        <span className="room-title">
+          <span className="room-name">#{room.slug}</span>
+          {who !== "" ? <span className="room-occupancy meta">· {who}</span> : null}
+        </span>
         {room.topic ? <span className="room-topic meta">{room.topic}</span> : null}
         {strayed ? (
           <button
