@@ -11,6 +11,20 @@
   height: 100%;
 }
 
+/*
+ * Too narrow for three columns. The roster is not hidden and does not become a
+ * menu — it moves into the stream column as a horizontal strip above the
+ * composer (SPEC §3). React decides that, because it is a question of where the
+ * panel is rendered rather than how it is painted, and it says so here so the
+ * stylesheet does not need a second copy of the breakpoint (`lib/layout.ts`).
+ */
+.frame[data-narrow="true"] {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-areas:
+    "rail stream"
+    "status status";
+}
+
 .rail {
   grid-area: rail;
   background: var(--surface-1);
@@ -202,34 +216,7 @@
   text-overflow: ellipsis;
 }
 
-.roster {
-  grid-area: roster;
-  background: var(--surface-1);
-  border-left: 1px solid var(--hairline);
-  padding: var(--gutter);
-  overflow-y: auto;
-}
-
-/* The column has two modes — who is around, and who you want to hear from. The
-   switch sits on the panel label's own line rather than taking a row. */
-.roster-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.roster-switch {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--text-faint);
-  cursor: pointer;
-}
-
-.roster-switch:hover {
-  color: var(--text-secondary);
-}
+/* The roster panel styles itself, both ways round: `roster/roster.css`. */
 
 /*
  * "Since you were gone", pulled from the room header (SPEC §4.2). It is a
@@ -302,24 +289,18 @@
   font-weight: 500;
 }
 
-/* Room and people lists. Plain rows: no colored icon squares in the rail, no
-   avatar column in the roster (SPEC §5). T-303 and T-401 build on these. */
-.room-list,
-.roster-list {
+/* The room list. Plain rows: no colored icon squares in the rail (SPEC §5). */
+.room-list {
   list-style: none;
   margin: 6px 0 0;
   padding: 0;
 }
 
-.room-item,
-.roster-name {
-  padding: 3px 0;
-  color: var(--text-secondary);
-}
-
 .room-item {
   display: block;
   width: 100%;
+  padding: 3px 0;
+  color: var(--text-secondary);
   opacity: 0.6;
   transition: opacity var(--motion-base);
   text-align: left;
@@ -354,10 +335,6 @@
 .room-item[aria-current="true"],
 .room-item:hover {
   opacity: 1;
-}
-
-.roster-name {
-  color: var(--text-primary);
 }
 
 .status-right {

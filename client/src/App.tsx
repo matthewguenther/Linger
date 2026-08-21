@@ -1,10 +1,11 @@
 /**
  * The top of the client: sign-in first, the Console frame once you're in.
  *
- * The frame is real now. The account is T-301, the live connection is T-302,
- * and the message stream is T-303 — pick a room in the rail and you are reading
- * and writing in it. The roster on the right is still a plain list of names;
- * the card stack that makes an empty server feel occupied is T-401.
+ * The frame is [rail | stream | roster] over a permanent status bar, and the
+ * roster is the point of it (SPEC §3): people get the right-hand panel, not a
+ * gutter. On a window too narrow for three columns the roster moves into the
+ * stream column as a horizontal strip above the composer — it is never hidden
+ * and it never becomes a menu, so `Stream` takes it as a slot.
  *
  * The rail is where SPEC §4.2's other half lives: a room holding something you
  * have not seen changes *weight*, and nothing else. No number, no dot, no
@@ -27,10 +28,11 @@ import {
   statusText,
   useGateway,
 } from "./lib/gateway";
+import { useNarrow } from "./lib/layout";
 import { hostOf } from "./lib/link";
 import { useSession } from "./lib/session";
-import NotifyRules from "./notify/NotifyRules";
 import { resetNotifications, setViewing } from "./notify/notify";
+import Roster from "./roster/Roster";
 import Stream from "./stream/Stream";
 import "./app.css";
 
@@ -80,7 +82,7 @@ function Console({
   const [server, setServer] = useState<ServerInfo | null>(null);
   const [openRoomId, setOpenRoomId] = useState<RoomId | null>(null);
   const [density, setDensity] = useState<Density>(loadDensity);
-  const [notifying, setNotifying] = useState(false);
+  const narrow = useNarrow();
 
   useEffect(() => {
     applyDensity(density);
@@ -116,13 +118,6 @@ function Console({
   const rooms = [...gateway.rooms]
     .filter((room) => room.archived_at === null)
     .sort((a, b) => a.position - b.position);
-  // Everyone the server has told us about, minus the people who aren't here.
-  // T-401 turns this into the card stack; it is a list of names until then.
-  const around = gateway.presence
-    .filter((entry) => entry.state !== "offline")
-    .map((entry) => gateway.users.find((person) => person.id === entry.user_id))
-    .filter((person) => person !== undefined);
-
   // Land in the first room, and don't hold a room that was archived or that
   // this account can no longer see.
   const open = rooms.find((room) => room.id === openRoomId) ?? rooms[0] ?? null;
@@ -135,8 +130,12 @@ function Console({
   const status = statusText(gateway.status);
   const statusDetail = gateway.status.kind === "waiting" ? gateway.status.reason : undefined;
 
+  // One roster, in one of two places. Rendering it twice and hiding one would
+  // mean two of everything it holds — two open cards, two scroll positions.
+  const roster = <Roster api={api} rooms={rooms} layout={narrow ? "strip" : "column"} />;
+
   return (
-    <div className="frame">
+    <div className="frame" data-narrow={narrow ? "true" : undefined}>
       <aside className="rail">
         <section className="rail-section">
           <h2 className="panel-label">server</h2>
@@ -181,6 +180,7 @@ function Console({
                 : "Connecting to the server…"}
             </p>
           </div>
+          {narrow ? roster : null}
         </main>
       ) : (
         <Stream
@@ -189,38 +189,11 @@ function Console({
           users={gateway.users}
           density={density}
           onDensityChange={setDensity}
+          roster={narrow ? roster : undefined}
         />
       )}
 
-      {/* The right-hand column has two modes. The roster is what it is for;
-          the notify rules borrow it because they are a list of people too, and
-          a settings screen for one setting would be a screen too many. */}
-      <aside className="roster">
-        <div className="roster-head">
-          <h2 className="panel-label">{notifying ? "notify me when" : "who’s around"}</h2>
-          <button
-            type="button"
-            className="roster-switch meta"
-            aria-expanded={notifying}
-            onClick={() => setNotifying((held) => !held)}
-          >
-            {notifying ? "done" : "notify"}
-          </button>
-        </div>
-        {notifying ? (
-          <NotifyRules api={api} rooms={rooms} />
-        ) : around.length === 0 ? (
-          <p className="placeholder">nobody yet</p>
-        ) : (
-          <ul className="roster-list">
-            {around.map((person) => (
-              <li key={person.id} className="roster-name">
-                {person.display_name}
-              </li>
-            ))}
-          </ul>
-        )}
-      </aside>
+      {narrow ? null : roster}
 
       <footer className="status-bar meta">
         <span title={statusDetail}>{status}</span>

@@ -85,9 +85,12 @@ task fails its acceptance criteria twice.
   read as weight instead of a tally. T-305 landed 2026-08-21 and finished the
   milestone: a "you left off here" line, rooms that change weight instead of
   wearing a number, a "since you were gone" view you pull from the header, and
-  the one notification the product allows. **Next up: M4 — presence, roster,
-  entrance sounds (T-401).**
-- ⬜ **M4 … M9** — queued below.
+  the one notification the product allows.
+- ⬜ **M4 — presence, roster, entrance sounds** — started. T-401 landed
+  2026-08-21: the roster is the card stack the product is about, it moves live
+  across clients, and on a narrow window it becomes a strip above the composer
+  instead of hiding. **Next up: T-402 (in-room mechanics).**
+- ⬜ **M5 … M9** — queued below.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
   rule 13 is the enforceable version. Do not build any of it back.
@@ -1070,11 +1073,83 @@ test with real disconnects, not mocks.*
 
 *Milestone check: roster updates live across two clients; sounds play and respect mutes.*
 
-- ⬜ **T-401 · The roster** — effort: **high**
+- ✅ **T-401 · The roster** — effort: **high** *(landed 2026-08-21)*
   SPEC §3. Card stack, not a name list: styled name, presence dot, room, activity
   line, status (expanded), last-seen + away message for offline. Narrow window →
   horizontal strip above composer (never hidden). This panel is the product
   thesis — spend the polish here.
+
+  *Verified against a real server with a real client.* One `linger-server` on a
+  temp database, four accounts, the desktop client signed in as one of them and
+  the other three driven over the real gateway by a script. The roster moved
+  live: somebody focusing a room jumped to the top with `in #porch` under their
+  name; killing their connection hollowed the dot, dropped them to the bottom
+  and started their last-seen clock — all without a reload.
+
+  ### What got built
+
+  - `client/src/roster/roster.ts` — the deciding, as pure functions: who is
+    where, what order the cards come in, and how long ago "a while" is. 20 tests.
+  - `client/src/roster/Roster.tsx` + `roster.css` — the cards. Name in the
+    person's own color and weight, presence dot, the room, the activity, a short
+    duration, and the status underneath when you open one.
+  - `client/src/lib/names.ts` — `personStyle`/`nameStyle`, lifted out of
+    `Stream.tsx` so the stream and the roster paint a person the same way. When
+    T-701 generates the palette, both pick it up at once.
+  - `client/src/lib/clock.ts` — `useNow`, also lifted out of the stream. Two
+    components that each owned a timer would disagree by up to a minute.
+  - `client/src/lib/layout.ts` — the one width in the app: under 880px the
+    roster cannot be a column.
+  - `client/src/lib/gateway.ts` — one new field, `offlineAt`.
+
+  ### The three decisions worth knowing
+
+  - ***The narrow layout moves the component, it does not hide one.*** SPEC §3
+    puts the strip *above the composer*, and the composer lives inside
+    `Stream.tsx`, so `Stream` takes the roster as a slot and `App` hands it over
+    when the window is narrow. Rendering it in both places and hiding one would
+    mean two open cards and two scroll positions. React owns the breakpoint
+    because the question is *where the panel is rendered*, not how it is painted;
+    the frame carries the answer down to CSS as `data-narrow`.
+  - ***When somebody left is something this client has to remember.*** The server
+    writes `last_seen_at` on disconnect and never pushes the new value, so for
+    anyone who leaves while you are watching, the copy in `ready` is stale.
+    `offlineAt` records the moment the offline frame arrived and beats it. A
+    `ready` clears the map, because the users it carries are freshly read. This
+    is why "1m" appears under somebody the moment they drop, rather than the
+    hours-old value the database had.
+  - ***An away message left on a status is not shown to somebody plainly here.***
+    Presence carries the live one and wins. The one saved on a status only
+    renders for `idle`, `away` and `offline` — "back after work" under a dot that
+    says they are in the room is the app contradicting itself.
+
+  ### Notes for whoever is next
+
+  - *The activity line is the registry label, so it reads `♪ Spotify`, not
+    `♪ Bill Evans`.* SPEC §3's sketch shows the track; the wire type has no field
+    for one and never will (AGENTS rule 2). Only the `media` kind gets a mark —
+    `activityMark` is one function if T-501 wants more.
+  - *The status image is not rendered.* `image_key` needs the media store M6
+    builds, and T-405 owns the editor that would set one. Everything else on a
+    status is there: the line in their own styling, and the three labeled fields.
+  - **T-405 should not rebuild the card.** The status renders here already; what
+    it owns is the editor, the away flow, and the image.
+  - *The `notify` switch survived* — it is still the second mode of this panel,
+    now inside `Roster.tsx` rather than `App.tsx`, so `App` no longer holds any
+    roster state.
+  - *Nobody is "in a room" yet except by hand.* The client never sends
+    `room.focus` — **that is T-402** — so in normal use everyone sits at
+    `around`. The room line, the occupancy sort and the in-room dot are all
+    written and were tested with scripted clients; they light up for real when
+    T-402 lands.
+  - *Testing needed a keyboard.* Wayland has no `xdotool`, so the sign-in form
+    was driven through a virtual keyboard on `/dev/uinput`. Two things cost time
+    and are worth writing down. `struct input_event` is **24 bytes** on x86-64
+    and Python's `struct` gives you 16 for `"<llHHi"` — `l` is 4 bytes in
+    standard size, so it has to be `"<qqHHi"`; every event write returns EINVAL
+    otherwise, with nothing to say why. And KWin's scripting console is how you
+    focus and resize the window from a script: `workspace.windowList()`,
+    `workspace.activeWindow = w`, and assigning `w.frameGeometry`.
 - ⬜ **T-402 · In-room mechanics** — effort: **medium**
   Focus = in the room (send `room.focus`), background/idle >90s = leave it
   (`room.focus` with `null`), input-idle >10min = `idle` state. Header occupancy
