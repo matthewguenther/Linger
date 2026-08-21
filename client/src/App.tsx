@@ -1,20 +1,23 @@
 /**
  * The top of the client: sign-in first, the Console frame once you're in.
  *
- * The frame is live from the gateway now (T-302) but still thin: the message
- * stream is T-303 and the real roster is T-401. What's real here is the account
- * (T-301) and the connection — who's on the server, what rooms exist, who is
- * around, and a status bar that reports the connection honestly.
+ * The frame is real now. The account is T-301, the live connection is T-302,
+ * and the message stream is T-303 — pick a room in the rail and you are reading
+ * and writing in it. The roster on the right is still a plain list of names;
+ * the card stack that makes an empty server feel occupied is T-401.
  */
 import { useEffect, useState } from "react";
 
 import AuthScreens from "./auth/AuthScreens";
+import type { RoomId } from "./generated/RoomId";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { User } from "./generated/User";
 import type { AuthedApi } from "./lib/api";
+import { applyDensity, type Density, loadDensity } from "./lib/density";
 import { connect, disconnect, statusText, useGateway } from "./lib/gateway";
 import { hostOf } from "./lib/link";
 import { useSession } from "./lib/session";
+import Stream from "./stream/Stream";
 import "./app.css";
 
 export default function App() {
@@ -61,6 +64,12 @@ function Console({
 }) {
   const gateway = useGateway();
   const [server, setServer] = useState<ServerInfo | null>(null);
+  const [openRoomId, setOpenRoomId] = useState<RoomId | null>(null);
+  const [density, setDensity] = useState<Density>(loadDensity);
+
+  useEffect(() => {
+    applyDensity(density);
+  }, [density]);
 
   useEffect(() => {
     void connect(api);
@@ -90,6 +99,10 @@ function Console({
     .map((entry) => gateway.users.find((person) => person.id === entry.user_id))
     .filter((person) => person !== undefined);
 
+  // Land in the first room, and don't hold a room that was archived or that
+  // this account can no longer see.
+  const open = rooms.find((room) => room.id === openRoomId) ?? rooms[0] ?? null;
+
   const status = statusText(gateway.status);
   const statusDetail = gateway.status.kind === "waiting" ? gateway.status.reason : undefined;
 
@@ -107,8 +120,15 @@ function Console({
           ) : (
             <ul className="room-list">
               {rooms.map((room) => (
-                <li key={room.id} className="room-item">
-                  #{room.slug}
+                <li key={room.id}>
+                  <button
+                    type="button"
+                    className="room-item"
+                    aria-current={room.id === open?.id ? "true" : undefined}
+                    onClick={() => setOpenRoomId(room.id)}
+                  >
+                    #{room.slug}
+                  </button>
                 </li>
               ))}
             </ul>
@@ -116,25 +136,28 @@ function Console({
         </section>
       </aside>
 
-      <main className="stream">
-        <header className="stream-header">
-          <span className="room-name">welcome</span>
-          <span className="meta">nobody in the room</span>
-        </header>
-        <div className="stream-body">
-          <p className="placeholder">
-            You're signed in and connected. The stream itself lands in T-303.
-          </p>
-        </div>
-        <footer className="composer">
-          <input
-            className="composer-input"
-            placeholder="say something"
-            disabled
-            aria-label="message composer (disabled until the stream lands)"
-          />
-        </footer>
-      </main>
+      {open === null ? (
+        <main className="stream">
+          <header className="stream-header">
+            <span className="room-name">welcome</span>
+          </header>
+          <div className="stream-body">
+            <p className="placeholder">
+              {gateway.status.kind === "ready"
+                ? "This server has no rooms yet."
+                : "Connecting to the server…"}
+            </p>
+          </div>
+        </main>
+      ) : (
+        <Stream
+          api={api}
+          room={open}
+          users={gateway.users}
+          density={density}
+          onDensityChange={setDensity}
+        />
+      )}
 
       <aside className="roster">
         <h2 className="panel-label">who’s around</h2>

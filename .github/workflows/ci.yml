@@ -45,6 +45,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: typecheck
         run: pnpm check
+      - name: test
+        run: pnpm test
       - name: build
         run: pnpm exec vite build
 
