@@ -244,6 +244,15 @@ Things that surprise people the first time:
   a menu. React decides which — `client/src/lib/layout.ts` holds the only copy of that
   width and the frame carries the answer as `data-narrow` — so there is no media query
   to go looking for, and nothing is rendered twice.
+- **A status is drawn in two places by one component** (`client/src/status/`). It shows
+  in the roster card when you open it, and in the card you get by clicking a name in the
+  stream. The popover is rendered through a portal into the document body rather than
+  inside the message: the stream is virtualized, so anything drawn inside a row is
+  clipped by the scroller. Setting an away message is what makes you away — it is a
+  field on the status, not a mode — and it takes two writes, in this order: `PATCH /me`
+  saves it and is the only thing that stamps `away_since`, then the gateway frame tells
+  everyone. The room leave has to go before the away frame, because the server sets
+  `around` on any room leave.
 - **The only thing that interrupts you is somebody naming you.** A mention, or a person
   you ticked in `notify me when`, raises a desktop notification through
   `tauri-plugin-notification`. Nothing else does, and there is no badge for one to hang

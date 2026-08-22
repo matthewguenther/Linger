@@ -42,6 +42,7 @@ import {
 
 import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
+import type { PresenceState } from "../generated/PresenceState";
 import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
 import type { User } from "../generated/User";
@@ -63,9 +64,10 @@ import {
   useGateway,
 } from "../lib/gateway";
 import { isLooking } from "../lib/looking";
-import { nameStyle, personStyle } from "../lib/names";
+import { personStyle } from "../lib/names";
 import { occupancyLine, occupantsOf } from "../lib/occupancy";
 import { peopleList } from "../notify/rules";
+import PersonName from "../status/PersonName";
 import Markdown, { type MentionLookup } from "./Markdown";
 import { mentionHandles, plainText } from "./markdown";
 import { REACTIONS, reactionOf, reactionTitle, reactionWeight } from "./reactions";
@@ -157,6 +159,13 @@ export default function Stream({
   }, [room.id]);
 
   const people = useMemo(() => new Map(users.map((person) => [person.id, person])), [users]);
+  // Presence per author, for the card a name opens. Built once here rather
+  // than read by each name: every row in a virtualized list subscribing to the
+  // store on its own would re-render the whole stream on every presence frame.
+  const states = useMemo(
+    () => new Map(gateway.presence.map((entry) => [entry.user_id, entry.state])),
+    [gateway.presence],
+  );
 
   // A mention names a username, because that is the thing that is unique on a
   // server and the thing somebody actually typed.
@@ -476,6 +485,7 @@ export default function Stream({
                       api={api}
                       row={row}
                       author={author}
+                      authorState={states.get(row.message.author_id) ?? "offline"}
                       me={me}
                       people={people}
                       mentions={mentions}
@@ -522,6 +532,7 @@ function MessageRow({
   api,
   row,
   author,
+  authorState,
   me,
   people,
   mentions,
@@ -537,6 +548,7 @@ function MessageRow({
   row: Extract<StreamRow, { kind: "message" }>;
   author: User | undefined;
   me: User | null;
+  authorState: PresenceState;
   people: Map<string, User>;
   mentions: MentionLookup;
   repliedTo: Message | undefined;
@@ -571,7 +583,6 @@ function MessageRow({
     });
   };
 
-  const authorName = nameStyle(author);
   const time = (
     <time
       className="msg-time meta"
@@ -619,18 +630,14 @@ function MessageRow({
       {irc ? (
         <div className="msg-body">
           {time}
-          <span className="irc-name" style={authorName}>
-            {name}
-          </span>
+          <PersonName user={author} name={name} state={authorState} className="irc-name" />
           <span className="irc-text">{body}</span>
         </div>
       ) : (
         <>
           {head ? (
             <p className="msg-head">
-              <span className="msg-author" style={authorName}>
-                {name}
-              </span>
+              <PersonName user={author} name={name} state={authorState} className="msg-author" />
               {time}
             </p>
           ) : null}

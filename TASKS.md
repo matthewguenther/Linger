@@ -86,15 +86,21 @@ task fails its acceptance criteria twice.
   milestone: a "you left off here" line, rooms that change weight instead of
   wearing a number, a "since you were gone" view you pull from the header, and
   the one notification the product allows.
-- ⬜ **M4 — presence, roster, statuses** — started. T-401 landed
+- ✅ **M4 — presence, roster, statuses** (2026-08-21) — the milestone check
+  passed: the roster moves live across two clients, and a status set on one
+  shows up on the other. T-405 also found and fixed a T-402 bug that had been
+  stopping presence dead a few seconds after every launch — details under the
+  task. T-401 landed
   2026-08-21: the roster is the card stack the product is about, it moves live
   across clients, and on a narrow window it becomes a strip above the composer
   instead of hiding. **T-402 landed 2026-08-21: focusing a room puts you in it,
   90 seconds of background or sitting still takes you out, ten minutes with no
   input is idle, and occupancy is names in the header and a small stack on the
   rail.** Verified independently on 2026-08-21: 158 client tests, 124 workspace
-  tests, `pnpm check` clean, no binding drift. **Only T-405 is left in M4** —
-  the entrance-sound tasks moved to the Backburner (below).
+  tests, `pnpm check` clean, no binding drift. T-405 landed 2026-08-21 and
+  finished the milestone: a status editor, an away message that supersedes the
+  status, and a card on any name in the stream. The entrance-sound tasks are on
+  the Backburner (below), so **M4 is done**.
 - ⬜ **M4.5 — the shell's missing surfaces** — new, added 2026-08-21. There is no
   way to add a room from inside the client, no invite screen, no server settings,
   no member settings, and no server list. T-410, T-411, T-412.
@@ -1146,10 +1152,13 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
     for one and never will (AGENTS rule 2). Only the `media` kind gets a mark —
     `activityMark` is one function if T-501 wants more.
   - *The status image is not rendered.* `image_key` needs the media store M6
-    builds, and T-405 owns the editor that would set one. Everything else on a
-    status is there: the line in their own styling, and the three labeled fields.
+    builds. **T-606 owns it now** — T-405 took the rest of the status and left
+    the image behind, because there is nowhere to put a file until T-601 lands.
+    Everything else on a status is there: the line in their own styling, and
+    the three labeled fields.
   - **T-405 should not rebuild the card.** The status renders here already; what
-    it owns is the editor, the away flow, and the image.
+    it owns is the editor and the away flow. *(It did not — it lifted the card
+    into `status/StatusCard.tsx` so the popover could draw the same one.)*
   - *The `notify` switch survived* — it is still the second mode of this panel,
     now inside `Roster.tsx` rather than `App.tsx`, so `App` no longer holds any
     roster state.
@@ -1234,9 +1243,108 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
     checked with a second gateway client sitting in `#garage`: `room.enter`,
     occupancy of one, `presence.update` `in_room`. The header and the rail
     stack light up from those same frames.
-- ⬜ **T-405 · Statuses + away UI** — effort: **medium**
-  SPEC §4.6. Status editor (line 240, three labeled fields, image ≤512KB at
-  400×200), away message supersedes; roster + popover rendering.
+- ✅ **T-405 · Statuses + away UI** — effort: **medium** *(landed 2026-08-21)*
+  SPEC §4.6. Status editor (line 240, three labeled fields), away message
+  supersedes; roster + popover rendering. **The status image is not built** —
+  it needs the media store, and moved to **T-606** in M6.
+
+  *Verified against a real server with a real client.* One `linger-server` on a
+  temp database, two accounts, the desktop client signed in as one of them and
+  the other watched on a real gateway socket. Set a status in the editor and it
+  appeared on the other client. Typed an away message and saved: the card went
+  hollow, dropped down the stack, swapped the status line for the away message,
+  and the watching client got the two frames in the right order — the room
+  leave first, then `away`. "I'm back" put all of it back, including rejoining
+  the room. Clicking a name in the stream opened that person's card; Escape
+  closed it and put focus back on the name.
+
+  ### What got built
+
+  - `client/src/status/status.ts` — the deciding, as pure functions: what is in
+    a status, what an empty one looks like, what the editor's boxes become on
+    the wire, and whether anything actually changed. 22 tests.
+  - `client/src/status/StatusEditor.tsx` — the form. A third mode of the roster
+    panel, reached from `edit` on your own card, because in a narrow window the
+    cards are chips in a strip and a chip is not a form.
+  - `client/src/status/StatusCard.tsx` — the card, lifted out of `Roster.tsx` so
+    the roster and the popover draw the same one.
+  - `client/src/status/PersonName.tsx` — a name in the stream, and the card it
+    opens.
+  - `client/src/lib/presence.ts` — `away` is now a state this file can reach,
+    driven by `wantAway`. 10 new tests.
+  - `client/src/lib/watchPresence.ts` — `setAway`, and **a bug fix; see below**.
+  - `client/src/lib/watchPresence.test.ts` — the driver, with the gateway mocked.
+    9 tests. New file: nothing covered this before.
+
+  ### ⚠️ **The big one: T-402's presence driver was wedging itself.**
+
+  *Found by reading the code while adding `setAway`, then reproduced in six
+  lines of Node. `tick()` guarded against two passes at once by holding the
+  in-flight promise: `ticking = run()`. When `decide` has nothing to say, `run`
+  has no `await` to reach, so **its whole body — including the `ticking = null`
+  in its own `finally` — runs before the assignment happens**, and the
+  assignment then puts the resolved promise back. From that moment every tick
+  saw a non-null `ticking`, set `pending`, and returned. Presence stopped
+  sending anything for the rest of the session.*
+
+  *A tick with nothing to say is the common case: it happens on the first
+  pointer move after everything is in sync. So this fired within seconds of
+  launch, every launch. The 90-second leave, the ten-minute idle and room
+  changes all stopped working, silently, and whatever was last sent stayed true
+  on the server — which is why T-402's own testing did not catch it. Its tests
+  covered `presence.ts`, which was correct; nothing tested the driver.*
+
+  *The guard is a plain boolean now, set before the first statement, so it
+  cannot be beaten by its own body. `watchPresence.test.ts` covers it: with the
+  old guard, 7 of its 9 tests fail.*
+
+  ### The three decisions worth knowing
+
+  - ***An away message is a field on the status, not a mode.*** Type one and you
+    are away; clear it and you are back. That is what AIM did and it is why
+    SPEC §4.6 puts `away_message` on the status object. It also means going away
+    is one save, and the "I'm back" button is that same save with the field
+    emptied.
+  - ***Away is deliberate, so it is sticky.*** Moving the mouse does not bring
+    you back. Sitting still does not make you more away, and the ten-minute idle
+    clock is not allowed to quietly downgrade you. Only the person coming back
+    ends it. Auto-returning on input would mean glancing at the window silently
+    dropped the message you left — the exact AIM annoyance.
+  - ***Two writes, on purpose, and the order matters.*** `PATCH /me` saves the
+    message and is the **only** thing that stamps `away_since`, which is what
+    the roster counts "away 20m" from. The gateway frame is what everyone sees
+    now. The frame goes second, and the room leave goes before it, because the
+    server sets `around` on any `room.focus` with `null` and the other order
+    wipes the away state a moment after setting it.
+
+  ### Notes for whoever is next
+
+  - ***The status image is not built, and could not be.*** SPEC §4.6 allows one
+    image, ≤512 KB at 400×200. `image_key` names an object in the media store,
+    and there is no media store until **M6 builds the upload pipeline (T-601)**;
+    `/uploads` is not even mounted. Pulling it in would be reaching into a later
+    milestone. Everything else on a status is done. `statusOf` carries
+    `image_key` through every save untouched — `PATCH /me` replaces the whole
+    status object, so dropping it would delete an image the moment T-601 lets
+    somebody set one. The editor says so in a line of copy. **It is written up
+    as T-606, in M6, right after the upload pipeline that unblocks it.**
+  - *T-501's poller now has a third frame to keep the activity id on.* T-402
+    already flagged `idle` and the `around` after it; `away` and the `around`
+    that follows it send `activity: null` for the same reason. Same fix: let the
+    poller own every `presence.update`, or pass the last known id along.
+  - *`.person-name` and `.person-dot` moved from `roster.css` to
+    `status/status.css`* when the popover became the second thing that draws
+    them. The dot's state colors key off its own `data-state` now rather than an
+    ancestor's, so one set of rules covers both surfaces.
+  - *The popover renders through a portal into the body.* The stream is
+    virtualized — every row is inside a scrolling box under a transform — so a
+    card drawn inside a row gets clipped by the first edge it reaches. It is
+    fixed to the viewport off the name's own rectangle, flips above the name
+    when there is no room below, and closes on scroll, because the name moves
+    and it does not.
+  - *A fresh server still has no rooms, and the client still cannot make one.*
+    Both test runs had to create `#garage` over REST before there was anywhere
+    to stand. That is T-410.
 
 ## M4.5 — the parts of the shell nobody has built yet
 
@@ -1376,6 +1484,43 @@ itself editing `linger-core`, something has gone wrong — stop and ask.
 - ⬜ **T-605 · Expiry + storage accounting** — effort: **medium**
   365-day expiry of non-starred/non-pinned (host-configurable/off), background
   task; storage-used figure for the status bar and `GET /server`.
+- ⬜ **T-606 · The status image** — effort: **low** *(the rest of T-405, once
+  there is somewhere to put a file)*
+  SPEC §4.6's last bullet: one image on a status, **≤512 KB, displayed at
+  400×200**. T-405 built every other part of the status and stopped here,
+  because `image_key` names an object in the media store and there was no media
+  store — `/uploads` was not even mounted. `linger-core::limits` already holds
+  `MAX_STATUS_IMAGE_BYTES`.
+
+  Do this **after T-601**, which is what makes an upload possible, and after
+  **T-603** if it has landed, so the image is served from the media origin like
+  everything else. It is small: most of the work is already done in both
+  directions.
+
+  - **Client.** A file picker in `client/src/status/StatusEditor.tsx`, and an
+    `<img>` in `client/src/status/StatusCard.tsx` — one component, so the
+    roster card and the name popover both get it at once. Refuse an oversize
+    file before uploading it rather than after, the way the editor already
+    counts characters down.
+  - **Client, the trap.** `statusOf` in `client/src/status/status.ts` already
+    carries `image_key` through untouched on every save, because `PATCH /me`
+    replaces the whole status object. **Keep that.** The moment the editor can
+    set a key, a save that dropped the field would delete somebody's image.
+    `status.test.ts` has a test pinning this — do not delete it either.
+  - **Server.** `validate::status` checks lengths and nothing else: it will
+    accept any string as an `image_key` today. It has to become a real check —
+    the key names an object that exists, belongs to this user, is an image, and
+    is within `MAX_STATUS_IMAGE_BYTES`. Without that, `image_key` is a
+    user-controlled string that ends up in a URL.
+  - **Also.** A status image should not expire out from under the status
+    (T-605 expires non-starred objects at 365 days), and replacing one should
+    not leave the old object orphaned.
+  - *Accept:* set an image, see it at 400×200 in both the roster card and the
+    popover, on a second client; a 600 KB file is refused with a sentence a
+    person can read; a key naming somebody else's object is refused by the
+    server; the image survives a year-old status once T-605 is in.
+  - **Take the line of copy out of the editor when this lands.** It currently
+    says "Status images arrive with file uploads."
 
 ## M7 — styling: names, palette, themes, fonts
 

@@ -33,8 +33,10 @@ import type { ReactionGroup } from "../generated/ReactionGroup";
 import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
 import type { ServerFrame } from "../generated/ServerFrame";
+import type { UpdateMeRequest } from "../generated/UpdateMeRequest";
 import type { UpdateReadMarkerRequest } from "../generated/UpdateReadMarkerRequest";
 import type { User } from "../generated/User";
+import type { UserStatus } from "../generated/UserStatus";
 import type { UserId } from "../generated/UserId";
 import { considerFrame } from "../notify/notify";
 import type { AuthedApi } from "./api";
@@ -917,6 +919,43 @@ export function startedTyping(roomId: RoomId): void {
   if (now - (typingSentAt[roomId] ?? 0) < TYPING_TTL_MS - 2_000) return;
   typingSentAt[roomId] = now;
   void send({ op: "typing.start", d: { room_id: roomId } });
+}
+
+/**
+ * Save your status (SPEC §4.6, PROTOCOL §5).
+ *
+ * `PATCH /me` replaces the whole status object when it is present, so the
+ * caller has to send a complete one — half a status is a status with the other
+ * half deleted. `status.ts::statusOf` is what builds it, and it carries over
+ * the fields the editor does not own.
+ *
+ * `away_since` comes back server-stamped: it is set when an away message
+ * appears or changes and cleared with it, and nothing the client sends for it
+ * is read. That is why the answer is folded in rather than the local guess
+ * kept — the roster's "away 20m" counts off the server's clock, not ours.
+ *
+ * Failures are thrown. The editor is holding the text and is the only thing
+ * that can tell the person it did not save.
+ */
+export async function saveStatus(api: AuthedApi, status: UserStatus): Promise<User> {
+  const request: UpdateMeRequest = {
+    display_name: null,
+    style: null,
+    status,
+    entrance_sound: null,
+  };
+  const user = await api.patch<User>("/me", request);
+  // The server also fans this out as `user.update`, which usually beats the
+  // HTTP answer back. Folding it in anyway means the editor is never left
+  // showing the old text because one frame went missing.
+  if (connected === api) {
+    publish({
+      ...state,
+      me: state.me?.id === user.id ? user : state.me,
+      users: upsert(state.users, user, (u) => u.id === user.id),
+    });
+  }
+  return user;
 }
 
 /** The status bar line (SPEC §5.6): protocol text, never a spinner. */
