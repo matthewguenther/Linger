@@ -1597,6 +1597,12 @@ above.
   roster that does not have them on it. The roster is the product (SPEC §3), so this
   is not a rough edge, it is the main surface being wrong.
 
+  **And it is louder than just a missing card.** `Stream.tsx` resolves an author out of
+  the same `users` list and falls back to `"someone"` when it misses (line ~563). So the
+  fifth friend says hello and the other four see **"someone"** said it, in the default
+  styling, with no card behind the name. Their first impression of the server is being
+  an anonymous stranger to everybody already in it.
+
   **Why it happens, exactly.** Nothing tells a connected client that a person exists.
   `client/src/roster/roster.ts` builds the stack by mapping over `gateway.users`, and
   that list is only ever filled from the `users` array in `ready`. `POST /auth/register`
