@@ -111,7 +111,9 @@ task fails its acceptance criteria twice.
   **T-410 landed 2026-08-21**: the host can make, rename, reorder and archive rooms,
   hand out and revoke invite links, and rename the server, all from inside the app —
   and a member sees none of those controls. The milestone check is not passed yet;
-  T-411 is the rest of it.
+  T-411 is the rest of it. **T-415 was added the same day**, from something T-410 hit on
+  a real server: a person who joins while you are connected never appears until you
+  restart the app.
 - ⬜ **M5 … M9** — queued below.
 - ⏬ **Backburner (after M9)** — entrance sounds: T-403, T-404, T-408. Matt's
   call, 2026-08-21. Still V1, just last.
@@ -1444,12 +1446,14 @@ above.
   - **Two things this run turned up that are not T-410's to fix:**
     - *A member who joins after you connected is invisible to you until you reconnect.*
       Registering the second account did not put them in the first client's roster.
-      Nothing pushes a new `User`: the roster is built from the `users` list in `ready`
-      plus `user.update`, and there is no `user.create`. A presence frame for somebody
-      the client has never heard of has no name to draw. Fixing it means a new gateway
-      event, which is a protocol change — **T-413** is already the task that touches the
-      server, and it needs the mirror of this anyway (a removed member has to leave the
-      roster live). Worth deciding both at once.
+      Nothing pushes a new `User`, and `buildRoster` maps over the `users` list, so a
+      presence frame for somebody the client has never heard of has no card to land on.
+      **Written up as T-415**, below. First read of this said it needed a new wire type;
+      that was wrong — `user.update` already carries a whole `User` and the client's
+      fold already appends an unknown id, so it is very likely one `publish` call in
+      `POST /auth/register` plus a line of PROTOCOL. T-413 needs the mirror (a removed
+      member leaving the roster live) and that half *does* need something new, so the
+      two want deciding together.
     - *One client instance, once, held a live socket that delivered no frames.* It was
       the instance launched **before** the server had been set up: it sat on the sign-in
       screen through the whole first-run, and after setup it showed `ready` and the
@@ -1584,6 +1588,62 @@ above.
     subcommand. **It does not work** — passwords are argon2id hashes and the
     `sqlite3` shell cannot produce one. The `sqlite3` lines in the README stay
     where they are, for backup, which they do well.
+
+- ⬜ **T-415 · A new friend shows up without anybody restarting** — effort: **medium**
+  Found during T-410 on 2026-08-21, on a real server. **Somebody who joins after you
+  are already connected does not appear in your roster at all until you restart the
+  app** — not when they register, and not when they come online and start talking.
+  Four friends on a server, a fifth joins, and the four of them are looking at a
+  roster that does not have them on it. The roster is the product (SPEC §3), so this
+  is not a rough edge, it is the main surface being wrong.
+
+  **Why it happens, exactly.** Nothing tells a connected client that a person exists.
+  `client/src/roster/roster.ts` builds the stack by mapping over `gateway.users`, and
+  that list is only ever filled from the `users` array in `ready`. `POST /auth/register`
+  publishes nothing. So the new person is not in `users`, and `buildRoster` never
+  reaches them. Their presence frames *do* arrive and *are* folded into `presence` —
+  there is simply no name, style or card to draw them with, so they are dropped on the
+  floor by the one `.map()` that matters.
+
+  **It is probably five lines, not a protocol change.** T-410's first write-up said
+  this needed a new wire type; that was wrong and is corrected here. `ServerEvent::UserUpdate(User)`
+  already exists, already carries a whole `User`, and the client's fold for it already
+  does `upsert(current.users, …)` — which *appends* when the id is unknown. So the
+  machinery is all there and only the announcement is missing. Publish `UserUpdate`
+  from `POST /auth/register` after the row is written, and connected clients grow the
+  card on their own. There is even accidental proof: a new member who edits their
+  display name today pops into everybody's roster at that moment, because `PATCH /me`
+  is the one route that does publish.
+
+  **The one decision to make.** PROTOCOL §8 documents `user.update` as "display name,
+  style, or status changed", and "update" for somebody who did not exist a second ago
+  is a stretch. Two honest options, and this task picks one and writes it down:
+  - Widen the `user.update` line in PROTOCOL §8 to mean "this is the current state of
+    this person, whether or not you had them" — cheapest, no new op, and it matches
+    what the client already does.
+  - Add `user.create`, which reads better in the log and on the wire but is a new op
+    for every client to learn and buys nothing the fold does not already handle.
+  Either way it is one line in `linger-core::gateway`'s docs or enum, so **this is the
+  rare M4.5 task that is allowed to touch `linger-core`** — unlike T-410/T-411/T-412.
+
+  **Do this with T-413 in front of you, or right after it.** T-413 needs the exact
+  mirror — a removed member has to *leave* the roster live — and that one genuinely
+  cannot reuse `user.update`, because the wire `User` has no `deactivated_at` field and
+  should not grow one just to carry a tombstone. So T-413 needs its own way to say
+  "this person is gone". Decide the pair together so the answer to "somebody arrived"
+  and the answer to "somebody left" have the same shape, rather than two different
+  inventions a week apart.
+
+  - *Accept:* a gateway integration test — client A identifies, client B registers over
+    REST, and A receives a frame carrying B and nothing else changes. Then on a real
+    server with two clients: register a third account through an invite while both are
+    open, and watch the card appear on both without a reload and without either person
+    touching anything. Then have the new person go online and confirm their dot and room
+    follow, which is the half that already works and must keep working.
+  - *Note:* do not "fix" this by having the client refetch `GET /users` on a timer, or
+    on every presence frame for an unknown id. Both are polling with extra steps, and
+    the second one is a request storm triggered by strangers. The server knows when
+    somebody joined; it should say so once.
 
 ## M5 — activity detection
 
