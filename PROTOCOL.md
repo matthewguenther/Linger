@@ -177,7 +177,24 @@ PATCH /me/password        { current_password, new_password }                 →
 GET  /me/notify-rules     → NotifyRule[]
 PUT  /me/notify-rules     { target_user_id, room_id | null }   → 204
 DELETE /me/notify-rules   { target_user_id, room_id | null }   → 204
+
+POST /users/:id/remove    → 204                     # host-only, M4.5 / T-413
+POST /users/:id/restore   → 204                     # host-only, M4.5 / T-413
 ```
+
+### Removing a member (M4.5, not built yet)
+
+`remove` sets `deactivated_at`; `restore` clears it. Neither carries a body. The host
+cannot remove themselves — that answers `FORBIDDEN`. There is no ban and no ban list:
+usernames are unique and immutable, the account row survives, and registration is
+invite-only, so the host is already the only way back in. Nothing durable enough to ban
+by (an address, a device id) is stored anywhere in Linger, and nothing is going to be.
+
+Deactivation has to be enforced in three places that do not check it today, or a removed
+member stays in the room: refresh-token rotation, the live gateway session, and — if the
+15-minute access-token window is judged too long — the bearer extractor. `GET /users`
+already filters deactivated accounts. Removing somebody also revokes the invites they
+created. Their messages are untouched; removing a person is not deleting what they wrote.
 
 `PATCH /me` semantics: absent fields are unchanged; `style` and `status` replace the
 whole object when present. `entrance_sound: ""` clears the sound (bundled keys are
