@@ -103,7 +103,11 @@ task fails its acceptance criteria twice.
   the Backburner (below), so **M4 is done**.
 - ⬜ **M4.5 — the shell's missing surfaces** — new, added 2026-08-21. There is no
   way to add a room from inside the client, no invite screen, no server settings,
-  no member settings, and no server list. T-410, T-411, T-412.
+  no member settings, and no server list. T-410, T-411, T-412. **T-413 and T-414
+  were added later the same day**, after reading T-410 with Matt turned up two
+  holes in running a server: nobody can be removed once they are in, and a host
+  who forgets their password has no way back in at all. The decisions behind both
+  are recorded under *Decided — the host's side* below.
 - ⬜ **M5 … M9** — queued below.
 - ⏬ **Backburner (after M9)** — entrance sounds: T-403, T-404, T-408. Matt's
   call, 2026-08-21. Still V1, just last.
@@ -1359,10 +1363,15 @@ client, and the server rail in SPEC §3 has never existed at all.*
 second room, invite a friend, and rename the server — without curl and without
 reading the docs.*
 
-**Every REST endpoint these tasks need already exists and already has an
-integration test** (T-103, T-104, T-106). This is UI over a finished server: no
-protocol changes, no new wire types, no schema work. If one of these tasks finds
-itself editing `linger-core`, something has gone wrong — stop and ask.
+**Every REST endpoint T-410, T-411 and T-412 need already exists and already has
+an integration test** (T-103, T-104, T-106). Those three are UI over a finished
+server: no protocol changes, no new wire types, no schema work. If one of them
+finds itself editing `linger-core`, something has gone wrong — stop and ask.
+
+**T-413 and T-414 are the exceptions** and were added after the other three.
+T-413 adds the one endpoint this milestone is missing, and T-414 is not UI at
+all — it is a subcommand on the server binary. Neither gates the milestone check
+above.
 
 - ⬜ **T-410 · Host controls: rooms, invites, the server itself** — effort: **high**
   The host's side of the sweep. Everything here is host-only and must be *absent*,
@@ -1428,6 +1437,85 @@ itself editing `linger-core`, something has gone wrong — stop and ask.
     task at all until now, which is why it is written down here rather than left to
     be discovered again at M8. If the budget is tight, T-410 and T-411 are what make
     the app usable; this one makes it match the spec.
+
+- ⬜ **T-413 · Removing a member** — effort: **medium**
+  The host can remove somebody from the server, and let them back in. There is no
+  separate ban — see *Decided — the host's side* below for why one would buy
+  nothing here. The UI word is **"Remove from the server"**: not kick, not ban
+  (SPEC §1 vocabulary).
+  - **The endpoint.** Host-only, mirroring the shape rooms already use for
+    archive: `POST /users/{id}/remove` sets `deactivated_at`,
+    `POST /users/{id}/restore` clears it. Neither request has a body, so this
+    likely needs no new wire type at all — check before adding one.
+    The host cannot remove themselves (`FORBIDDEN`).
+  - **Setting the column is about a quarter of the job.** Four doors, three of
+    them currently unlocked — verified by reading the code on 2026-08-21:
+    - `AuthedUser` in `crates/linger-server/src/auth.rs` only verifies the JWT
+      signature. A removed member keeps every endpoint until their access token
+      expires, up to 15 minutes.
+    - `auth::rotate_refresh` does not look at `deactivated_at` either, so they can
+      keep minting fresh access tokens for the full 30-day refresh window.
+    - The gateway verifies the token once at identify (`gateway/socket.rs`) and
+      never re-checks. An open socket keeps receiving fan-out indefinitely.
+    - `GET /users` and the roster query already filter `deactivated_at IS NULL`,
+      so that half is free — they leave the roster on their own.
+    Removal must therefore **set the column, revoke every refresh family that
+    user owns, and close their live gateway sessions.** Decide and write down
+    whether the bearer extractor also gets a deactivation check — that is a
+    database read on every authenticated request, and the gateway close is what
+    actually gets somebody out of the room. Letting a 15-minute access token die
+    on its own is a defensible answer; leaving it undecided is not.
+  - **Their invites die with them.** Revoke invites they created, in the same
+    transaction. Otherwise their own link is a way back in.
+  - **Their messages stay.** SPEC principle 3 — removing a person is not deleting
+    what they wrote. No tombstones, no scrubbing the author off old messages.
+  - **The control.** On the member's card, host-only, and *absent* rather than
+    greyed out for everybody else — same rule as T-410. Removed members need to
+    be listed somewhere the host can reach, or restore is a feature nobody can
+    find.
+  - *Accept:* integration tests — a removed member's next refresh is rejected,
+    their live socket closes, they are gone from `GET /users`, their messages are
+    still in the room, and an invite they created stops previewing; the host
+    cannot remove themselves; restore puts them back and they can sign in again.
+    Then on a real server with two clients: remove the second account and watch it
+    leave the first client's roster without a reload.
+  - *Note:* this is the one task in M4.5 that changes the server. If it grows a
+    wire type, that type lives in `linger-core` like every other one (AGENTS
+    rule 7).
+
+- ⬜ **T-414 · `reset-password`, for the host who is locked out** — effort: **low**
+  Today there is no way back in. There is no password reset, and the setup token
+  only exists while the server has zero users. A host who forgets their password
+  leaves a server their friends can still talk on and that nobody can ever add a
+  room to again.
+  - **A subcommand on the server binary:** `linger-server reset-password <username>`.
+    Same env config, same SQLite file, and the argon2 that is already linked into
+    the binary. Under the documented deployment that is
+    `docker compose run --rm linger linger-server reset-password matt`.
+  - **Running it on the box is the proof of ownership.** No token, no login, no
+    env-var credentials — the same position ARCHITECTURE §9 takes on first-run.
+  - Read the new password from stdin or generate one and print it. **Never from
+    argv** — that lands in shell history and in `ps` output. Fail loudly and exit
+    non-zero if the username does not exist. Revoke that user's refresh families
+    at the same time: the reason to reset a password is usually that somebody
+    else may have had it.
+  - **Check for an arg parser before adding one.** If the workspace has no `clap`
+    today, one `std::env::args()` match is enough for a single subcommand and
+    keeps the dependency list where it is.
+  - **Say what to do about the running server.** A second process writing to the
+    same SQLite file steps outside the single-writer discipline AGENTS calls out.
+    Simplest honest answer: tell people to stop the server first
+    (`docker compose stop linger`), and set a busy timeout so a mistake waits
+    instead of erroring.
+  - **README.** A short "Locked out" section next to Backup, written for somebody
+    who is already stressed: the exact command, and what it does not do.
+  - *Accept:* on a real server, reset the host's password, sign in with the new
+    one from a fresh client, and confirm the old refresh token is dead. A wrong
+    username exits non-zero with a plain-English message.
+  - *Note:* the first plan here was a `sqlite3` recipe in the README instead of a
+    subcommand. **It does not work** — passwords are argon2id hashes and the
+    `sqlite3` shell cannot produce one. The `sqlite3` lines in the README stay
+    where they are, for backup, which they do well.
 
 ## M5 — activity detection
 
@@ -1622,6 +1710,40 @@ itself the credential (a real change to PROTOCOL §2 and the refresh-token famil
 logic), and a host-set no-auth LAN mode (honest for a LAN party, dangerous the
 day the box gets a public IP). If the friction comes back, those are the next
 two rungs, in that order.
+
+---
+
+## Decided — the host's side
+
+**Matt, 2026-08-21.** Four questions came out of reading T-410 before starting it.
+The server-admin story is otherwise unchanged and already built: the host deploys
+the image, reads the one-time setup URL out of the logs, pastes it into the
+client, and from then on is a normal user with `is_host = 1`. Rooms and server
+settings are database rows edited from inside the app — never a config file.
+
+**No host transfer.** `is_host` stays a boolean that nobody can hand to anybody
+else. If the host goes quiet, the friends stand up a new server. That is a real
+answer for a group of eight, and it keeps a second root from growing on a product
+whose anti-goals include a permission matrix (AGENTS rule 10).
+
+**Removal, not banning** — T-413. A ban needs something durable to ban *by*, an
+address or a device id, and Linger does not store either and should not. It would
+not work anyway: housemates share one address and phone networks reshuffle them.
+A removal here is already ban-shaped — usernames are unique and immutable, the
+account row stays, and registration is invite-only, so the host is the only door
+back in. One action, plus the reverse, so a removal made in a bad moment is
+fixable.
+
+**The M6 storage knobs are environment variables.** The 50 GB pool and the
+365-day file expiry (SPEC §7) go in the compose file with everything else, per
+the position `config.rs` already takes. No config-file format to document,
+version, and migrate.
+
+**The printed setup URL is https when a domain is set** — fixed 2026-08-21, not a
+task. The client keeps whatever scheme it is handed, for the REST base URL and
+the gateway socket both, so printing `http://` pinned the host's own session to
+plaintext on the very first thing they ever do. It falls back to `http` only for
+a bare bind address, which has no certificate and is honestly plaintext.
 
 ---
 
