@@ -108,6 +108,10 @@ task fails its acceptance criteria twice.
   holes in running a server: nobody can be removed once they are in, and a host
   who forgets their password has no way back in at all. The decisions behind both
   are recorded under *Decided — the host's side* below.
+  **T-410 landed 2026-08-21**: the host can make, rename, reorder and archive rooms,
+  hand out and revoke invite links, and rename the server, all from inside the app —
+  and a member sees none of those controls. The milestone check is not passed yet;
+  T-411 is the rest of it.
 - ⬜ **M5 … M9** — queued below.
 - ⏬ **Backburner (after M9)** — entrance sounds: T-403, T-404, T-408. Matt's
   call, 2026-08-21. Still V1, just last.
@@ -1373,7 +1377,7 @@ T-413 adds the one endpoint this milestone is missing, and T-414 is not UI at
 all — it is a subcommand on the server binary. Neither gates the milestone check
 above.
 
-- ⬜ **T-410 · Host controls: rooms, invites, the server itself** — effort: **high**
+- ✅ **T-410 · Host controls: rooms, invites, the server itself** — effort: **high**
   The host's side of the sweep. Everything here is host-only and must be *absent*,
   not disabled-and-greyed, for a member — a greyed-out control is a role matrix
   drawn in CSS (AGENTS rule 10, SPEC §2 anti-goals).
@@ -1394,6 +1398,70 @@ above.
     rename the server and see the rail change without a reload.
   - *Note:* archiving is the only delete this product has. The rail already filters
     `archived_at`, so an archived room disappears; do not add a "deleted" state.
+  - **Landed 2026-08-21.** One panel over the stream column (`client/src/host/`) with
+    three sections — rooms, invites, server — reached from `+ room` and `manage` on
+    the rail, both drawn only for a host. No modal, and the roster stays visible while
+    you work, which matters because an invite is something you make *for* somebody.
+    Every accept criterion was walked on a real server from a fresh host account:
+    room made and posted in, renamed with a topic, reordered, archived and gone from
+    the rail; two invites made, one used to register a second account and one revoked
+    and confirmed dead (`valid: false` on preview, `INVITE_INVALID` on register); the
+    server renamed and the rail changed with no reload. Then signed in as the second
+    account and confirmed `manage` and `+ room` are simply not drawn.
+  - *No wire types were touched*, as the milestone note said they would not need to be.
+    `linger-core` and `client/src/generated/` are untouched; the new REST calls are
+    typed wrappers on the existing generated types in `lib/api.ts`.
+  - *The panel keeps no copy of the room list.* Saves go to the server, the server fans
+    out `room.create`/`room.update`, and both the panel and the rail render off the same
+    gateway store — so they cannot disagree, and the other clients get it too. Verified
+    live in the app, not just in the response.
+  - *Reordering renumbers, it does not swap.* `moveRoom` in `host/host.ts` sorts by
+    position, moves one place, then renumbers `0..n-1` and sends only the rooms whose
+    number actually changed. Nothing stops two rooms sharing a `position` in the schema,
+    and a plain swap on a list that has drifted moves the wrong room. On a tidy list it
+    is still the two PATCHes you would expect.
+  - *The accent picker is wired but cannot show colour yet.* It saves a palette key and
+    the frame sets `--accent: var(--name-<key>, var(--accent-default))`, so the moment
+    **T-701** generates `palette.generated.css` from `linger-core::PALETTE` the accent
+    starts painting with no further work. Until then every key falls back to the built-in
+    accent and every swatch is the same grey — which is why the key's *name* is the
+    label and the swatch is decoration. A line of copy in the panel says so, the same way
+    the status editor is honest about images; delete it when T-701 lands. Two small
+    additions came with it: `--accent-default` in `tokens.css` (so the frame can override
+    `--accent` without a self-referential fallback), and `client/src/lib/palette.ts`,
+    which mirrors the sixteen keys for pickers to iterate over. The server is still the
+    only authority on which keys are real (AGENTS rule 8) and no hex value crosses into
+    the frontend (rule 12). **T-701 should reuse `PALETTE_KEYS` for the styling picker.**
+  - *Slug rules exist in exactly one place.* The new-room form has no regex and no
+    hint that restates one; a bad slug comes back as the server's own sentence.
+  - *Copying a link answers honestly.* The Clipboard API needs a secure context and a
+    permission the WebView can refuse, so `copyText` returns a boolean and the screen
+    says when it failed. The link also sits in a selectable read-only box, which is the
+    fallback that always works. It did work in WebKitGTK on Plasma 6.
+  - *Archive asks first, because it is one-way.* There is no unarchive endpoint and no
+    plan for one, so the button turns into `yes, archive` / `keep it` and a line of copy
+    says what does and does not survive.
+  - **Two things this run turned up that are not T-410's to fix:**
+    - *A member who joins after you connected is invisible to you until you reconnect.*
+      Registering the second account did not put them in the first client's roster.
+      Nothing pushes a new `User`: the roster is built from the `users` list in `ready`
+      plus `user.update`, and there is no `user.create`. A presence frame for somebody
+      the client has never heard of has no name to draw. Fixing it means a new gateway
+      event, which is a protocol change — **T-413** is already the task that touches the
+      server, and it needs the mirror of this anyway (a removed member has to leave the
+      roster live). Worth deciding both at once.
+    - *One client instance, once, held a live socket that delivered no frames.* It was
+      the instance launched **before** the server had been set up: it sat on the sign-in
+      screen through the whole first-run, and after setup it showed `ready` and the
+      roster but never applied a single `room.create`, including ones made by `curl`.
+      The server was fine — a raw WebSocket probe on the same box got the fan-out
+      immediately — and restarting the app fixed it permanently. **It did not reproduce**
+      on a clean second run through the same first-run flow. The likely suspect is the
+      StrictMode double `connect`/`disconnect` in `Console`'s effect racing against
+      itself; `disconnect()` sets `connected = null` synchronously and the frame
+      listener drops everything when `connected` is not the api it was attached for.
+      Recorded rather than fixed: it is `lib/gateway.ts` and the sign-in path (T-301,
+      T-302), not this task, and a fix chased on one unreproducible sighting is a guess.
 
 - ⬜ **T-411 · The member's sweep: settings, empty states, first five minutes** — effort: **medium**
   The other half, for somebody who is not the host. There is no settings surface in

@@ -300,6 +300,31 @@
   flex: 1;
 }
 
+/* A section heading with the host's control for that section beside it. The
+   control is not drawn at all for anybody else, so this row is often just the
+   label (T-410). */
+.rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rail-action {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  cursor: pointer;
+}
+
+.rail-action:hover,
+.rail-action[aria-pressed="true"] {
+  color: var(--text-secondary);
+}
+
 .rail-server {
   margin-top: 6px;
   font-weight: 500;
