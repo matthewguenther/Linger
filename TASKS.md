@@ -1152,10 +1152,13 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
     for one and never will (AGENTS rule 2). Only the `media` kind gets a mark —
     `activityMark` is one function if T-501 wants more.
   - *The status image is not rendered.* `image_key` needs the media store M6
-    builds, and T-405 owns the editor that would set one. Everything else on a
-    status is there: the line in their own styling, and the three labeled fields.
+    builds. **T-606 owns it now** — T-405 took the rest of the status and left
+    the image behind, because there is nowhere to put a file until T-601 lands.
+    Everything else on a status is there: the line in their own styling, and
+    the three labeled fields.
   - **T-405 should not rebuild the card.** The status renders here already; what
-    it owns is the editor, the away flow, and the image.
+    it owns is the editor and the away flow. *(It did not — it lifted the card
+    into `status/StatusCard.tsx` so the popover could draw the same one.)*
   - *The `notify` switch survived* — it is still the second mode of this panel,
     now inside `Roster.tsx` rather than `App.tsx`, so `App` no longer holds any
     roster state.
