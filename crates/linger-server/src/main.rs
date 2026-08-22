@@ -23,10 +23,20 @@ async fn main() -> anyhow::Result<()> {
     // First run: no users yet, so hand the host their one-time setup URL.
     // Printed to stdout on purpose — `docker compose logs linger` is the flow.
     if let Some(token) = state.setup.peek() {
-        let host = domain.unwrap_or_else(|| bind.to_string());
+        // Scheme matters: the client keeps whatever it is handed, for the REST
+        // base URL and the gateway socket alike. A configured LINGER_DOMAIN
+        // means the documented deployment has Caddy terminating TLS in front
+        // (ARCHITECTURE §9), so the reachable address is https — printing http
+        // there would pin the host's own session to plaintext on their first
+        // action. With no domain we are talking to a bare bind address, which
+        // has no certificate and is honestly http.
+        let (scheme, host) = match domain {
+            Some(domain) => ("https", domain),
+            None => ("http", bind.to_string()),
+        };
         println!("\n  ┌─────────────────────────────────────────────────");
         println!("  │  This server isn't set up yet.");
-        println!("  │  Open:  http://{host}/setup?token={token}");
+        println!("  │  Open:  {scheme}://{host}/setup?token={token}");
         println!("  │  (the link works once, then never again)");
         println!("  └─────────────────────────────────────────────────\n");
     }

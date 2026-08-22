@@ -356,7 +356,10 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
 
 - ✅ **T-102 · First-run host setup** — effort: **medium**
   ARCHITECTURE §9. On boot with zero users: generate a one-time setup token,
-  print `http://<domain-or-bind>/setup?token=…` to stdout, expose endpoints to
+  print `https://<domain>/setup?token=…` to stdout (http only when there is no
+  `LINGER_DOMAIN` and we are printing a bare bind address — the client keeps
+  whatever scheme it is handed, so this decides whether the host's own session
+  runs over TLS; corrected 2026-08-21), expose endpoints to
   create the host account + name the server (writes `server_config`). Token dies on
   use or restart. No env-var bootstrap credentials.
   *Accept:* integration test boots a fresh server, completes setup, second attempt
