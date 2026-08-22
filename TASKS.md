@@ -1243,7 +1243,7 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
 - ✅ **T-405 · Statuses + away UI** — effort: **medium** *(landed 2026-08-21)*
   SPEC §4.6. Status editor (line 240, three labeled fields), away message
   supersedes; roster + popover rendering. **The status image is not built** —
-  see the note below; it needs M6.
+  it needs the media store, and moved to **T-606** in M6.
 
   *Verified against a real server with a real client.* One `linger-server` on a
   temp database, two accounts, the desktop client signed in as one of them and
@@ -1323,8 +1323,8 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
     milestone. Everything else on a status is done. `statusOf` carries
     `image_key` through every save untouched — `PATCH /me` replaces the whole
     status object, so dropping it would delete an image the moment T-601 lets
-    somebody set one. The editor says so in a line of copy. **When T-601 lands,
-    this is a file picker and one `<img>`, nothing more.**
+    somebody set one. The editor says so in a line of copy. **It is written up
+    as T-606, in M6, right after the upload pipeline that unblocks it.**
   - *T-501's poller now has a third frame to keep the activity id on.* T-402
     already flagged `idle` and the `around` after it; `away` and the `around`
     that follows it send `activity: null` for the same reason. Same fix: let the
@@ -1481,6 +1481,43 @@ itself editing `linger-core`, something has gone wrong — stop and ask.
 - ⬜ **T-605 · Expiry + storage accounting** — effort: **medium**
   365-day expiry of non-starred/non-pinned (host-configurable/off), background
   task; storage-used figure for the status bar and `GET /server`.
+- ⬜ **T-606 · The status image** — effort: **low** *(the rest of T-405, once
+  there is somewhere to put a file)*
+  SPEC §4.6's last bullet: one image on a status, **≤512 KB, displayed at
+  400×200**. T-405 built every other part of the status and stopped here,
+  because `image_key` names an object in the media store and there was no media
+  store — `/uploads` was not even mounted. `linger-core::limits` already holds
+  `MAX_STATUS_IMAGE_BYTES`.
+
+  Do this **after T-601**, which is what makes an upload possible, and after
+  **T-603** if it has landed, so the image is served from the media origin like
+  everything else. It is small: most of the work is already done in both
+  directions.
+
+  - **Client.** A file picker in `client/src/status/StatusEditor.tsx`, and an
+    `<img>` in `client/src/status/StatusCard.tsx` — one component, so the
+    roster card and the name popover both get it at once. Refuse an oversize
+    file before uploading it rather than after, the way the editor already
+    counts characters down.
+  - **Client, the trap.** `statusOf` in `client/src/status/status.ts` already
+    carries `image_key` through untouched on every save, because `PATCH /me`
+    replaces the whole status object. **Keep that.** The moment the editor can
+    set a key, a save that dropped the field would delete somebody's image.
+    `status.test.ts` has a test pinning this — do not delete it either.
+  - **Server.** `validate::status` checks lengths and nothing else: it will
+    accept any string as an `image_key` today. It has to become a real check —
+    the key names an object that exists, belongs to this user, is an image, and
+    is within `MAX_STATUS_IMAGE_BYTES`. Without that, `image_key` is a
+    user-controlled string that ends up in a URL.
+  - **Also.** A status image should not expire out from under the status
+    (T-605 expires non-starred objects at 365 days), and replacing one should
+    not leave the old object orphaned.
+  - *Accept:* set an image, see it at 400×200 in both the roster card and the
+    popover, on a second client; a 600 KB file is refused with a sentence a
+    person can read; a key naming somebody else's object is refused by the
+    server; the image survives a year-old status once T-605 is in.
+  - **Take the line of copy out of the editor when this lands.** It currently
+    says "Status images arrive with file uploads."
 
 ## M7 — styling: names, palette, themes, fonts
 

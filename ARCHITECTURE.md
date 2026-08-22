@@ -475,7 +475,7 @@ passes its check.
 | **M4** | Presence + roster + in-room state + statuses | Roster updates live across two clients; a status set on one shows up on the other | 2 days |
 | **M4.5** | Host controls (rooms, invites, server settings), member settings, the server list | A host who has only seen the app can create a server, add a room, invite a friend, and rename the server — no curl, no docs | 2–3 days |
 | **M5** | Activity detection: Windows, X11, KDE/Wayland, macOS | Foreground app appears in the roster on Kubuntu/Plasma 6 Wayland and on Windows | 3–5 days |
-| **M6** | Uploads, media pipeline, the media collection | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
+| **M6** | Uploads, media pipeline, the media collection, status images | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
 | **M7** | Styling: names, statuses, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
 | **M8** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
 | **M9** | Export | One archive contains every message and file, and it opens | 1 day |
