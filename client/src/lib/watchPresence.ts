@@ -1,5 +1,5 @@
 /**
- * Watch the window, send `room.focus` and `idle`.
+ * Watch the window, send `room.focus`, `idle` and `away`.
  *
  * The clocks and the deciding live in `presence.ts`. This file is the part
  * that cannot be tested without a window: it listens for input and focus,
@@ -11,28 +11,39 @@ import { send } from "./gateway";
 import { readFocused, setLooking, stopLooking } from "./looking";
 import { decide, frameFor, nextCheckAt, type PresenceAction, type PresenceClock } from "./presence";
 
-function applySent(
-  sent: { roomId: RoomId | null; state: PresenceState },
-  action: PresenceAction,
-): { roomId: RoomId | null; state: PresenceState } {
+interface Sent {
+  roomId: RoomId | null;
+  state: PresenceState;
+  awayMessage: string | null;
+}
+
+function applySent(sent: Sent, action: PresenceAction): Sent {
   if (action.kind === "focus") {
     return {
       roomId: action.roomId,
       state: action.roomId === null ? "around" : "in_room",
+      // The server clears the away message on any `room.focus`, so our record
+      // of what is on the wire has to clear with it.
+      awayMessage: null,
     };
   }
-  return { roomId: sent.roomId, state: action.state };
+  if (action.kind === "away") {
+    return { roomId: sent.roomId, state: "away", awayMessage: action.message };
+  }
+  return { roomId: sent.roomId, state: action.state, awayMessage: null };
 }
 
 let live = false;
 let openRoomId: RoomId | null = null;
 let sentRoomId: RoomId | null = null;
 let sentState: PresenceState = "around";
+let sentAwayMessage: string | null = null;
+let wantAway: string | null = null;
 let focused = false;
 let lastInputAt = 0;
 let blurredAt = 0;
 let timer: number | null = null;
-let ticking: Promise<void> | null = null;
+let running = false;
 let pending = false;
 let attached = false;
 let unlisten: (() => void) | null = null;
@@ -45,6 +56,8 @@ function clock(): PresenceClock {
     roomId: openRoomId,
     sentRoomId,
     sentState,
+    wantAway,
+    sentAwayMessage,
   };
 }
 
@@ -63,16 +76,28 @@ function schedule(): void {
   }, Math.max(0, at - Date.now()));
 }
 
+/**
+ * Work out what to send, and send it. One of these runs at a time.
+ *
+ * The guard is a plain boolean, and it has to be. An earlier version held the
+ * in-flight promise instead, which looked equivalent and was not: when
+ * `decide` has nothing to say, the whole body runs to completion *before* the
+ * promise is assigned, so the assignment overwrote the `null` the body had
+ * just cleared. Every later tick then saw a non-null promise, set `pending`,
+ * and returned — and presence stopped sending anything at all for the rest of
+ * the session. Nothing surfaced it: the frames simply stopped, and the last
+ * ones sent stayed true on the server.
+ *
+ * A boolean set before the first statement cannot be beaten by its own body.
+ * Anything that arrives mid-flight sets `pending` and the loop goes round
+ * again, so a tick is never dropped.
+ */
 async function tick(): Promise<void> {
-  if (ticking) {
+  if (running) {
     pending = true;
-    return ticking;
+    return;
   }
-  ticking = run();
-  return ticking;
-}
-
-async function run(): Promise<void> {
+  running = true;
   try {
     do {
       pending = false;
@@ -85,15 +110,18 @@ async function run(): Promise<void> {
         if (action === null) break;
         const ok = await send(frameFor(action));
         if (!ok) break;
-        const next = applySent({ roomId: sentRoomId, state: sentState }, action);
+        const next = applySent(
+          { roomId: sentRoomId, state: sentState, awayMessage: sentAwayMessage },
+          action,
+        );
         sentRoomId = next.roomId;
         sentState = next.state;
+        sentAwayMessage = next.awayMessage;
       }
       schedule();
-    } while (pending);
+    } while (pending && live);
   } finally {
-    ticking = null;
-    if (pending && live) void tick();
+    running = false;
   }
 }
 
@@ -126,9 +154,32 @@ export function setPresenceRoom(roomId: RoomId | null): void {
 }
 
 /**
+ * Go away, or come back (SPEC §4.6). `null` is coming back.
+ *
+ * Only the wire half. The copy that outlives the session is saved on the
+ * status by the editor, which is also what stamps `away_since` — the server
+ * owns that value and only `PATCH /me` sets it.
+ */
+export function setAway(message: string | null): void {
+  const next = message === null || message.trim() === "" ? message : message.trim();
+  if (next === wantAway) return;
+  wantAway = next;
+  void tick();
+}
+
+/** Whether this client currently believes it is away. */
+export function isAway(): boolean {
+  return wantAway !== null;
+}
+
+/**
  * True once the gateway has said `ready`. A fresh `ready` is a new session
  * as far as the server is concerned — we are `around` with no room, and the
  * next tick re-announces if we should still be in one.
+ *
+ * Being away survives the reconnect. The server forgot — its presence map is
+ * per-connection — so `sentAwayMessage` clears and the next tick says it
+ * again. A dropped socket is not somebody coming back to their desk.
  */
 export function setPresenceLive(next: boolean): void {
   if (next === live) return;
@@ -136,6 +187,7 @@ export function setPresenceLive(next: boolean): void {
   if (next) {
     sentRoomId = null;
     sentState = "around";
+    sentAwayMessage = null;
     void tick();
     return;
   }
@@ -192,6 +244,8 @@ function stopPresence(): void {
   openRoomId = null;
   sentRoomId = null;
   sentState = "around";
+  sentAwayMessage = null;
+  wantAway = null;
   if (timer !== null && typeof window !== "undefined") {
     window.clearTimeout(timer);
     timer = null;

@@ -30,6 +30,8 @@ import { useNow } from "../lib/clock";
 import { useGateway } from "../lib/gateway";
 import { nameStyle, personStyle } from "../lib/names";
 import NotifyRules from "../notify/NotifyRules";
+import StatusCard from "../status/StatusCard";
+import StatusEditor from "../status/StatusEditor";
 import {
   activityMark,
   buildRoster,
@@ -58,6 +60,9 @@ export default function Roster({
   // The rules are a list of people too, and a settings screen for one setting
   // would be a screen too many.
   const [notifying, setNotifying] = useState(false);
+  // Writing your own. A third mode rather than a form inside your card: in a
+  // narrow window the cards are chips in a strip, and a chip is not a form.
+  const [editing, setEditing] = useState(false);
   // One card open at a time. Two open cards is a list of statuses, which is a
   // different panel and a worse one.
   const [open, setOpen] = useState<string | null>(null);
@@ -79,20 +84,32 @@ export default function Roster({
     [users, presence, allRooms, me?.id, offlineAt, now],
   );
 
+  // `me` is null until the first `ready`, and goes null again if the connection
+  // resets under an open editor. The heading and the body have to agree about
+  // that, or the panel says "your status" over the card stack.
+  const showEditor = editing && me !== null;
+
   return (
     <aside className="roster" data-layout={layout}>
       <div className="roster-head">
-        <h2 className="panel-label">{notifying ? "notify me when" : "who’s around"}</h2>
+        <h2 className="panel-label">{headingFor(notifying, showEditor)}</h2>
         <button
           type="button"
           className="roster-switch meta"
-          aria-expanded={notifying}
-          onClick={() => setNotifying((held) => !held)}
+          aria-expanded={notifying || editing}
+          onClick={() => {
+            if (editing) setEditing(false);
+            else setNotifying((held) => !held);
+          }}
         >
-          {notifying ? "done" : "notify"}
+          {editing || notifying ? "done" : "notify"}
         </button>
       </div>
-      {notifying ? (
+      {showEditor && me !== null ? (
+        <div className="roster-editor">
+          <StatusEditor api={api} me={me} onDone={() => setEditing(false)} />
+        </div>
+      ) : notifying ? (
         <div className="roster-notify">
           <NotifyRules api={api} rooms={rooms} />
         </div>
@@ -109,6 +126,7 @@ export default function Roster({
               onToggle={() =>
                 setOpen((held) => (held === entry.user.id ? null : entry.user.id))
               }
+              onEdit={() => setEditing(true)}
             />
           ))}
         </ul>
@@ -120,28 +138,34 @@ export default function Roster({
 /**
  * One person.
  *
- * The head is a button only when there is a status under it. An affordance that
- * does nothing is worse than no affordance, and most cards, most of the time,
- * have nothing to open.
+ * The head is a button only when there is something under it. An affordance
+ * that does nothing is worse than no affordance, and most cards, most of the
+ * time, have nothing to open.
+ *
+ * Your own card is the exception: it opens whether or not you have written
+ * anything, because "edit" is under there and a blank status would otherwise
+ * have no way in.
  */
 function PersonCard({
   entry,
   now,
   open,
   onToggle,
+  onEdit,
 }: {
   entry: RosterEntry;
   now: number;
   open: boolean;
   onToggle: () => void;
+  onEdit: () => void;
 }) {
   const { user, state } = entry;
-  const openable = hasStatus(entry);
+  const openable = hasStatus(entry) || entry.isMe;
   const head = (
     <>
       {/* The dot is decoration; the word beside it is what a screen reader
           reads, so presence is never carried by color alone. */}
-      <span className="person-dot" aria-hidden="true" />
+      <span className="person-dot" data-state={state} aria-hidden="true" />
       <span className="person-name" style={nameStyle(user)}>
         {user.display_name}
       </span>
@@ -165,7 +189,21 @@ function PersonCard({
         <p className="person-head">{head}</p>
       )}
       <PersonLines entry={entry} now={now} />
-      {open ? <StatusCard entry={entry} /> : null}
+      {open ? (
+        <>
+          {/* The away message is already on the lines above, so the card
+              leaves the status line out rather than saying it twice. */}
+          <StatusCard user={user} awayShown={entry.awayMessage !== null && entry.awayMessage !== ""} />
+          {entry.isMe ? (
+            <p className="person-mine">
+              {hasStatus(entry) ? null : <span className="meta">nothing set</span>}
+              <button type="button" className="person-edit meta" onClick={onEdit}>
+                edit
+              </button>
+            </p>
+          ) : null}
+        </>
+      ) : null}
     </li>
   );
 }
@@ -235,41 +273,9 @@ function sinceOf(entry: RosterEntry, now: number): string | null {
   return entry.activity === null ? null : shortAgo(entry.activity.since, now);
 }
 
-/**
- * The status, opened (SPEC §4.6): a line in their own styling, and up to three
- * labeled fields. The status image is not here yet — it needs the media store
- * that M6 builds, and T-405 owns the editor that would set one.
- */
-function StatusCard({ entry }: { entry: RosterEntry }) {
-  const status = entry.user.status;
-  if (!status) return null;
-  const fields: [string, string | null][] = [
-    ["reading", status.reading],
-    ["listening to", status.listening],
-    ["working on", status.working_on],
-  ];
-  const shown = fields.filter(([, value]) => value !== null && value !== "");
-  // The away message supersedes the status line when it is set (SPEC §4.6),
-  // and `PersonLines` has already drawn it.
-  const line = entry.awayMessage !== null && entry.awayMessage !== "" ? null : status.line;
-
-  return (
-    <div className="person-status">
-      {line === null || line === "" ? null : (
-        <p className="status-line" style={nameStyle(entry.user)}>
-          {line}
-        </p>
-      )}
-      {shown.length === 0 ? null : (
-        <dl className="status-fields">
-          {shown.map(([label, value]) => (
-            <div className="status-field" key={label}>
-              <dt className="meta">{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </div>
-  );
+/** What the panel is currently for. Three modes, one label. */
+function headingFor(notifying: boolean, editing: boolean): string {
+  if (editing) return "your status";
+  if (notifying) return "notify me when";
+  return "who’s around";
 }

@@ -9,7 +9,10 @@
  * edges can be tested without waiting for either. The driver that reads the
  * window and sends the frames is `watchPresence.ts`.
  *
- * `away` is T-405's. This file will not send a state over the top of it.
+ * `away` is a deliberate state a person chooses, not a clock running out, so
+ * it comes in from outside as `wantAway` and outranks everything here: while
+ * it is set the two clocks stop mattering, because somebody who said they are
+ * away does not stop being away by sitting still.
  */
 import type { ClientFrame } from "../generated/ClientFrame";
 import type { PresenceState } from "../generated/PresenceState";
@@ -35,11 +38,19 @@ export interface PresenceClock {
   sentRoomId: RoomId | null;
   /** The last presence state we sent, or that `ready` gave us. */
   sentState: PresenceState;
+  /**
+   * The away message the person asked to wear, or null for "not away"
+   * (SPEC §4.6). Set by the editor, not by any clock in this file.
+   */
+  wantAway: string | null;
+  /** The away message we last got onto the wire, so a reword is noticed. */
+  sentAwayMessage: string | null;
 }
 
 export type PresenceAction =
   | { kind: "focus"; roomId: RoomId | null }
-  | { kind: "state"; state: "idle" | "around" };
+  | { kind: "state"; state: "idle" | "around" }
+  | { kind: "away"; message: string | null };
 
 /**
  * Whether the 90-second clocks still say this person is here.
@@ -66,12 +77,26 @@ export function wantedRoom(clock: PresenceClock, now: number): RoomId | null {
  * sets `in_room` / `around` from the former, so this never sends those as a
  * state of their own — doing so would either no-op or fight the room.
  *
- * `away` is left alone: T-405 owns that word, and overwriting it with `idle`
- * because somebody's hands were off the keyboard would be this file reaching
- * into a different task.
+ * **Leave the room, then go away.** The server sets `around` on any
+ * `room.focus` with `null`, so sending the leave *after* the away frame would
+ * wipe the away state a moment after setting it. Same order idle uses, and for
+ * the same reason. One action per call: the driver loops until this returns
+ * null, so the two frames go out in order rather than racing.
  */
 export function decide(clock: PresenceClock, now: number): PresenceAction | null {
-  if (clock.sentState === "away") return null;
+  if (clock.wantAway !== null) {
+    // Out of the room first, or the leave undoes what comes next.
+    if (clock.sentRoomId !== null) return { kind: "focus", roomId: null };
+    if (clock.sentState !== "away" || clock.sentAwayMessage !== clock.wantAway) {
+      return { kind: "away", message: clock.wantAway };
+    }
+    // Away is sticky. Sitting still does not make somebody more away, and the
+    // ten-minute clock must not quietly downgrade them to `idle`.
+    return null;
+  }
+
+  // Back from away. Say so once; the clocks below take over from the next pass.
+  if (clock.sentState === "away") return { kind: "state", state: "around" };
 
   const want = wantedRoom(clock, now);
   if (want !== clock.sentRoomId) return { kind: "focus", roomId: want };
@@ -87,6 +112,9 @@ export function decide(clock: PresenceClock, now: number): PresenceAction | null
  * window. `null` means it is waiting on input, not on the clock.
  */
 export function nextCheckAt(clock: PresenceClock, now: number): number | null {
+  // Nothing to wait for while away: no clock changes the answer, only the
+  // person coming back does, and that arrives as an event.
+  if (clock.wantAway !== null) return null;
   const times: number[] = [];
   const leaveByInput = clock.lastInputAt + LEAVE_AFTER_MS;
   if (leaveByInput > now) times.push(leaveByInput);
@@ -103,6 +131,14 @@ export function nextCheckAt(clock: PresenceClock, now: number): number | null {
 export function frameFor(action: PresenceAction): ClientFrame {
   if (action.kind === "focus") {
     return { op: "room.focus", d: { room_id: action.roomId } };
+  }
+  if (action.kind === "away") {
+    // The message rides along so everyone connected sees it now. The copy that
+    // outlives the session is saved separately, on the status (SPEC §4.6).
+    return {
+      op: "presence.update",
+      d: { state: "away", activity: null, away_message: action.message },
+    };
   }
   return {
     op: "presence.update",

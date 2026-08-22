@@ -103,16 +103,6 @@ button.person-head[aria-expanded="true"]::after {
   color: var(--text-secondary);
 }
 
-.person-name {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--person-name);
-  font-size: var(--text-label-size);
-  line-height: 1.4;
-}
-
 /* Sits with the name rather than out at the edge: it is part of reading who
    this is, not a second column. */
 .person-you {
@@ -120,33 +110,8 @@ button.person-head[aria-expanded="true"]::after {
   color: var(--text-faint);
 }
 
-/* Presence, as a dot. The word is beside it for a screen reader (`sr-only`),
-   so state is never carried by shape alone. */
-.person-dot {
-  flex: none;
-  align-self: center;
-  width: 7px;
-  height: 7px;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  background: var(--text-secondary);
-}
-
-.person[data-state="in_room"] .person-dot {
-  background: var(--text-primary);
-}
-
-/* Hollow: here, but not at the keyboard. */
-.person[data-state="idle"] .person-dot,
-.person[data-state="away"] .person-dot {
-  background: none;
-  border-color: var(--text-muted);
-}
-
-.person[data-state="offline"] .person-dot {
-  background: none;
-  border-color: var(--text-faint);
-}
+/* `.person-name` and `.person-dot` are drawn by the popover too, so they live
+   in `status/status.css` with the rest of the shared person bits. */
 
 /* Everything under the name lines up with the name, not with the dot. */
 .person-lines {
@@ -192,42 +157,8 @@ button.person-head[aria-expanded="true"]::after {
   overflow-wrap: anywhere;
 }
 
-/* The status, opened: their line in their own styling, then the labeled
-   fields (SPEC §4.6). */
-.person-status {
-  padding: 5px 0 2px 13px;
-}
-
-.status-line {
-  color: var(--person-name);
-  font-size: var(--text-label-size);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.status-fields {
-  display: grid;
-  gap: 1px;
-  padding-top: 4px;
-}
-
-.status-field {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.status-field dt {
-  flex: none;
-}
-
-.status-field dd {
-  min-width: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-label-size);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
+/* The status card itself lives in `status/status.css`, next to the component,
+   because the popover draws the same one (SPEC §4.6). */
 
 /* ---------------------------------------------------------------------------
    Narrow windows: the same cards, along instead of down (SPEC §3).
@@ -310,7 +241,8 @@ button.person-head[aria-expanded="true"]::after {
 
 /* The notify rules are a list, and a list cannot be a strip. It gets the width
    and a ceiling instead. */
-.roster[data-layout="strip"] .roster-notify {
+.roster[data-layout="strip"] .roster-notify,
+.roster[data-layout="strip"] .roster-editor {
   order: 3;
   flex-basis: 100%;
   max-height: 38vh;
