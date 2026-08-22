@@ -9,16 +9,23 @@
  * a typed one, and it is one annotated assignment, not a cast.
  */
 import type { AuthResponse } from "../generated/AuthResponse";
+import type { CreateInviteRequest } from "../generated/CreateInviteRequest";
+import type { CreateRoomRequest } from "../generated/CreateRoomRequest";
 import type { ErrorBody } from "../generated/ErrorBody";
 import type { ErrorCode } from "../generated/ErrorCode";
+import type { Invite } from "../generated/Invite";
 import type { InvitePreview } from "../generated/InvitePreview";
 import type { LoginRequest } from "../generated/LoginRequest";
 import type { RefreshRequest } from "../generated/RefreshRequest";
 import type { RefreshResponse } from "../generated/RefreshResponse";
 import type { RegisterRequest } from "../generated/RegisterRequest";
+import type { Room } from "../generated/Room";
+import type { RoomId } from "../generated/RoomId";
 import type { ServerInfo } from "../generated/ServerInfo";
 import type { SetupPreview } from "../generated/SetupPreview";
 import type { SetupRequest } from "../generated/SetupRequest";
+import type { UpdateRoomRequest } from "../generated/UpdateRoomRequest";
+import type { UpdateServerRequest } from "../generated/UpdateServerRequest";
 import type { User } from "../generated/User";
 
 /** Everything REST lives under this prefix (PROTOCOL §1). */
@@ -308,6 +315,42 @@ export class AuthedApi {
 
   serverInfo(signal?: AbortSignal): Promise<ServerInfo> {
     return this.get<ServerInfo>("/server", signal);
+  }
+
+  // --- the host's endpoints (PROTOCOL §3 and §7) ---------------------------
+  //
+  // All of these answer FORBIDDEN for anybody but the host, which is the lock;
+  // the client hides the controls rather than greying them out, which is the
+  // product decision on top of it.
+
+  updateServer(request: UpdateServerRequest): Promise<ServerInfo> {
+    return this.patch<ServerInfo>("/server", request);
+  }
+
+  createRoom(request: CreateRoomRequest): Promise<Room> {
+    return this.post<Room>("/rooms", request);
+  }
+
+  updateRoom(id: RoomId, request: UpdateRoomRequest): Promise<Room> {
+    return this.patch<Room>(`/rooms/${encodeURIComponent(id)}`, request);
+  }
+
+  /** The only delete this product has (SPEC §4.1): the room leaves the rail
+   *  and everything in it is still there. */
+  archiveRoom(id: RoomId): Promise<Room> {
+    return this.post<Room>(`/rooms/${encodeURIComponent(id)}/archive`);
+  }
+
+  invites(signal?: AbortSignal): Promise<Invite[]> {
+    return this.get<Invite[]>("/invites", signal);
+  }
+
+  createInvite(request: CreateInviteRequest): Promise<Invite> {
+    return this.post<Invite>("/invites", request);
+  }
+
+  revokeInvite(code: string): Promise<void> {
+    return this.delete(`/invites/${encodeURIComponent(code)}`);
   }
 
   async #withAuth<T>(call: (accessToken: string) => Promise<T>): Promise<T> {

@@ -156,10 +156,19 @@ The setup URL in that log is meant for the desktop client, not a browser: open L
 and paste it into the first box. It creates your account, makes you the host, and names
 the server. It works once, and a restart replaces it.
 
-Inviting people works the same way. An invite code becomes a link by hanging it off
-your server's address — `https://linger.example/invite/CODE` — and whoever you send it
-to pastes that into the same box. The box also takes a bare address
-(`linger.example`) for signing back in.
+Everything else you need to run the place is inside the app. As the host you get two
+extra controls on the rail — `+ room` next to the room list, and `manage` next to the
+server's name — and they open one panel with three sections: rooms, invites, and the
+server's own name and accent. Nobody else sees those controls at all. Making a room,
+renaming or archiving one, reordering the rail, handing out invite links and revoking
+them, and renaming the server are all done there. None of it needs `curl` and none of
+it is a config file.
+
+Inviting people works like the setup link. The invites screen makes the link and copies
+it for you — it is your server's address with the code hung off it,
+`https://linger.example/invite/CODE` — and whoever you send it to pastes that into the
+same box the setup link goes in. The box also takes a bare address (`linger.example`)
+for signing back in.
 
 **Backup** is the whole point of self-hosting your friendships — it's two paths:
 `data/linger.db` and `data/objects/`. A cron one-liner:
@@ -253,6 +262,14 @@ Things that surprise people the first time:
   saves it and is the only thing that stamps `away_since`, then the gateway frame tells
   everyone. The room leave has to go before the away frame, because the server sets
   `around` on any room leave.
+- **The host's controls are absent for everybody else, not greyed out**
+  (`client/src/host/`). One panel over the stream column with three sections — rooms,
+  invites, the server itself — reached from two small controls on the rail that only a
+  host is shown. A disabled button would be a permission matrix drawn in CSS, and this
+  product does not have one; the server refuses the request either way, which is the
+  actual lock. The panel keeps no copy of the room list: every save goes to the server,
+  the server fans the change out, and the panel re-renders off the same store the rail
+  does, so the two cannot disagree and the other clients see it too.
 - **The only thing that interrupts you is somebody naming you.** A mention, or a person
   you ticked in `notify me when`, raises a desktop notification through
   `tauri-plugin-notification`. Nothing else does, and there is no badge for one to hang

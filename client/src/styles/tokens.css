@@ -19,8 +19,11 @@
   --text-muted: #5c636f;
   --text-faint: #4a515c;
   /* Accent is used for exactly four things: the "you left off here" line,
-     focus rings, the active-room rule, and the send affordance. Nowhere else. */
-  --accent: #6e9bff;
+     focus rings, the active-room rule, and the send affordance. Nowhere else.
+     The host can point it at a palette key (`PATCH /server`), so the frame
+     overrides `--accent` for its subtree and this is what it falls back to. */
+  --accent-default: #6e9bff;
+  --accent: var(--accent-default);
 
   /* --- typography (SPEC §5.2): sans for content, mono for metadata ONLY --- */
   --font-ui: "Geist Sans", "IBM Plex Sans", system-ui, sans-serif;
@@ -63,7 +66,7 @@
   --text-secondary: #5c636f;
   --text-muted: #8b929e;
   --text-faint: #a8aeb8;
-  --accent: #2563c9;
+  --accent-default: #2563c9;
 }
 
 /* Density modes (SPEC §5.6). IRC mode's mono body is the one sanctioned
