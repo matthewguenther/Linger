@@ -5,6 +5,7 @@
 pub mod gateway;
 mod secrets;
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use linger_core::gateway::{ClientFrame, ServerFrame};
@@ -61,7 +62,10 @@ async fn session_load() -> SessionLoad {
     .await
 }
 
-/// Save the session after a sign-in or a token refresh.
+/// Save one server's session after a sign-in or a token refresh.
+///
+/// Other servers in the list are left alone. This server becomes the active
+/// one, which is what a sign-in means.
 #[tauri::command]
 async fn session_save(session: StoredSession) -> SessionWrite {
     off_thread(
@@ -73,12 +77,27 @@ async fn session_save(session: StoredSession) -> SessionWrite {
     .await
 }
 
-/// Forget the session on sign-out, or when the server rejects it.
+/// Forget one server, or every server when `base_url` is omitted.
 #[tauri::command]
-async fn session_clear() -> SessionWrite {
-    off_thread(secrets::clear, || SessionWrite::Unavailable {
-        reason: lost_worker(),
-    })
+async fn session_clear(base_url: Option<String>) -> SessionWrite {
+    off_thread(
+        move || secrets::clear(base_url.as_deref()),
+        || SessionWrite::Unavailable {
+            reason: lost_worker(),
+        },
+    )
+    .await
+}
+
+/// Remember which server the window is looking at.
+#[tauri::command]
+async fn session_set_active(base_url: String) -> SessionWrite {
+    off_thread(
+        move || secrets::set_active(&base_url),
+        || SessionWrite::Unavailable {
+            reason: lost_worker(),
+        },
+    )
     .await
 }
 
@@ -86,42 +105,70 @@ async fn session_clear() -> SessionWrite {
 // Gateway
 // ---------------------------------------------------------------------------
 
-/// The live gateway connection, if there is one. Replaced wholesale on sign-in
-/// and torn down on sign-out: one connection to one server at a time.
+/// Live gateway connections, one per server. Killing or signing out of one
+/// must not touch the others (T-412).
 #[derive(Default)]
-struct Connection(Mutex<Option<gateway::Handle>>);
+struct Connections(Mutex<HashMap<String, gateway::Handle>>);
 
-impl Connection {
-    fn with<T>(&self, work: impl FnOnce(&mut Option<gateway::Handle>) -> T) -> T {
-        let mut slot = match self.0.lock() {
-            Ok(slot) => slot,
+impl Connections {
+    fn with<T>(&self, work: impl FnOnce(&mut HashMap<String, gateway::Handle>) -> T) -> T {
+        let mut map = match self.0.lock() {
+            Ok(map) => map,
             // A panic elsewhere poisoned the lock. What it guards is still a
-            // perfectly good handle, and refusing to reconnect for the rest of
-            // the session would be the worse outcome by far.
+            // perfectly good map of handles, and refusing to reconnect for the
+            // rest of the session would be the worse outcome by far.
             Err(poisoned) => poisoned.into_inner(),
         };
-        work(&mut slot)
+        work(&mut map)
     }
 }
 
-/// Sends what the gateway client produces to the WebView.
+/// Status for one server. The frontend fans these out by `base_url`.
+#[derive(Clone, Serialize)]
+struct StatusEvent {
+    base_url: String,
+    status: gateway::Status,
+}
+
+/// A sequenced frame from one server.
+#[derive(Clone, Serialize)]
+struct FrameEvent {
+    base_url: String,
+    frame: ServerFrame,
+}
+
+/// Sends what the gateway client produces to the WebView, tagged with the
+/// server it came from so two live connections cannot overwrite each other.
 struct WindowEvents {
     app: AppHandle,
+    base_url: String,
 }
 
 impl gateway::Events for WindowEvents {
     fn status(&self, status: gateway::Status) {
         // A failed emit means the window is gone. There is nobody to tell.
-        let _ = self.app.emit(gateway::STATUS_EVENT, status);
+        let _ = self.app.emit(
+            gateway::STATUS_EVENT,
+            StatusEvent {
+                base_url: self.base_url.clone(),
+                status,
+            },
+        );
     }
 
     fn frame(&self, frame: &ServerFrame) {
-        let _ = self.app.emit(gateway::FRAME_EVENT, frame);
+        let _ = self.app.emit(
+            gateway::FRAME_EVENT,
+            FrameEvent {
+                base_url: self.base_url.clone(),
+                frame: frame.clone(),
+            },
+        );
     }
 }
 
-/// Open (or reopen) the connection. Calling this again replaces the previous
-/// one, which is what makes a frontend reload or a re-sign-in start clean.
+/// Open (or reopen) the connection to one server. Calling this again for the
+/// same address replaces that connection only; every other server stays up.
 ///
 /// `expires_at_ms` is when the access token dies, in Unix milliseconds; the
 /// frontend knows it from the `expires_in` that came with the token. `false`
@@ -129,7 +176,7 @@ impl gateway::Events for WindowEvents {
 #[tauri::command]
 fn gateway_connect(
     app: AppHandle,
-    connection: State<'_, Connection>,
+    connections: State<'_, Connections>,
     base_url: String,
     token: String,
     expires_at_ms: i64,
@@ -138,35 +185,46 @@ fn gateway_connect(
         value: token,
         expires_at_ms,
     };
-    let Some((handle, task)) = gateway::client(&base_url, token, WindowEvents { app: app.clone() })
-    else {
+    let Some((handle, task)) = gateway::client(
+        &base_url,
+        token,
+        WindowEvents {
+            app: app.clone(),
+            base_url: base_url.clone(),
+        },
+    ) else {
         return false;
     };
     tauri::async_runtime::spawn(task);
-    connection.with(|slot| {
-        if let Some(previous) = slot.replace(handle) {
+    connections.with(|map| {
+        if let Some(previous) = map.insert(base_url, handle) {
             previous.shutdown();
         }
     });
     true
 }
 
-/// Close the connection: sign-out, or the frontend going away.
+/// Close one connection: sign-out of that server, or the frontend going away.
 #[tauri::command]
-fn gateway_disconnect(connection: State<'_, Connection>) {
-    connection.with(|slot| {
-        if let Some(handle) = slot.take() {
+fn gateway_disconnect(connections: State<'_, Connections>, base_url: String) {
+    connections.with(|map| {
+        if let Some(handle) = map.remove(&base_url) {
             handle.shutdown();
         }
     });
 }
 
-/// Hand the connection a fresh access token. The frontend is the only owner of
+/// Hand one connection a fresh access token. The frontend is the only owner of
 /// refresh tokens, so this is the only way a new one arrives.
 #[tauri::command]
-fn gateway_token(connection: State<'_, Connection>, token: String, expires_at_ms: i64) -> bool {
-    connection.with(|slot| {
-        slot.as_ref().is_some_and(|handle| {
+fn gateway_token(
+    connections: State<'_, Connections>,
+    base_url: String,
+    token: String,
+    expires_at_ms: i64,
+) -> bool {
+    connections.with(|map| {
+        map.get(&base_url).is_some_and(|handle| {
             handle.set_token(gateway::Token {
                 value: token,
                 expires_at_ms,
@@ -175,10 +233,15 @@ fn gateway_token(connection: State<'_, Connection>, token: String, expires_at_ms
     })
 }
 
-/// Send one client frame. `false` means there was no connection to send it on.
+/// Send one client frame on one connection. `false` means there was no
+/// connection to send it on.
 #[tauri::command]
-fn gateway_send(connection: State<'_, Connection>, frame: ClientFrame) -> bool {
-    connection.with(|slot| slot.as_ref().is_some_and(|handle| handle.send(frame)))
+fn gateway_send(
+    connections: State<'_, Connections>,
+    base_url: String,
+    frame: ClientFrame,
+) -> bool {
+    connections.with(|map| map.get(&base_url).is_some_and(|handle| handle.send(frame)))
 }
 
 /// Entry point shared by main.rs and (later) mobile.
@@ -191,12 +254,13 @@ pub fn run() {
         // them, or one from a person they asked to hear from (SPEC §4.2).
         // There are no other notifications and no unread badge to attach one to.
         .plugin(tauri_plugin_notification::init())
-        .manage(Connection::default())
+        .manage(Connections::default())
         .invoke_handler(tauri::generate_handler![
             activity_probe,
             session_load,
             session_save,
             session_clear,
+            session_set_active,
             gateway_connect,
             gateway_disconnect,
             gateway_token,

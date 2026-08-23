@@ -10,6 +10,19 @@
   overflow-y: auto;
 }
 
+/* In-app "add a server" (T-412): same paste box, sitting in the stream column
+   rather than taking over the window. */
+.auth-embed {
+  place-items: start center;
+  background: transparent;
+}
+
+.auth-embed .auth-panel {
+  border: 0;
+  background: transparent;
+  padding-top: calc(var(--gutter) * 1.5);
+}
+
 .auth-panel {
   width: 100%;
   max-width: 380px;

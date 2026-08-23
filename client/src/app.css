@@ -336,6 +336,66 @@
   font-weight: 500;
 }
 
+/* SPEC §3: the server list. A filled dot is live; weight is the only "something
+   new" signal, same as rooms — no number, no second badge (T-412). */
+.server-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.server-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 0;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  transition: opacity var(--motion-base);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  margin-left: calc(var(--gutter) * -1);
+  padding-left: calc(var(--gutter) - 2px);
+  font: inherit;
+  cursor: pointer;
+}
+
+.server-item:hover,
+.server-item[aria-current="true"],
+.server-item[data-new="true"] {
+  opacity: 1;
+}
+
+.server-item[aria-current="true"] {
+  border-left-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.server-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.server-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--text-faint);
+  background: transparent;
+}
+
+.server-dot[data-live="true"] {
+  background: var(--text-secondary);
+  border-color: var(--text-secondary);
+}
+
 /* The room list. Plain rows: no colored icon squares in the rail (SPEC §5). */
 .room-list {
   list-style: none;

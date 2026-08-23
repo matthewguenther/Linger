@@ -8,11 +8,14 @@
  *
  * The connection itself is not here. It lives in the Tauri core
  * (ARCHITECTURE §1), which owns reconnecting, resume and sequence numbers and
- * sends two events up: a connection status, and each sequenced server frame.
- * This file folds those frames into a snapshot the UI can render, answers when
- * the core says it needs a fresh access token, and holds each open room's
- * history — because history arrives two ways, as pages over REST and as frames
- * over the socket, and the two have to be stitched together in one place.
+ * sends two events up: a connection status, and each sequenced server frame,
+ * each tagged with the server it came from (T-412). This file folds those
+ * frames into a snapshot per server, answers when the core says it needs a
+ * fresh access token, and holds each open room's history — because history
+ * arrives two ways, as pages over REST and as frames over the socket, and the
+ * two have to be stitched together in one place. `useGateway()` is the server
+ * the window is looking at; the rail reads the rest through
+ * `useServerSummaries()`.
  *
  * Running `pnpm dev` in a plain browser, with no Tauri underneath, leaves the
  * status on `offline` — the same honest degrading as session storage.
@@ -40,6 +43,7 @@ import type { UserStatus } from "../generated/UserStatus";
 import type { UserId } from "../generated/UserId";
 import { considerFrame } from "../notify/notify";
 import type { AuthedApi } from "./api";
+import { setActiveSession } from "./ipc";
 
 /**
  * Mirrors `Status` in `src-tauri/src/gateway.rs`. Allowed to be hand-written:
@@ -147,12 +151,49 @@ const EMPTY: GatewayState = {
   offlineAt: {},
 };
 
-let state: GatewayState = EMPTY;
-const listeners = new Set<() => void>();
+/**
+ * One server's store. T-412: presence, read markers, notify rules and the
+ * stream all live here, keyed by the server's origin, so a second server
+ * cannot overwrite the first.
+ */
+interface ServerHold {
+  state: GatewayState;
+  connected: AuthedApi | null;
+  givenToken: string | null;
+  supplying: Promise<void> | null;
+}
 
-function publish(next: GatewayState): void {
-  state = next;
-  for (const notify of listeners) notify();
+const byUrl = new Map<string, ServerHold>();
+let activeUrl: string | null = null;
+const listeners = new Set<() => void>();
+const listListeners = new Set<() => void>();
+
+function emptyHold(): ServerHold {
+  return { state: EMPTY, connected: null, givenToken: null, supplying: null };
+}
+
+function holdOf(url: string): ServerHold {
+  let held = byUrl.get(url);
+  if (!held) {
+    held = emptyHold();
+    byUrl.set(url, held);
+  }
+  return held;
+}
+
+function publishUrl(url: string, next: GatewayState): void {
+  const held = holdOf(url);
+  held.state = next;
+  if (url === activeUrl) {
+    for (const notify of listeners) notify();
+  }
+  for (const notify of listListeners) notify();
+}
+
+function ofApi(api: AuthedApi): { url: string; held: ServerHold } | null {
+  const held = byUrl.get(api.baseUrl);
+  if (!held || held.connected !== api) return null;
+  return { url: api.baseUrl, held };
 }
 
 function subscribe(notify: () => void): () => void {
@@ -162,9 +203,80 @@ function subscribe(notify: () => void): () => void {
   };
 }
 
-/** Subscribe a component to the gateway. */
+function getActive(): GatewayState {
+  if (activeUrl === null) return EMPTY;
+  return byUrl.get(activeUrl)?.state ?? EMPTY;
+}
+
+/** Subscribe a component to the *active* server's gateway. */
 export function useGateway(): GatewayState {
-  return useSyncExternalStore(subscribe, () => state);
+  return useSyncExternalStore(subscribe, getActive);
+}
+
+export interface ServerSummary {
+  baseUrl: string;
+  status: GatewayStatus;
+  /** Any room on this server holds something you have not seen. Never a count. */
+  hasNew: boolean;
+}
+
+let summarySnapshot: ServerSummary[] = [];
+
+function getSummaries(): ServerSummary[] {
+  const next: ServerSummary[] = [];
+  for (const [baseUrl, held] of byUrl) {
+    if (held.connected === null) continue;
+    next.push({
+      baseUrl,
+      status: held.state.status,
+      hasNew: hasNewOnServer(held.state),
+    });
+  }
+  if (
+    next.length === summarySnapshot.length &&
+    next.every(
+      (item, i) =>
+        item.baseUrl === summarySnapshot[i]?.baseUrl &&
+        item.status === summarySnapshot[i]?.status &&
+        item.hasNew === summarySnapshot[i]?.hasNew,
+    )
+  ) {
+    return summarySnapshot;
+  }
+  summarySnapshot = next;
+  return next;
+}
+
+function subscribeList(notify: () => void): () => void {
+  listListeners.add(notify);
+  return () => {
+    listListeners.delete(notify);
+  };
+}
+
+/** Every connected server, for the rail. Status and "something new", nothing else. */
+export function useServerSummaries(): ServerSummary[] {
+  return useSyncExternalStore(subscribeList, getSummaries);
+}
+
+/** Which server the window is looking at. */
+export function activeServerUrl(): string | null {
+  return activeUrl;
+}
+
+/**
+ * Look at this server. The previous one is told we left the room, so we do
+ * not stay "in" a room we are no longer reading.
+ */
+export function setActiveServer(url: string): void {
+  if (activeUrl === url) return;
+  const previous = activeUrl;
+  activeUrl = url;
+  if (previous !== null) {
+    void sendTo(previous, { op: "room.focus", d: { room_id: null } });
+  }
+  for (const notify of listeners) notify();
+  void setActiveSession(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -466,26 +578,29 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
 // Talking to the Tauri core
 // ---------------------------------------------------------------------------
 
-/** The signed-in connection this store is currently following. */
-let connected: AuthedApi | null = null;
 let unlisteners: UnlistenFn[] = [];
-/**
- * The token we last handed down. Cleared once the handshake works, so a second
- * request for a token means the last one was refused rather than expired — the
- * case where only forcing a refresh gets us back on.
- */
-let givenToken: string | null = null;
-let supplying: Promise<void> | null = null;
+let attaching: Promise<void> | null = null;
 
-async function supplyToken(): Promise<void> {
-  if (supplying) return supplying;
-  const api = connected;
+interface StatusPayload {
+  base_url: string;
+  status: GatewayStatus;
+}
+
+interface FramePayload {
+  base_url: string;
+  frame: ServerFrame;
+}
+
+async function supplyToken(held: ServerHold): Promise<void> {
+  if (held.supplying) return held.supplying;
+  const api = held.connected;
   if (!api) return;
-  supplying = (async () => {
+  held.supplying = (async () => {
     try {
-      const fresh = await api.accessToken(givenToken !== null);
-      givenToken = fresh.token;
+      const fresh = await api.accessToken(held.givenToken !== null);
+      held.givenToken = fresh.token;
       await invoke("gateway_token", {
+        baseUrl: api.baseUrl,
         token: fresh.token,
         expiresAtMs: fresh.expiresAt,
       });
@@ -493,83 +608,134 @@ async function supplyToken(): Promise<void> {
       // A refused refresh already ends the session through `AuthedApi`; a
       // network failure is temporary and the core will ask again.
     } finally {
-      supplying = null;
+      held.supplying = null;
     }
   })();
-  return supplying;
+  return held.supplying;
 }
 
-/** Open the connection and start following it. Replaces any previous one. */
-export async function connect(api: AuthedApi): Promise<void> {
-  await disconnect();
-  connected = api;
-  if (!isTauri()) return;
-
-  const following = api;
-  const attach = async (): Promise<void> => {
+async function ensureListeners(): Promise<void> {
+  if (unlisteners.length > 0) return;
+  if (attaching) return attaching;
+  attaching = (async () => {
     const stop = [
-      await listen<GatewayStatus>("gateway:status", (event) => {
-        if (connected !== following) return;
+      await listen<StatusPayload>("gateway:status", (event) => {
+        const { base_url, status } = event.payload;
+        const held = byUrl.get(base_url);
+        if (!held || held.connected === null) return;
         // Nothing else knows the token was accepted, so this is where we learn
         // it, and where a later request means "refused", not "expired".
-        if (event.payload.kind === "ready") givenToken = null;
-        if (event.payload.kind === "needs_token") void supplyToken();
-        publish({ ...state, status: event.payload });
+        if (status.kind === "ready") held.givenToken = null;
+        if (status.kind === "needs_token") void supplyToken(held);
+        publishUrl(base_url, { ...held.state, status });
       }),
-      await listen<ServerFrame>("gateway:frame", (event) => {
-        if (connected !== following) return;
-        publish(apply(state, event.payload));
+      await listen<FramePayload>("gateway:frame", (event) => {
+        const { base_url, frame } = event.payload;
+        const held = byUrl.get(base_url);
+        if (!held || held.connected === null) return;
+        const next = apply(held.state, frame);
+        publishUrl(base_url, next);
         // After the fold, never before: whether a message is worth interrupting
         // somebody for depends on who they are and what rules they have, and
         // the snapshot is where both of those live.
-        considerFrame(event.payload, state);
+        considerFrame(frame, next, base_url);
       }),
     ];
-    // A disconnect that landed while we were attaching: don't leak listeners.
-    if (connected !== following) {
-      for (const off of stop) off();
-      return;
-    }
     unlisteners = stop;
-  };
-  await attach();
+    attaching = null;
+  })();
+  return attaching;
+}
 
+/**
+ * Open a connection to this server and start following it. Other servers
+ * stay connected. Calling this again for the same address with a new
+ * `AuthedApi` (a re-login) replaces that connection only.
+ */
+export async function connect(api: AuthedApi): Promise<void> {
+  const held = holdOf(api.baseUrl);
+  if (held.connected === api) return;
+  held.connected = api;
+  if (activeUrl === null) activeUrl = api.baseUrl;
+  if (!isTauri()) {
+    for (const notify of listeners) notify();
+    for (const notify of listListeners) notify();
+    return;
+  }
+
+  await ensureListeners();
   const token = await api.accessToken();
-  givenToken = token.token;
+  held.givenToken = token.token;
   await invoke("gateway_connect", {
     baseUrl: api.baseUrl,
     token: token.token,
     expiresAtMs: token.expiresAt,
   });
+  for (const notify of listListeners) notify();
 }
 
-/** Close the connection and forget everything it told us. */
-export async function disconnect(): Promise<void> {
-  connected = null;
-  givenToken = null;
-  for (const off of unlisteners) off();
-  unlisteners = [];
-  publish(EMPTY);
-  if (isTauri()) await invoke("gateway_disconnect");
+/** Close one server, or every server when `baseUrl` is omitted. */
+export async function disconnect(baseUrl?: string): Promise<void> {
+  const urls = baseUrl === undefined ? [...byUrl.keys()] : [baseUrl];
+  for (const url of urls) {
+    const held = byUrl.get(url);
+    if (!held) continue;
+    held.connected = null;
+    held.givenToken = null;
+    byUrl.delete(url);
+    if (isTauri()) await invoke("gateway_disconnect", { baseUrl: url });
+  }
+  if (activeUrl !== null && !byUrl.has(activeUrl)) {
+    activeUrl = byUrl.keys().next().value ?? null;
+  }
+  if (byUrl.size === 0) {
+    for (const off of unlisteners) off();
+    unlisteners = [];
+  }
+  for (const notify of listeners) notify();
+  for (const notify of listListeners) notify();
 }
 
 /**
- * Send one frame upstream. `false` means there was no live connection, which
- * callers treat as "say it again after the next `ready`" rather than an error.
+ * Send one frame on the active server. `false` means there was no live
+ * connection, which callers treat as "say it again after the next `ready`"
+ * rather than an error.
  */
 export async function send(frame: ClientFrame): Promise<boolean> {
+  if (activeUrl === null) return false;
+  return sendTo(activeUrl, frame);
+}
+
+/** Send one frame on a specific server. */
+export async function sendTo(baseUrl: string, frame: ClientFrame): Promise<boolean> {
   if (!isTauri()) return false;
-  const sent: boolean = await invoke("gateway_send", { frame });
+  const sent: boolean = await invoke("gateway_send", { baseUrl, frame });
   return sent;
+}
+
+/**
+ * Send one frame on every connected server except the active one. Idle and
+ * away belong to the person, not to one server; room focus does not.
+ */
+export async function sendOthers(frame: ClientFrame): Promise<void> {
+  for (const url of byUrl.keys()) {
+    if (url === activeUrl) continue;
+    await sendTo(url, frame);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Room history
 // ---------------------------------------------------------------------------
 
-/** Put one room's stream into the snapshot, creating it if it is new. */
-function putStream(roomId: RoomId, stream: RoomStream): void {
-  publish({ ...state, streams: { ...state.streams, [roomId]: stream } });
+/** Put one room's stream into that server's snapshot, creating it if it is new. */
+function putStream(api: AuthedApi, roomId: RoomId, stream: RoomStream): void {
+  const found = ofApi(api);
+  if (!found) return;
+  publishUrl(found.url, {
+    ...found.held.state,
+    streams: { ...found.held.state.streams, [roomId]: stream },
+  });
 }
 
 async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | null): Promise<void> {
@@ -581,13 +747,15 @@ async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | nul
   } catch {
     // A page that didn't arrive doesn't need a state of its own. The status bar
     // is already saying what is wrong, and the next scroll asks again.
-    const stream = state.streams[roomId];
-    if (connected === api && stream) putStream(roomId, { ...stream, loading: false });
+    const found = ofApi(api);
+    const stream = found?.held.state.streams[roomId];
+    if (found && stream) putStream(api, roomId, { ...stream, loading: false });
     return;
   }
-  const stream = state.streams[roomId];
-  if (connected !== api || !stream) return;
-  putStream(roomId, {
+  const found = ofApi(api);
+  const stream = found?.held.state.streams[roomId];
+  if (!found || !stream) return;
+  putStream(api, roomId, {
     messages: mergePage(stream.messages, page),
     // A short page means the range scan ran out of room: this is the beginning.
     atStart: page.length < PAGE_SIZE,
@@ -606,8 +774,9 @@ async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | nul
  * scrollback when you switch away and come back.
  */
 export async function openRoom(api: AuthedApi, roomId: RoomId): Promise<void> {
-  if (connected !== api || state.streams[roomId]) return;
-  putStream(roomId, { messages: [], atStart: false, loading: true });
+  const found = ofApi(api);
+  if (!found || found.held.state.streams[roomId]) return;
+  putStream(api, roomId, { messages: [], atStart: false, loading: true });
   await fetchPage(api, roomId, null);
 }
 
@@ -629,23 +798,25 @@ const MAX_CATCHUP_PAGES = 10;
  */
 export async function loadUntil(api: AuthedApi, roomId: RoomId, id: MessageId): Promise<void> {
   for (let page = 0; page < MAX_CATCHUP_PAGES; page += 1) {
-    const stream = state.streams[roomId];
-    if (connected !== api || !stream || stream.atStart) return;
+    const found = ofApi(api);
+    const stream = found?.held.state.streams[roomId];
+    if (!found || !stream || stream.atStart) return;
     const oldest = stream.messages[0];
     if (oldest !== undefined && oldest.id <= id) return;
     await loadOlder(api, roomId);
     // `loadOlder` declines while a page is already in flight. Nothing changed,
     // so asking again in a tight loop would only spin.
-    if (state.streams[roomId] === stream) return;
+    if (ofApi(api)?.held.state.streams[roomId] === stream) return;
   }
 }
 
 /** Fetch the page before the oldest message held. Safe to call repeatedly. */
 export async function loadOlder(api: AuthedApi, roomId: RoomId): Promise<void> {
-  const stream = state.streams[roomId];
-  if (connected !== api || !stream || stream.loading || stream.atStart) return;
+  const found = ofApi(api);
+  const stream = found?.held.state.streams[roomId];
+  if (!found || !stream || stream.loading || stream.atStart) return;
   const oldest = stream.messages[0];
-  putStream(roomId, { ...stream, loading: true });
+  putStream(api, roomId, { ...stream, loading: true });
   await fetchPage(api, roomId, oldest?.id ?? null);
 }
 
@@ -672,9 +843,10 @@ export async function sendMessage(
   };
   const path = `/rooms/${encodeURIComponent(roomId)}/messages`;
   const message = await api.post<Message>(path, request);
-  const stream = state.streams[roomId];
-  if (connected !== api || !stream) return;
-  putStream(roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
+  const found = ofApi(api);
+  const stream = found?.held.state.streams[roomId];
+  if (!found || !stream) return;
+  putStream(api, roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
 }
 
 /**
@@ -692,9 +864,10 @@ export async function editMessage(
 ): Promise<void> {
   const request: EditMessageRequest = { body };
   const edited = await api.patch<Message>(`/messages/${encodeURIComponent(message.id)}`, request);
-  const stream = state.streams[edited.room_id];
-  if (connected !== api || !stream) return;
-  putStream(edited.room_id, { ...stream, messages: mergeMessage(stream.messages, edited) });
+  const found = ofApi(api);
+  const stream = found?.held.state.streams[edited.room_id];
+  if (!found || !stream) return;
+  putStream(api, edited.room_id, { ...stream, messages: mergeMessage(stream.messages, edited) });
 }
 
 /**
@@ -706,8 +879,12 @@ export async function editMessage(
  */
 export async function deleteMessage(api: AuthedApi, message: Message): Promise<void> {
   await api.delete(`/messages/${encodeURIComponent(message.id)}`);
-  if (connected !== api) return;
-  publish(apply(state, { op: "message.delete", d: { id: message.id, room_id: message.room_id } }));
+  const found = ofApi(api);
+  if (!found) return;
+  publishUrl(
+    found.url,
+    apply(found.held.state, { op: "message.delete", d: { id: message.id, room_id: message.room_id } }),
+  );
 }
 
 /**
@@ -724,16 +901,20 @@ export async function toggleReaction(
   message: Message,
   key: string,
 ): Promise<void> {
-  const me = state.me;
-  if (!me) return;
+  const found = ofApi(api);
+  const me = found?.held.state.me;
+  if (!found || !me) return;
   const held = message.reactions.find((group) => group.key === key);
   const mine = held?.user_ids.includes(me.id) ?? false;
 
   const others = held?.user_ids.filter((id) => id !== me.id) ?? [];
   const guess = mine ? others : [...others, me.id];
   const guessed = (user_ids: UserId[]): void => {
-    publish(
-      apply(state, {
+    const live = ofApi(api);
+    if (!live) return;
+    publishUrl(
+      live.url,
+      apply(live.held.state, {
         op: "reaction.update",
         d: { message_id: message.id, key, count: user_ids.length, user_ids },
       }),
@@ -749,7 +930,7 @@ export async function toggleReaction(
     // Put it back. With the socket up a frame would have corrected this
     // anyway, but a refusal while the socket is down would otherwise leave a
     // mark on screen that the server never accepted.
-    if (connected === api) guessed(held?.user_ids ?? []);
+    if (ofApi(api)) guessed(held?.user_ids ?? []);
     throw error;
   }
 }
@@ -767,9 +948,12 @@ export async function toggleReaction(
  * and pinning it again is the only way the line means anything the second time.
  */
 export function enterRoom(roomId: RoomId): void {
-  const marker = state.read[roomId];
-  if (marker === undefined || state.leftOff[roomId] === marker) return;
-  publish({ ...state, leftOff: { ...state.leftOff, [roomId]: marker } });
+  if (activeUrl === null) return;
+  const held = byUrl.get(activeUrl);
+  if (!held) return;
+  const marker = held.state.read[roomId];
+  if (marker === undefined || held.state.leftOff[roomId] === marker) return;
+  publishUrl(activeUrl, { ...held.state, leftOff: { ...held.state.leftOff, [roomId]: marker } });
 }
 
 /**
@@ -787,16 +971,21 @@ export async function loadReadMarkers(api: AuthedApi): Promise<void> {
   } catch {
     return;
   }
-  if (connected !== api) return;
+  const found = ofApi(api);
+  if (!found) return;
   // Pin from the server's copy rather than the merged one. This answer and the
   // gateway's `ready` race on every cold start, so by the time it lands the open
   // room may already have been marked read — and the whole point of the line is
   // where you were *before* this session began.
-  const leftOff = { ...state.leftOff };
+  const leftOff = { ...found.held.state.leftOff };
   for (const [roomId, id] of Object.entries(map)) {
     leftOff[roomId] ??= id;
   }
-  publish({ ...state, read: { ...map, ...state.read }, leftOff });
+  publishUrl(found.url, {
+    ...found.held.state,
+    read: { ...map, ...found.held.state.read },
+    leftOff,
+  });
 }
 
 /** PROTOCOL §4: at most one read-marker write per five seconds per room. */
@@ -805,10 +994,15 @@ const READ_DEBOUNCE_MS = 5_000;
 const readSentAt: Record<string, number> = {};
 const readTimers: Record<string, number> = {};
 
+function readKey(api: AuthedApi, roomId: RoomId): string {
+  return `${api.baseUrl}:${roomId}`;
+}
+
 function flushRead(api: AuthedApi, roomId: RoomId): void {
-  const last_read_id = state.read[roomId];
-  if (connected !== api || last_read_id === undefined) return;
-  readSentAt[roomId] = Date.now();
+  const found = ofApi(api);
+  const last_read_id = found?.held.state.read[roomId];
+  if (!found || last_read_id === undefined) return;
+  readSentAt[readKey(api, roomId)] = Date.now();
   const body: UpdateReadMarkerRequest = { last_read_id };
   // Nothing shows a failure and nothing retries. The marker is a convenience,
   // the next `GET /read` is the truth, and a red line in the UI because a
@@ -823,18 +1017,24 @@ function flushRead(api: AuthedApi, roomId: RoomId): void {
  * was pinned when you walked in and stays where it is for the session.
  */
 export function markRead(api: AuthedApi, roomId: RoomId, messageId: MessageId): void {
-  const held = state.read[roomId];
+  const found = ofApi(api);
+  if (!found) return;
+  const held = found.held.state.read[roomId];
   if (held !== undefined && held >= messageId) return;
-  publish({ ...state, read: { ...state.read, [roomId]: messageId } });
+  publishUrl(found.url, {
+    ...found.held.state,
+    read: { ...found.held.state.read, [roomId]: messageId },
+  });
 
-  if (readTimers[roomId] !== undefined) return;
-  const since = Date.now() - (readSentAt[roomId] ?? 0);
+  const key = readKey(api, roomId);
+  if (readTimers[key] !== undefined) return;
+  const since = Date.now() - (readSentAt[key] ?? 0);
   if (since >= READ_DEBOUNCE_MS) {
     flushRead(api, roomId);
     return;
   }
-  readTimers[roomId] = window.setTimeout(() => {
-    delete readTimers[roomId];
+  readTimers[key] = window.setTimeout(() => {
+    delete readTimers[key];
     flushRead(api, roomId);
   }, READ_DEBOUNCE_MS - since);
 }
@@ -845,6 +1045,19 @@ export function hasNewActivity(current: GatewayState, roomId: RoomId): boolean {
   if (newest === undefined) return false;
   const read = current.read[roomId];
   return read === undefined || read < newest;
+}
+
+/**
+ * True when any room on this server holds something you have not seen.
+ *
+ * This is the whole of the server-rail mark (T-412): a boolean, never a
+ * count, the same rule rooms use. Archived rooms do not count — they are
+ * not on the rail either.
+ */
+export function hasNewOnServer(current: GatewayState): boolean {
+  return current.rooms.some(
+    (room) => room.archived_at === null && hasNewActivity(current, room.id),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -858,8 +1071,9 @@ function sameRule(a: NotifyRule, b: NotifyRule): boolean {
 /** "Always notify me when this person posts" — the whole list (SPEC §4.2). */
 export async function loadNotifyRules(api: AuthedApi): Promise<void> {
   const rules = await api.get<NotifyRule[]>("/me/notify-rules");
-  if (connected !== api) return;
-  publish({ ...state, notifyRules: rules });
+  const found = ofApi(api);
+  if (!found) return;
+  publishUrl(found.url, { ...found.held.state, notifyRules: rules });
 }
 
 /**
@@ -871,14 +1085,20 @@ export async function setNotifyRule(
   rule: NotifyRule,
   on: boolean,
 ): Promise<void> {
-  const before = state.notifyRules;
+  const found = ofApi(api);
+  if (!found) return;
+  const before = found.held.state.notifyRules;
   const without = before.filter((held) => !sameRule(held, rule));
-  publish({ ...state, notifyRules: on ? [...without, rule] : without });
+  publishUrl(found.url, {
+    ...found.held.state,
+    notifyRules: on ? [...without, rule] : without,
+  });
   try {
     if (on) await api.put("/me/notify-rules", rule);
     else await api.delete("/me/notify-rules", rule);
   } catch (error) {
-    if (connected === api) publish({ ...state, notifyRules: before });
+    const live = ofApi(api);
+    if (live) publishUrl(live.url, { ...live.held.state, notifyRules: before });
     throw error;
   }
 }
@@ -938,11 +1158,12 @@ export function startedTyping(roomId: RoomId): void {
  * that can tell the person it did not save.
  */
 function foldUser(api: AuthedApi, user: User): void {
-  if (connected !== api) return;
-  publish({
-    ...state,
-    me: state.me?.id === user.id ? user : state.me,
-    users: upsert(state.users, user, (u) => u.id === user.id),
+  const found = ofApi(api);
+  if (!found) return;
+  publishUrl(found.url, {
+    ...found.held.state,
+    me: found.held.state.me?.id === user.id ? user : found.held.state.me,
+    users: upsert(found.held.state.users, user, (u) => u.id === user.id),
   });
 }
 

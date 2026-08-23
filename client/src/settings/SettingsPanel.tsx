@@ -94,8 +94,8 @@ export default function SettingsPanel({
         <section className="settings-section">
           <h3 className="panel-label">this computer</h3>
           <p className="settings-lead">
-            Signing out forgets this server on this computer. It does not delete
-            your account.
+            Signing out forgets this server on this computer. Other servers you
+            are signed into stay. It does not delete your account.
           </p>
           <button
             type="button"
