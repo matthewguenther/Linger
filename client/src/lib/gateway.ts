@@ -937,6 +937,15 @@ export function startedTyping(roomId: RoomId): void {
  * Failures are thrown. The editor is holding the text and is the only thing
  * that can tell the person it did not save.
  */
+function foldUser(api: AuthedApi, user: User): void {
+  if (connected !== api) return;
+  publish({
+    ...state,
+    me: state.me?.id === user.id ? user : state.me,
+    users: upsert(state.users, user, (u) => u.id === user.id),
+  });
+}
+
 export async function saveStatus(api: AuthedApi, status: UserStatus): Promise<User> {
   const request: UpdateMeRequest = {
     display_name: null,
@@ -944,17 +953,22 @@ export async function saveStatus(api: AuthedApi, status: UserStatus): Promise<Us
     status,
     entrance_sound: null,
   };
-  const user = await api.patch<User>("/me", request);
+  const user = await api.updateMe(request);
   // The server also fans this out as `user.update`, which usually beats the
   // HTTP answer back. Folding it in anyway means the editor is never left
   // showing the old text because one frame went missing.
-  if (connected === api) {
-    publish({
-      ...state,
-      me: state.me?.id === user.id ? user : state.me,
-      users: upsert(state.users, user, (u) => u.id === user.id),
-    });
-  }
+  foldUser(api, user);
+  return user;
+}
+
+/**
+ * Save a display name (T-411). Same fold as `saveStatus`: the HTTP answer is
+ * the name you just typed, and waiting for the fan-out would leave the roster
+ * and the status bar a round trip behind your own save.
+ */
+export async function saveDisplayName(api: AuthedApi, request: UpdateMeRequest): Promise<User> {
+  const user = await api.updateMe(request);
+  foldUser(api, user);
   return user;
 }
 

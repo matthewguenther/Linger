@@ -32,6 +32,7 @@ import { nameStyle, personStyle } from "../lib/names";
 import NotifyRules from "../notify/NotifyRules";
 import StatusCard from "../status/StatusCard";
 import StatusEditor from "../status/StatusEditor";
+import { emptyRoster } from "../settings/copy";
 import {
   activityMark,
   buildRoster,
@@ -114,7 +115,7 @@ export default function Roster({
           <NotifyRules api={api} rooms={rooms} />
         </div>
       ) : entries.length === 0 ? (
-        <p className="placeholder">nobody yet</p>
+        <p className="placeholder">{emptyRoster(gateway.status.kind === "ready")}</p>
       ) : (
         <ul className="roster-list">
           {entries.map((entry) => (

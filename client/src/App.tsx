@@ -12,6 +12,10 @@
  * everybody else rather than greyed out — a disabled control is a permission
  * matrix drawn in CSS, and this product refuses to have one.
  *
+ * `you` is the other door: display name, password, density, sign out. It is
+ * drawn for everybody, because those are yours, not the host's. The panel
+ * takes the stream column the same way `manage` does (T-411).
+ *
  * The rail is where SPEC §4.2's other half lives: a room holding something you
  * have not seen changes *weight*, and nothing else. No number, no dot, no
  * color. It is one line of CSS and it is the whole feature.
@@ -19,12 +23,15 @@
 import { type CSSProperties, useEffect, useState } from "react";
 
 import AuthScreens from "./auth/AuthScreens";
+import type { AuthResponse } from "./generated/AuthResponse";
 import type { RoomId } from "./generated/RoomId";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { User } from "./generated/User";
 import HostPanel, { type HostSection } from "./host/HostPanel";
 import type { AuthedApi } from "./lib/api";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
+import SettingsPanel from "./settings/SettingsPanel";
+import { noRoomsBody, noRoomsRail } from "./settings/copy";
 import {
   connect,
   disconnect,
@@ -73,6 +80,7 @@ export default function App() {
       user={session.state.user}
       keyringNotice={session.keyringNotice}
       onSignOut={session.signOut}
+      onSignIn={session.signIn}
     />
   );
 }
@@ -82,11 +90,13 @@ function Console({
   user,
   keyringNotice,
   onSignOut,
+  onSignIn,
 }: {
   api: AuthedApi;
   user: User;
   keyringNotice: string | null;
   onSignOut: () => Promise<void>;
+  onSignIn: (baseUrl: string, auth: AuthResponse) => Promise<void>;
 }) {
   const gateway = useGateway();
   const [server, setServer] = useState<ServerInfo | null>(null);
@@ -94,7 +104,19 @@ function Console({
   const [density, setDensity] = useState<Density>(loadDensity);
   // Which host surface is open over the stream, if any (T-410).
   const [hostSection, setHostSection] = useState<HostSection | null>(null);
+  // The member's own settings (T-411). Mutually exclusive with the host panel:
+  // both take the stream column, and two overlays is a modal stack.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const narrow = useNarrow();
+
+  const openSettings = (): void => {
+    setHostSection(null);
+    setSettingsOpen(true);
+  };
+  const openHost = (section: HostSection): void => {
+    setSettingsOpen(false);
+    setHostSection(section);
+  };
 
   useEffect(() => {
     applyDensity(density);
@@ -161,6 +183,10 @@ function Console({
   // for itself — so this only decides whether the controls are drawn at all.
   const isHost = gateway.me?.is_host ?? user.is_host;
   const host = isHost ? hostSection : null;
+  // `ready` is the live copy of who we are; the stored session is the fallback
+  // until it arrives. The status bar and settings both prefer the live one so
+  // a display-name save shows up without a reload.
+  const you = gateway.me ?? user;
 
   // The server's accent, if the host picked one (SPEC §5.3, `PATCH /server`).
   // It names a palette key, and the variable that key points at is generated
@@ -176,16 +202,29 @@ function Console({
         <section className="rail-section">
           <div className="rail-head">
             <h2 className="panel-label">server</h2>
-            {isHost ? (
+            <div className="rail-actions">
+              {isHost ? (
+                <button
+                  type="button"
+                  className="rail-action meta"
+                  aria-pressed={host !== null}
+                  onClick={() =>
+                    host === null ? openHost("server") : setHostSection(null)
+                  }
+                >
+                  manage
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="rail-action meta"
-                aria-pressed={host !== null}
-                onClick={() => setHostSection(host === null ? "server" : null)}
+                aria-pressed={settingsOpen}
+                aria-label="your settings"
+                onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
               >
-                manage
+                you
               </button>
-            ) : null}
+            </div>
           </div>
           <p className="rail-server">{server?.name ?? hostOf(api.baseUrl)}</p>
         </section>
@@ -196,14 +235,14 @@ function Console({
               <button
                 type="button"
                 className="rail-action meta"
-                onClick={() => setHostSection("rooms")}
+                onClick={() => openHost("rooms")}
               >
                 + room
               </button>
             ) : null}
           </div>
           {rooms.length === 0 ? (
-            <p className="placeholder">—</p>
+            <p className="placeholder">{noRoomsRail()}</p>
           ) : (
             <ul className="room-list">
               {rooms.map((room) => (
@@ -221,6 +260,7 @@ function Console({
                       // You clicked a room to read it, so the host panel gets
                       // out of the way rather than sitting over the stream.
                       setHostSection(null);
+                      setSettingsOpen(false);
                     }}
                   >
                     <span className="room-slug">#{room.slug}</span>
@@ -240,7 +280,18 @@ function Console({
         </section>
       </aside>
 
-      {host !== null ? (
+      {settingsOpen ? (
+        <SettingsPanel
+          api={api}
+          user={you}
+          density={density}
+          onDensityChange={setDensity}
+          onSignOut={onSignOut}
+          onReauthenticated={(auth) => onSignIn(api.baseUrl, auth)}
+          onClose={() => setSettingsOpen(false)}
+          roster={narrow ? roster : undefined}
+        />
+      ) : host !== null ? (
         <HostPanel
           api={api}
           rooms={rooms}
@@ -254,13 +305,13 @@ function Console({
       ) : open === null ? (
         <main className="stream">
           <header className="stream-header">
-            <span className="room-name">welcome</span>
+            <span className="room-name">
+              {gateway.status.kind === "ready" ? "no rooms yet" : "welcome"}
+            </span>
           </header>
           <div className="stream-body">
             <p className="placeholder">
-              {gateway.status.kind === "ready"
-                ? "This server has no rooms yet."
-                : "Connecting to the server…"}
+              {noRoomsBody(gateway.status.kind === "ready", isHost)}
             </p>
             {/* The host is the one person who can fix this, so they get the
                 way out rather than a sentence about it. */}
@@ -269,7 +320,7 @@ function Console({
                 <button
                   type="button"
                   className="rail-action meta"
-                  onClick={() => setHostSection("rooms")}
+                  onClick={() => openHost("rooms")}
                 >
                   make the first room
                 </button>
@@ -294,11 +345,16 @@ function Console({
       <footer className="status-bar meta">
         <span title={statusDetail}>{status}</span>
         <span className="status-right">
-          <span>{user.display_name}</span>
-          {keyringNotice ? <span className="status-warn">not remembered</span> : null}
-          <button className="status-action" type="button" onClick={() => void onSignOut()}>
-            sign out
+          <button
+            className="status-action"
+            type="button"
+            aria-pressed={settingsOpen}
+            aria-label="your settings"
+            onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
+          >
+            {you.display_name}
           </button>
+          {keyringNotice ? <span className="status-warn">not remembered</span> : null}
         </span>
       </footer>
     </div>
