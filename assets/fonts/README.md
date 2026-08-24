@@ -18,7 +18,7 @@ The curated set from SPEC §5.7 — open-licensed, subset, bundled with the clie
 | `departure-mono` | Departure Mono | OFL-1.1 | https://departuremono.com |
 | `silkscreen` | Silkscreen | OFL-1.1 | https://kottke.org/plus/type/silkscreen |
 
-Acquisition and subsetting happen in task T-704 (see TASKS.md): woff2, weights
+Acquisition and subsetting happen in task T-604 (see TASKS.md): woff2, weights
 400/500/700 + italic where the face has them, Latin + Latin-Extended subset,
 each face's OFL license text kept alongside it in this directory.
 

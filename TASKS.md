@@ -8,6 +8,12 @@ Tasks are marked **⬜ not started** or **✅ done** — emoji, not markdown `- 
 checkboxes, so the state of the queue is visible at a glance while scrolling. Use
 the same two characters when you add or close a task.
 
+Task numbers match the milestone: T-5xx is M5, T-6xx is M6, and so on. Work that
+is still V1 but not on the critical path lives at the end as T-9xx (sounds) and
+T-91x (activity detection). A 2026-08-23 renumber, after activity detection left
+the main sequence: old M6–M9 are M5–M8; entrance sounds T-403/404/408 are
+T-901/902/903; activity T-501…T-507 are T-911…T-917.
+
 ## How to run a task
 
 **Model: Claude Opus 5** for every task below. One task per fresh session — a
@@ -34,7 +40,7 @@ State the current milestone first."*
 | **low** | **medium** | Mechanical, tightly specified; high effort just burns credits re-deriving what the task text already decides |
 | **medium** | **high** | Real features with judgment in the details; high is the sweet spot |
 | **high** | **high**, except the four below | Cross-cutting but well-scaffolded — the architecture docs carry a lot of the load |
-| T-302, T-501, T-601, T-801+T-802 | **xhigh** | The genuinely treacherous ones: realtime client resume, Wayland/KWin, resumable uploads + media pipeline, signing/notarization — AGENTS.md §"Where you will be wrong" territory |
+| T-302, T-911, T-501, T-701+T-702 | **xhigh** | The genuinely treacherous ones: realtime client resume, Wayland/KWin, resumable uploads + media pipeline, signing/notarization — AGENTS.md §"Where you will be wrong" territory |
 
 Running everything at xhigh is not better — it's slower, pricier, and prone to
 overbuilding simple tasks. Match the effort to the label and escalate only if a
@@ -56,7 +62,7 @@ task fails its acceptance criteria twice.
   builds on all three OSes, and the **`oklch()` gate is answered: yes** (T-002).
   *One human errand is outstanding and does not block anything: the visual
   "a window opens" sign-off on Linux/Windows/macOS — see T-002 and T-003. It
-  must be closed before M8.*
+  must be closed before M7.*
 - ✅ **Real-binary smoke test** (2026-08-19): booted `linger-server` from a clean
   data dir; the printed setup URL created the host, login → room → message all
   worked over curl, and the setup link died after use (404).
@@ -117,11 +123,11 @@ task fails its acceptance criteria twice.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
-- ⬜ **M6 … M9** — queued below. M6 starts when M4.5's check passes.
-- ⏬ **Backburner (after M9)** — entrance sounds (T-403, T-404, T-408) and
-  **activity detection (M5, T-501…T-507)**. Sounds: Matt, 2026-08-21. Activity:
-  Matt, 2026-08-23 — still V1, not needed for a usable product, and large enough
-  that it would sit in the way of the rest. Do not start T-501.
+- ⬜ **M5 … M8** — queued below. M5 starts when M4.5's check passes.
+- ⏬ **Backburner (after M8)** — entrance sounds (T-901, T-902, T-903) and
+  activity detection (T-911…T-917). Sounds: Matt, 2026-08-21. Activity: Matt,
+  2026-08-23 — still V1, not needed for a usable product, and large enough that
+  it would sit in the way of the rest. Do not start T-911.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
   rule 13 is the enforceable version. Do not build any of it back.
@@ -133,9 +139,10 @@ single response. The allowed origins are a fixed list in
 to CORS and T-302 confirmed that — but if a future browser-side call mysteriously
 "can't reach the server", that list is the first place to look.
 
-Two decisions M5/M7 no longer have to make: **use `oklch()` directly** (WebKitGTK
-2.52.3 supports it, T-002), and **T-503's Win32 backend is a known quantity**
-(T-004). Both recipes are recorded next to the code that will need them.
+Two decisions styling and the activity backends no longer have to make: **use
+`oklch()` directly** (WebKitGTK 2.52.3 supports it, T-002), and **T-913's Win32
+backend is a known quantity** (T-004). Both recipes are recorded next to the
+code that will need them.
 
 What already exists (do not rebuild): workspace + CI; `linger-core` with typed
 UUIDv7 ids, the full REST + gateway wire contract, palette/fonts/reactions/limits,
@@ -168,11 +175,11 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   librsvg2-dev`, then `cd client && pnpm tauri dev`. Verify the Console frame
   renders. Then the SPEC §5.4 M0 gate: temporarily set a token to an `oklch()`
   literal and confirm this WebKitGTK renders it; note the result here. If it does
-  not render, M7 ships the generated hex fallbacks only (they already exist:
+  not render, M6 ships the generated hex fallbacks only (they already exist:
   `linger-core::palette::PaletteColor::hex`).
   *Accept:* screenshot of the frame; a one-line note "oklch: yes/no" added here.
 
-  ### **oklch: YES** — the gate is closed, M7 can use `oklch()` directly.
+  ### **oklch: YES** — the gate is closed, M6 can use `oklch()` directly.
 
   *Done 2026-08-19, empirically, against the exact runtime Tauri will use:
   **WebKitGTK 2.52.3** (Ubuntu 26.04's `libwebkit2gtk-4.1-0`).
@@ -211,7 +218,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`). Not a project bug.*
 
 - ✅ **T-003 · Shell opens on Windows and macOS** — effort: **low** *(needs hardware)*
-  Same check as T-002 per OS. Can trail other work; must close before M8 starts.
+  Same check as T-002 per OS. Can trail other work; must close before M7 starts.
   *Done 2026-08-19 as far as is possible without the hardware: the new
   `desktop.yml` workflow **builds the shell on `windows-latest` (6m54s) and
   `macos-latest` (1m10s)** and both are green. This is `cargo build`, not
@@ -222,7 +229,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
 
   *⚠️ What CI cannot do is watch a window appear. The visual "it opens and the
   Console frame renders" sign-off on Windows/macOS still needs someone in front
-  of those machines, and must happen before M8. Same for T-002's Linux
+  of those machines, and must happen before M7. Same for T-002's Linux
   screenshot.*
 
   *Cost note: `desktop.yml` is **manual-trigger only** (`gh workflow run
@@ -255,7 +262,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   `terminal` entry in `registry/apps.json`**, so the pipeline works end to end —
   foreground window → pid → exe path → normalize → registry hit — with no
   Windows-specific special casing. ARCHITECTURE §6 called this platform "easy"
-  and it was; **T-503 is a transcription job, not a research job.***
+  and it was; **T-913 is a transcription job, not a research job.***
 
   *Two things worth keeping: `PROCESS_QUERY_LIMITED_INFORMATION` (not
   `PROCESS_QUERY_INFORMATION`) is what makes elevated processes resolve, and
@@ -403,7 +410,7 @@ HTTP. No UI. Every endpoint gets an integration test (AGENTS.md).*
   newest-first. Reactions: PUT/DELETE, key must be in `linger-core::REACTIONS`
   else `VALIDATION_FAILED`. Read markers: `PUT /rooms/:id/read`, `GET /read`.
   **No count field anywhere — grep the diff for `unread` before finishing.**
-  Message rate limit 10/10s/user. Attachments array wiring lands in M6; return
+  Message rate limit 10/10s/user. Attachments array wiring lands in M5; return
   `[]` for now.
   *Accept:* tests for pagination edges (empty room, exact-limit boundary,
   before+after), tombstone reply chains, reaction validation, marker idempotency,
@@ -620,7 +627,7 @@ test with real disconnects, not mocks.*
     `rand`. rustls rather than native-tls so nobody needs libssl headers; ring
     rather than aws-lc-rs so nobody needs cmake or nasm. A WS client is required
     by ARCHITECTURE §1, so this is not a bundle-size judgment call — but it is
-    ~1MB of binary, worth knowing before M8.*
+    ~1MB of binary, worth knowing before M7.*
   - *CI now **runs clippy and the tests** on the shell instead of just
     `cargo check`ing it (`tauri-shell` job). The root clippy job can't see this
     crate — it is outside the workspace on purpose — and clippy caught three real
@@ -718,11 +725,11 @@ test with real disconnects, not mocks.*
     holds a message's `reactions` at all: dropping `reaction.update` would let
     our copy drift from the server's. Rendering weight is T-304.*
   - *The per-person gutter rule and the author's name both point at
-    `var(--name-<key>, <neutral>)`. **M7 generates those variables** from
+    `var(--name-<key>, <neutral>)`. **M6 generates those variables** from
     `linger-core::PALETTE` into `palette.generated.css`; until it does, both fall
     back to something neutral and the stream lights up the moment that file
     exists. Nothing in `client/` knows what "azure" looks like, and nothing
-    should. Font keys and name effects are M7's too, so a styled name currently
+    should. Font keys and name effects are M6's too, so a styled name currently
     gets weight and italic only.*
   - *`ready` now clears loaded history. A fresh `ready` means the client had to
     re-identify, which means the resume window lapsed, which means there may be
@@ -734,7 +741,7 @@ test with real disconnects, not mocks.*
     a page arrives, not while scrolling. If it ever needs fixing, the O(N) passes
     are `buildRows` and the virtualizer's `getMeasurements`.*
   - *Attachments render as nothing. There is no way to make one yet — uploads are
-    M6 — so there is nothing to render, but the branch will need writing.*
+    M5 — so there is nothing to render, but the branch will need writing.*
   - *New dependency: `@tanstack/react-virtual` (~600KB of source, a few KB in the
     bundle; total build is 245KB / 77KB gzipped, well inside AGENTS' 2MB rule).
     Hand-rolling variable-height virtualization with anchored prepends is the
@@ -810,7 +817,7 @@ test with real disconnects, not mocks.*
     strikethrough, inline code, fenced code, blockquotes, bullet and numbered
     lists, links, backslash escapes. **No headings, no tables, no images, no
     raw HTML.** Headings are shouting in a chat window and there is nothing to
-    point an image at until uploads land in M6. It is not CommonMark and does
+    point an image at until uploads land in M5. It is not CommonMark and does
     not try to be — CommonMark's emphasis rules are a specification unto
     themselves. The rule followed instead is that anything ambiguous stays
     literal: a `*` with no partner is a `*`.
@@ -909,7 +916,7 @@ test with real disconnects, not mocks.*
     hoisted phantom — the reaction drift test reads a file, which made the
     dependency real and pnpm noticed.
   - *Attachments still render as nothing*, and link embeds do not exist. Both
-    are still waiting on M6.
+    are still waiting on M5.
   - *Testing drove a real desktop over `/dev/uinput`* again (Wayland, no
     xdotool), plus KWin scripting to place and confirm the window before every
     screenshot. That scaffolding is throwaway and is not in the repo. Two
@@ -1108,10 +1115,11 @@ test with real disconnects, not mocks.*
 *Milestone check: roster updates live across two clients, and a status set on one
 shows up on the other.*
 
-**Entrance sounds moved out on 2026-08-21** (Matt). T-403, T-404 and T-408 are the
-last three things on the list now — see *Backburner* near the end of this file.
-The sounds are still V1 (SPEC §6, item 4); they are just not what is in the way.
-M4 therefore finishes on T-405, and its check no longer mentions sound.
+**Entrance sounds moved out on 2026-08-21** (Matt). They were T-403, T-404 and
+T-408; they are **T-901, T-902 and T-903** now — see *Backburner* near the end of
+this file. The sounds are still V1 (SPEC §6, item 4); they are just not what is
+in the way. M4 therefore finishes on T-405, and its check no longer mentions
+sound.
 
 - ✅ **T-401 · The roster** — effort: **high** *(landed 2026-08-21)*
   SPEC §3. Card stack, not a name list: styled name, presence dot, room, activity
@@ -1135,7 +1143,7 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
     duration, and the status underneath when you open one.
   - `client/src/lib/names.ts` — `personStyle`/`nameStyle`, lifted out of
     `Stream.tsx` so the stream and the roster paint a person the same way. When
-    T-701 generates the palette, both pick it up at once.
+    T-601 generates the palette, both pick it up at once.
   - `client/src/lib/clock.ts` — `useNow`, also lifted out of the stream. Two
     components that each owned a timer would disagree by up to a minute.
   - `client/src/lib/layout.ts` — the one width in the app: under 880px the
@@ -1168,10 +1176,10 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
   - *The activity line is the registry label, so it reads `♪ Spotify`, not
     `♪ Bill Evans`.* SPEC §3's sketch shows the track; the wire type has no field
     for one and never will (AGENTS rule 2). Only the `media` kind gets a mark —
-    `activityMark` is one function if T-501 wants more.
-  - *The status image is not rendered.* `image_key` needs the media store M6
-    builds. **T-606 owns it now** — T-405 took the rest of the status and left
-    the image behind, because there is nowhere to put a file until T-601 lands.
+    `activityMark` is one function if T-911 wants more.
+  - *The status image is not rendered.* `image_key` needs the media store M5
+    builds. **T-506 owns it now** — T-405 took the rest of the status and left
+    the image behind, because there is nowhere to put a file until T-501 lands.
     Everything else on a status is there: the line in their own styling, and
     the three labeled fields.
   - **T-405 should not rebuild the card.** The status renders here already; what
@@ -1232,14 +1240,14 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
 
   ### Notes for whoever is next
 
-  - *T-403 plays the sound on `room.enter`.* The server already sends that
+  - *T-901 plays the sound on `room.enter`.* The server already sends that
     frame only to people in the room (T-203). This task is what makes "in the
     room" true for a real client, so entrance sounds now have someone to play
-    for. Playback, mutes, and quiet hours are still T-403.
+    for. Playback, mutes, and quiet hours are still T-901.
   - *T-405 should not send `away` while still in a room without leaving first.*
     The server sets `around` on any `room.focus` with `null`, which would wipe
     the away state. Leave, then away — the same order idle uses.
-  - *T-501's activity poller should keep sending the registry id on
+  - *T-911's activity poller should keep sending the registry id on
     `presence.update`.* Idle (and the around that follows it) currently sends
     `activity: null`, because there is no activity to report yet. Once the
     poller is running, a `presence.update` here would clear the line until the
@@ -1264,7 +1272,7 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
 - ✅ **T-405 · Statuses + away UI** — effort: **medium** *(landed 2026-08-21)*
   SPEC §4.6. Status editor (line 240, three labeled fields), away message
   supersedes; roster + popover rendering. **The status image is not built** —
-  it needs the media store, and moved to **T-606** in M6.
+  it needs the media store, and moved to **T-506** in M5.
 
   *Verified against a real server with a real client.* One `linger-server` on a
   temp database, two accounts, the desktop client signed in as one of them and
@@ -1339,14 +1347,14 @@ M4 therefore finishes on T-405, and its check no longer mentions sound.
 
   - ***The status image is not built, and could not be.*** SPEC §4.6 allows one
     image, ≤512 KB at 400×200. `image_key` names an object in the media store,
-    and there is no media store until **M6 builds the upload pipeline (T-601)**;
+    and there is no media store until **M5 builds the upload pipeline (T-501)**;
     `/uploads` is not even mounted. Pulling it in would be reaching into a later
     milestone. Everything else on a status is done. `statusOf` carries
     `image_key` through every save untouched — `PATCH /me` replaces the whole
-    status object, so dropping it would delete an image the moment T-601 lets
+    status object, so dropping it would delete an image the moment T-501 lets
     somebody set one. The editor says so in a line of copy. **It is written up
-    as T-606, in M6, right after the upload pipeline that unblocks it.**
-  - *T-501's poller now has a third frame to keep the activity id on.* T-402
+    as T-506, in M5, right after the upload pipeline that unblocks it.**
+  - *T-911's poller now has a third frame to keep the activity id on.* T-402
     already flagged `idle` and the `around` after it; `away` and the `around`
     that follows it send `activity: null` for the same reason. Same fix: let the
     poller own every `presence.update`, or pass the last known id along.
@@ -1429,16 +1437,16 @@ above.
     is still the two PATCHes you would expect.
   - *The accent picker is wired but cannot show colour yet.* It saves a palette key and
     the frame sets `--accent: var(--name-<key>, var(--accent-default))`, so the moment
-    **T-701** generates `palette.generated.css` from `linger-core::PALETTE` the accent
+    **T-601** generates `palette.generated.css` from `linger-core::PALETTE` the accent
     starts painting with no further work. Until then every key falls back to the built-in
     accent and every swatch is the same grey — which is why the key's *name* is the
     label and the swatch is decoration. A line of copy in the panel says so, the same way
-    the status editor is honest about images; delete it when T-701 lands. Two small
+    the status editor is honest about images; delete it when T-601 lands. Two small
     additions came with it: `--accent-default` in `tokens.css` (so the frame can override
     `--accent` without a self-referential fallback), and `client/src/lib/palette.ts`,
     which mirrors the sixteen keys for pickers to iterate over. The server is still the
     only authority on which keys are real (AGENTS rule 8) and no hex value crosses into
-    the frontend (rule 12). **T-701 should reuse `PALETTE_KEYS` for the styling picker.**
+    the frontend (rule 12). **T-601 should reuse `PALETTE_KEYS` for the styling picker.**
   - *Slug rules exist in exactly one place.* The new-room form has no regex and no
     hint that restates one; a bad slug comes back as the server's own sentence.
   - *Copying a link answers honestly.* The Clipboard API needs a secure context and a
@@ -1540,7 +1548,7 @@ above.
   - **This is the expensive one on the list.** It is a refactor of session, gateway
     and presence ownership, not a screen. It is also the one V1 feature with no
     task at all until now, which is why it is written down here rather than left to
-    be discovered again at M8. If the budget is tight, T-410 and T-411 are what make
+    be discovered again at M7. If the budget is tight, T-410 and T-411 are what make
     the app usable; this one makes it match the spec.
 
 - ⬜ **T-413 · Removing a member** — effort: **medium**
@@ -1684,18 +1692,11 @@ above.
     the second one is a request storm triggered by strangers. The server knows when
     somebody joined; it should say so once.
 
-## M5 — activity detection — **moved to Backburner**
-
-*Matt, 2026-08-23. The whole milestone (T-501…T-507) is still V1, and the spike
-is already retired, but this is not the next thing and it is not on the path to
-a usable product. Tasks live under *Backburner* at the end of this file. **M6
-is next** once M4.5's check passes. Do not start T-501 "while you're in there."*
-
-## M6 — uploads, media pipeline, the media grid
+## M5 — uploads, media pipeline, the media grid
 
 *Milestone check: a 400 MB video uploads, resumes after a killed connection, appears in the media grid.*
 
-- ⬜ **T-601 · Upload pipeline (local backend)** — effort: **high**
+- ⬜ **T-501 · Upload pipeline (local backend)** — effort: **high**
   ARCHITECTURE §8 + PROTOCOL §6. Slot creation validates size/quota/MIME
   allowlist; token-authenticated direct-PUT URLs (bytes never traverse app
   routes — separate upload listener path); multipart >8MB with per-part URLs
@@ -1704,21 +1705,21 @@ is next** once M4.5's check passes. Do not start T-501 "while you're in there."*
   blurhash, video poster via ffmpeg. Reject oversize at slot *and* at complete.
   *Accept:* the milestone check, scripted: kill mid-upload, resume, complete;
   EXIF-GPS test image comes out clean; fake-MIME file is caught.
-- ⬜ **T-602 · S3 storage adapter** — effort: **medium** — same trait, presigned
+- ⬜ **T-502 · S3 storage adapter** — effort: **medium** — same trait, presigned
   URLs; test against MinIO in CI (service container).
-- ⬜ **T-603 · Separate media origin** — effort: **medium**
+- ⬜ **T-503 · Separate media origin** — effort: **medium**
   ARCHITECTURE §7: serve objects on the cdn host; `Content-Disposition:
   attachment` + `nosniff` off-allowlist; activate the Caddyfile block; strict CSP
   on the app origin.
-- ⬜ **T-604 · The media UI + link cards** — effort: **medium**
+- ⬜ **T-504 · The media UI + link cards** — effort: **medium**
   SPEC §4.4: grid, filter by person/type/date, stars (starred never expire),
   each item links to its message/moment. Restrained link embeds (favicon, title,
   domain — one line): server-side metadata fetch **with SSRF guard** (deny
   private ranges, cap size/time), cached.
-- ⬜ **T-605 · Expiry + storage accounting** — effort: **medium**
+- ⬜ **T-505 · Expiry + storage accounting** — effort: **medium**
   365-day expiry of non-starred/non-pinned (host-configurable/off), background
   task; storage-used figure for the status bar and `GET /server`.
-- ⬜ **T-606 · The status image** — effort: **low** *(the rest of T-405, once
+- ⬜ **T-506 · The status image** — effort: **low** *(the rest of T-405, once
   there is somewhere to put a file)*
   SPEC §4.6's last bullet: one image on a status, **≤512 KB, displayed at
   400×200**. T-405 built every other part of the status and stopped here,
@@ -1726,8 +1727,8 @@ is next** once M4.5's check passes. Do not start T-501 "while you're in there."*
   store — `/uploads` was not even mounted. `linger-core::limits` already holds
   `MAX_STATUS_IMAGE_BYTES`.
 
-  Do this **after T-601**, which is what makes an upload possible, and after
-  **T-603** if it has landed, so the image is served from the media origin like
+  Do this **after T-501**, which is what makes an upload possible, and after
+  **T-503** if it has landed, so the image is served from the media origin like
   everything else. It is small: most of the work is already done in both
   directions.
 
@@ -1747,58 +1748,58 @@ is next** once M4.5's check passes. Do not start T-501 "while you're in there."*
     is within `MAX_STATUS_IMAGE_BYTES`. Without that, `image_key` is a
     user-controlled string that ends up in a URL.
   - **Also.** A status image should not expire out from under the status
-    (T-605 expires non-starred objects at 365 days), and replacing one should
+    (T-505 expires non-starred objects at 365 days), and replacing one should
     not leave the old object orphaned.
   - *Accept:* set an image, see it at 400×200 in both the roster card and the
     popover, on a second client; a 600 KB file is refused with a sentence a
     person can read; a key naming somebody else's object is refused by the
-    server; the image survives a year-old status once T-605 is in.
+    server; the image survives a year-old status once T-505 is in.
   - **Take the line of copy out of the editor when this lands.** It currently
     says "Status images arrive with file uploads."
 
-## M7 — styling: names, palette, themes, fonts
+## M6 — styling: names, palette, themes, fonts
 
 *Milestone check: a gradient name from two palette keys, contrast verifiably ≥4.5:1 in both themes (the CI property test already guards the values).*
 
-- ⬜ **T-701 · Name rendering engine** — effort: **medium**
+- ⬜ **T-601 · Name rendering engine** — effort: **medium**
   Build step: emit `palette.generated.css` from `linger-core::palette::css_variables`
   (single source of truth; oklch or hex per T-002's verdict). Render styled names
   everywhere names appear; gradient fixed 92°; shimmer (4s linear)/glow honor
   `prefers-reduced-motion`, disabled in compact + IRC; "normalize everyone"
   toggle flattens names *and* message fonts.
-- ⬜ **T-702 · Style picker + settings** — effort: **medium**
+- ⬜ **T-602 · Style picker + settings** — effort: **medium**
   Two-click named-color picker (mIRC energy, modern craft), font/weight/italic/
   effect, live preview, msg-font override. Server already validates keys.
-- ⬜ **T-703 · Themes + time-of-day warmth** — effort: **low**
+- ⬜ **T-603 · Themes + time-of-day warmth** — effort: **low**
   Light theme tokens exist; add the ~200K post-sunset warmth shift (one variable
   swap, user-disableable) and theme switching.
-- ⬜ **T-704 · Font pipeline** — effort: **low**
+- ⬜ **T-604 · Font pipeline** — effort: **low**
   Script: fetch the 12 faces (`assets/fonts/README.md` table), subset
   (latin/latin-ext, 400/500/700 + italics) to woff2, keep OFL texts,
   `@font-face` wiring. No CDN.
 
-## M8 — packaging and updates
+## M7 — packaging and updates
 
 *Milestone check: a signed installer per OS; one auto-update ships end-to-end.
 Budget the full estimate; notarization is a version-sensitive slog — follow
 current vendor docs, not memory (AGENTS.md).*
 
-- ⬜ **T-801 · Updater + signing keys** — effort: **high**
+- ⬜ **T-701 · Updater + signing keys** — effort: **high**
   Tauri updater; generate the signing key and **back it up offline before
   anything ships** (losing it = no more updates, ARCHITECTURE §7.7). Release
   workflow: tag → build 3-OS installers → publish manifest.
-- ⬜ **T-802 · Windows signing + macOS notarization** — effort: **high**
+- ⬜ **T-702 · Windows signing + macOS notarization** — effort: **high**
   Needs certs/Apple developer account (Matt). Harden CSP for release while here
   (drop dev relaxations from `tauri.conf.json`).
-- ⬜ **T-803 · Server image publish** — effort: **low**
-  ghcr.io workflow for `deploy/Dockerfile` (+ ffmpeg once T-404/601 need it),
+- ⬜ **T-703 · Server image publish** — effort: **low**
+  ghcr.io workflow for `deploy/Dockerfile` (+ ffmpeg once T-902/T-501 need it),
   version tags, compose points at it.
 
-## M9 — export
+## M8 — export
 
 *Milestone check: one archive contains every message and file, and it opens.*
 
-- ⬜ **T-901 · Full export** — effort: **medium**
+- ⬜ **T-801 · Full export** — effort: **medium**
   SPEC §4.11, PROTOCOL §7: any member, 1/hour; background job → zip: per-room
   markdown (readable layout: dividers, names, timestamps), `media/` tree,
   `media.md` index. Job progress endpoint; download via the media origin.
@@ -1816,34 +1817,35 @@ usable product. Do not pull either "while you're in there."
 
 *Moved here 2026-08-21 by Matt. These three are still V1 (SPEC §6, item 4) and the
 server already fans out `room.enter` to exactly the right people (T-203). They are
-simply the lowest-value thing left of M4, so they go after M9 rather than in the
+simply the lowest-value thing left of M4, so they go after M8 rather than in the
 middle of it. Anything that lands before them must not break the frames they rely on.*
 
-- ⬜ **T-403 · Entrance sound playback** — effort: **medium**
+- ⬜ **T-901 · Entrance sound playback** — effort: **medium**
   SPEC §4.1. Play on `room.enter` for those in the room; per-user cooldown
   5min/listener;
   global + per-user mute; quiet hours 22:00–08:00 listener-local default-on;
   picker UI for bundled sounds.
-- ⬜ **T-404 · Custom sound upload** — effort: **medium**
+- ⬜ **T-902 · Custom sound upload** — effort: **medium**
   Server: accept ≤2s/≤200KB, transcode to Opus + loudness-normalize (−16 LUFS),
   **reject long files, never truncate**. Needs ffmpeg in the Docker image — add it.
-- ⬜ **T-408 · Curate the bundled sounds** — effort: **low** *(Matt-assisted, taste required)*
+- ⬜ **T-903 · Curate the bundled sounds** — effort: **low** *(Matt-assisted, taste required)*
   12–16 sounds per `assets/sounds/README.md` rules; `ffmpeg -af loudnorm=I=-16`
   for normalization; fill the source/license table.
 
-### M5 — activity detection
+### Activity detection
 
-*Moved here 2026-08-23 by Matt. Still V1 (SPEC §6, item 8). The Linux and Windows
-spikes are already retired, `linger-activity` already compiles, and the Null backend
-already reports nothing — which is the correct product until this comes back. It is
-not needed for a usable chat app, and it is large: four OS backends, a poller, a
-registry, and a sharing-controls UI. **Do not start T-501.** M6 starts when M4.5's
-check passes.*
+*Moved here 2026-08-23 by Matt. These used to be M5 / T-501…T-507; they are
+**T-911…T-917** now, so they do not sit in the M5 task block. Still V1 (SPEC §6,
+item 8). The Linux and Windows spikes are already retired, `linger-activity`
+already compiles, and the Null backend already reports nothing — which is the
+correct product until this comes back. It is not needed for a usable chat app,
+and it is large: four OS backends, a poller, a registry, and a sharing-controls
+UI. **Do not start T-911.** M5 (uploads) starts when M4.5's check passes.*
 
 *Milestone check, when this comes back: foreground app appears in the roster on
 Plasma 6 Wayland and Windows.*
 
-- ⬜ **T-501 · KWin backend + poller wiring** — effort: **high**
+- ⬜ **T-911 · KWin backend + poller wiring** — effort: **high**
   The spike-verified recipe is in `crates/linger-activity/src/backend.rs` docs —
   follow it exactly (zbus; own D-Bus service; KWin script via
   `loadScript`/`run`/`unloadScript`; `resourceClass` + pid → `/proc/exe`).
@@ -1853,19 +1855,19 @@ Plasma 6 Wayland and Windows.*
   raw process identity — resolution happens client-side in Rust, registry id only.
   *Accept:* on Plasma 6 Wayland: switch apps, roster follows within ~25s
   (debounce); unknown app shows nothing; hide-listed app shows nothing.
-- ⬜ **T-502 · X11 backend** — effort: **medium** — `x11rb`: `_NET_ACTIVE_WINDOW`
+- ⬜ **T-912 · X11 backend** — effort: **medium** — `x11rb`: `_NET_ACTIVE_WINDOW`
   → `_NET_WM_PID` → `/proc`. Covers GNOME-on-X11 too.
-- ⬜ **T-503 · Windows backend** — effort: **medium** — `windows` crate, per T-004
+- ⬜ **T-913 · Windows backend** — effort: **medium** — `windows` crate, per T-004
   spike learnings.
-- ⬜ **T-504 · macOS backend** — effort: **medium** — `objc2` +
+- ⬜ **T-914 · macOS backend** — effort: **medium** — `objc2` +
   `NSWorkspace.frontmostApplication.bundleIdentifier`. No special permission
   needed *because* we don't read titles — keep it that way.
-- ⬜ **T-505 · Hyprland + sway backends** — effort: **low** — their IPC sockets;
+- ⬜ **T-915 · Hyprland + sway backends** — effort: **low** — their IPC sockets;
   both are simple JSON/i3-IPC queries.
-- ⬜ **T-506 · Registry to ~200 entries + local overrides** — effort: **medium**
+- ⬜ **T-916 · Registry to ~200 entries + local overrides** — effort: **medium**
   Top games (Steam appids), browsers, creative, editors, media. Local override
   file in the client config dir; **never synced to the server**.
-- ⬜ **T-507 · Sharing controls UI** — effort: **medium**
+- ⬜ **T-917 · Sharing controls UI** — effort: **medium**
   SPEC §4.3: global one-click off (roster), per-server off, per-app hide,
   idle-only mode, **persistent visible indicator** + status bar `sharing: <app>`.
   Default off overall.
@@ -1921,7 +1923,7 @@ account row stays, and registration is invite-only, so the host is the only door
 back in. One action, plus the reverse, so a removal made in a bad moment is
 fixable.
 
-**The M6 storage knobs are environment variables.** The 50 GB pool and the
+**The M5 storage knobs are environment variables.** The 50 GB pool and the
 365-day file expiry (SPEC §7) go in the compose file with everything else, per
 the position `config.rs` already takes. No config-file format to document,
 version, and migrate.
@@ -1936,8 +1938,8 @@ a bare bind address, which has no certificate and is honestly plaintext.
 
 ## Parking lot (decisions needed, not tasks yet)
 
-- Bundle identifier is `com.linger.desktop` — fine? Changing after M8 is painful.
+- Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
 - `MediaItem` wire shape is minimal (attachment + message/room link) — revisit
-  when T-604 starts if the grid needs more.
+  when T-504 starts if the grid needs more.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
-  member's). Confirm this trade-off is intended before T-604.
+  member's). Confirm this trade-off is intended before T-504.

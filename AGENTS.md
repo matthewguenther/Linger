@@ -183,9 +183,9 @@ Do not start a milestone until the previous one passes its check in
 ```
 SPIKE → M0 scaffold → M1 server REST → M2 gateway → M3 client shell
       → M4 presence/roster → M4.5 host controls + server list
-      → M6 uploads/media → M7 styling/themes → M8 packaging → M9 export
-      → backburner: entrance sounds (T-403, T-404, T-408);
-                    activity detection (M5, T-501…T-507)
+      → M5 uploads/media → M6 styling/themes → M7 packaging → M8 export
+      → backburner: entrance sounds (T-901, T-902, T-903);
+                    activity detection (T-911…T-917)
 ```
 
 **The spike comes first and is throwaway:** a standalone Rust binary that prints the

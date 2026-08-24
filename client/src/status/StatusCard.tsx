@@ -72,8 +72,8 @@ export default function StatusCard({
       {/*
         The status image (SPEC §4.6: one image, 512 KB, 400×200) is not drawn
         and cannot be set. `image_key` names an object in the media store, and
-        there is no media store until M6 builds the upload pipeline. **T-606**
-        adds it here, once T-601 has landed. The field is carried through every
+        there is no media store until M5 builds the upload pipeline. **T-506**
+        adds it here, once T-501 has landed. The field is carried through every
         save so nothing is lost in the meantime; the editor says as much.
       */}
     </div>

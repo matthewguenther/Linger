@@ -705,8 +705,8 @@ function ServerSection({
         ))}
       </ul>
       {/* The same honesty the status editor uses about images: the key is
-          stored now, and M7's generated palette stylesheet is what paints it.
-          Delete this line when T-701 lands. */}
+          stored now, and M6's generated palette stylesheet is what paints it.
+          Delete this line when T-601 lands. */}
       <p className="host-note meta">
         The accent is saved as a palette name. It starts colouring the app when the theme work
         lands; the four things it touches are listed in SPEC §5.3.

@@ -285,10 +285,10 @@ Current work queue lives in [TASKS.md](TASKS.md).
 
 - **V1** — replaces the text half of a big chat platform for one friend group
   (see [SPEC.md §6](SPEC.md))
-- **Later (still V1, not on the critical path)** — entrance sounds; **ambient
-  activity detection** (opt-in, default off, bundled app registry, window titles
-  never read or transmitted). Both are in the spec. Neither is next. See
-  [TASKS.md](TASKS.md) *Backburner*.
+- **Later (still V1, not on the critical path)** — entrance sounds (T-901…T-903);
+  **ambient activity detection** (T-911…T-917: opt-in, default off, bundled app
+  registry, window titles never read or transmitted). Both are in the spec.
+  Neither is next. See [TASKS.md](TASKS.md) *Backburner*.
 - **V2** — voice rooms, ambient voice, DMs, search, knock, mobile
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
 

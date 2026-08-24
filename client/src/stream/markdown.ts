@@ -18,7 +18,7 @@
  * The subset is deliberately small — chat, not documentation. Bold, italic,
  * strikethrough, inline code, fenced code, blockquotes, bullet and numbered
  * lists, links, and backslash escapes. No headings, no tables, no images (there
- * is nothing to point one at until uploads land in M6), no raw HTML.
+ * is nothing to point one at until uploads land in M5), no raw HTML.
  *
  * It is not CommonMark and does not try to be. CommonMark's emphasis rules are
  * a specification unto themselves, and the cases where this parser differs —

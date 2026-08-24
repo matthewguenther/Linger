@@ -78,7 +78,7 @@ async fn create(
         .as_ref()
         .is_some_and(|ids| !ids.is_empty())
     {
-        return Err(ApiError::validation("Attachments arrive with M6."));
+        return Err(ApiError::validation("Attachments arrive with M5."));
     }
     if let Some(reply_to) = req.reply_to {
         let parent = repo::messages::expect(&state.db.read, reply_to).await?;

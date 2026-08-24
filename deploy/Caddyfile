@@ -6,7 +6,7 @@ linger.example.com {
 }
 
 # Uploads are served from a separate origin so hostile files can't touch app
-# sessions (ARCHITECTURE §7). M6 activates this; the DNS record for it can be
+# sessions (ARCHITECTURE §7). M5 activates this; the DNS record for it can be
 # created now (point cdn.linger.example.com at the same machine).
 #
 # cdn.linger.example.com {

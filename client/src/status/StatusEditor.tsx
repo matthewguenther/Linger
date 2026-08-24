@@ -146,9 +146,9 @@ export default function StatusEditor({
       />
 
       {/* SPEC §4.6 allows one image on a status. It needs somewhere to put
-          the file, and that is the media store M6 builds — T-606, right after
+          the file, and that is the media store M5 builds — T-506, right after
           the upload pipeline that unblocks it. Saying so is better than an
-          upload button that cannot work. Delete this line when T-606 lands. */}
+          upload button that cannot work. Delete this line when T-506 lands. */}
       <p className="editor-note meta">
         Status images arrive with file uploads. Nothing you set here is affected.
       </p>

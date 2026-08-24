@@ -9,7 +9,7 @@
  * never heard of is still refused there.
  *
  * It holds *keys*, never colors. What "azure" looks like is a CSS custom
- * property M7 generates from the Rust table, so nothing in the frontend has
+ * property M6 generates from the Rust table, so nothing in the frontend has
  * ever seen a hex value (AGENTS rule 12).
  */
 export const PALETTE_KEYS = [
@@ -40,7 +40,7 @@ export function isPaletteKey(value: string): value is PaletteKey {
 /**
  * The CSS variable a palette key names, with a fallback for right now.
  *
- * `--name-*` does not exist until M7 emits `palette.generated.css` from
+ * `--name-*` does not exist until M6 emits `palette.generated.css` from
  * `linger-core::palette::css_variables`. Until it does, every one of these
  * resolves to the fallback — which is why nothing in this app carries meaning
  * in color alone.

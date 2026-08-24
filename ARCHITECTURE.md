@@ -474,34 +474,34 @@ passes its check.
 | **M3** | Client: message list, composer, session grouping, aging, density modes | Two clients on one machine exchange messages in real time | 4–5 days |
 | **M4** | Presence + roster + in-room state + statuses | Roster updates live across two clients; a status set on one shows up on the other | 2 days |
 | **M4.5** | Host controls (rooms, invites, server settings), member settings, the server list | A host who has only seen the app can create a server, add a room, invite a friend, and rename the server — no curl, no docs | 2–3 days |
-| **M5** | Activity detection: Windows, X11, KDE/Wayland, macOS. **Parked 2026-08-23 — not next.** | Foreground app appears in the roster on Kubuntu/Plasma 6 Wayland and on Windows | 3–5 days |
-| **M6** | Uploads, media pipeline, the media collection, status images | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
-| **M7** | Styling: names, statuses, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
-| **M8** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
-| **M9** | Export | One archive contains every message and file, and it opens | 1 day |
+| **M5** | Uploads, media pipeline, the media collection, status images | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
+| **M6** | Styling: names, statuses, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
+| **M7** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
+| **M8** | Export | One archive contains every message and file, and it opens | 1 day |
 
-**Do M5 first as a spike, before M0.** Spend one evening writing a throwaway Rust binary
-that prints the foreground app every second on Kubuntu/Plasma 6 Wayland, then on
-Windows. If that is pleasant, the project is real. If Wayland eats the whole evening, you
-have learned the most important thing about the timeline for the cost of one night, and
-can decide whether activity detection is worth it or whether this is a very good
-self-hosted chat app without it.
+**Do the activity-detection spike first, before M0.** Spend one evening writing a
+throwaway Rust binary that prints the foreground app every second on
+Kubuntu/Plasma 6 Wayland, then on Windows. If that is pleasant, the project is
+real. If Wayland eats the whole evening, you have learned the most important
+thing about the timeline for the cost of one night. That spike is retired
+(2026-08-19). The real backends are on the backburner.
 
 **Entrance sounds moved to the end of the queue** (Matt, 2026-08-21). They are still
-V1 (SPEC §6, item 4) — they are simply the last thing built, after M9, and M4's check
-no longer waits on them. `TASKS.md` holds them under *Backburner*.
+V1 (SPEC §6, item 4) — they are simply the last thing built, after M8, and M4's check
+no longer waits on them. `TASKS.md` holds them under *Backburner* as T-901…T-903
+(they were T-403, T-404, T-408).
 
-**Activity detection (M5) is off the critical path** (Matt, 2026-08-23). It is still
+**Activity detection is off the critical path** (Matt, 2026-08-23). It is still
 V1 (SPEC §6, item 8). The spikes are retired and the crate is in the tree, but the
 real backends, poller, registry and sharing UI are not needed for a usable product
-and they are large. **M6 starts when M4.5's check passes.** Do not start T-501
-until Matt takes this off the backburner. `TASKS.md` holds T-501…T-507 under
-*Backburner*.
+and they are large. It used to occupy M5 / T-501…T-507; those tasks are
+**T-911…T-917** now. **M5 (uploads) starts when M4.5's check passes.** Do not
+start T-911 until Matt takes this off the backburner.
 
 **M4.5 was added on 2026-08-21**, after the client turned out to have no way to create
 a room, invite anybody, or edit the server — every endpoint for all three has existed
 since M1 with nobody calling it. It also carries the server list from §3 of the spec
 (V1 item 17), which had never been given a task at all.
 
-M8 is not interesting and cannot be skipped. macOS notarization in particular is a
+M7 is not interesting and cannot be skipped. macOS notarization in particular is a
 tedious, version-sensitive slog. Budget the full estimate.
