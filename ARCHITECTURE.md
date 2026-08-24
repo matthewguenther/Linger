@@ -474,7 +474,7 @@ passes its check.
 | **M3** | Client: message list, composer, session grouping, aging, density modes | Two clients on one machine exchange messages in real time | 4–5 days |
 | **M4** | Presence + roster + in-room state + statuses | Roster updates live across two clients; a status set on one shows up on the other | 2 days |
 | **M4.5** | Host controls (rooms, invites, server settings), member settings, the server list | A host who has only seen the app can create a server, add a room, invite a friend, and rename the server — no curl, no docs | 2–3 days |
-| **M5** | Activity detection: Windows, X11, KDE/Wayland, macOS | Foreground app appears in the roster on Kubuntu/Plasma 6 Wayland and on Windows | 3–5 days |
+| **M5** | Activity detection: Windows, X11, KDE/Wayland, macOS. **Parked 2026-08-23 — not next.** | Foreground app appears in the roster on Kubuntu/Plasma 6 Wayland and on Windows | 3–5 days |
 | **M6** | Uploads, media pipeline, the media collection, status images | 400 MB video uploads, resumes after a killed connection, appears in the media grid | 3 days |
 | **M7** | Styling: names, statuses, 16-color palette, themes, fonts | A user sets a gradient name from two palette keys; contrast is verifiably ≥4.5:1 in both themes | 2–3 days |
 | **M8** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
@@ -490,6 +490,13 @@ self-hosted chat app without it.
 **Entrance sounds moved to the end of the queue** (Matt, 2026-08-21). They are still
 V1 (SPEC §6, item 4) — they are simply the last thing built, after M9, and M4's check
 no longer waits on them. `TASKS.md` holds them under *Backburner*.
+
+**Activity detection (M5) is off the critical path** (Matt, 2026-08-23). It is still
+V1 (SPEC §6, item 8). The spikes are retired and the crate is in the tree, but the
+real backends, poller, registry and sharing UI are not needed for a usable product
+and they are large. **M6 starts when M4.5's check passes.** Do not start T-501
+until Matt takes this off the backburner. `TASKS.md` holds T-501…T-507 under
+*Backburner*.
 
 **M4.5 was added on 2026-08-21**, after the client turned out to have no way to create
 a room, invite anybody, or edit the server — every endpoint for all three has existed

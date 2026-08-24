@@ -5,7 +5,8 @@
 //! gets [`NullBackend`], which cleanly reports nothing. Never crash, never block
 //! startup, never take down presence because activity detection is unavailable.
 //!
-//! Implementation status (real backends land in M5; see TASKS.md):
+//! Implementation status (real backends are M5, parked on the backburner;
+//! see TASKS.md — do not start T-501):
 //!
 //! | Platform          | Approach                                             | Status |
 //! |-------------------|------------------------------------------------------|--------|
@@ -134,8 +135,9 @@ pub fn classify(
 }
 
 /// Select and construct the backend for this machine. Until the real backends
-/// land (M5), every classification maps to [`NullBackend`] — presence still works,
-/// activity is simply absent, which is the correct degraded behavior.
+/// land (M5, on the backburner), every classification maps to [`NullBackend`] —
+/// presence still works, activity is simply absent, which is the correct
+/// degraded behavior.
 #[must_use]
 pub fn select_backend() -> (BackendKind, Box<dyn ActivityBackend>) {
     let kind = classify(

@@ -117,9 +117,11 @@ task fails its acceptance criteria twice.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
-- ⬜ **M5 … M9** — queued below.
-- ⏬ **Backburner (after M9)** — entrance sounds: T-403, T-404, T-408. Matt's
-  call, 2026-08-21. Still V1, just last.
+- ⬜ **M6 … M9** — queued below. M6 starts when M4.5's check passes.
+- ⏬ **Backburner (after M9)** — entrance sounds (T-403, T-404, T-408) and
+  **activity detection (M5, T-501…T-507)**. Sounds: Matt, 2026-08-21. Activity:
+  Matt, 2026-08-23 — still V1, not needed for a usable product, and large enough
+  that it would sit in the way of the rest. Do not start T-501.
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
   rule 13 is the enforceable version. Do not build any of it back.
@@ -1682,36 +1684,12 @@ above.
     the second one is a request storm triggered by strangers. The server knows when
     somebody joined; it should say so once.
 
-## M5 — activity detection
+## M5 — activity detection — **moved to Backburner**
 
-*Milestone check: foreground app appears in the roster on Plasma 6 Wayland and Windows.*
-
-- ⬜ **T-501 · KWin backend + poller wiring** — effort: **high**
-  The spike-verified recipe is in `crates/linger-activity/src/backend.rs` docs —
-  follow it exactly (zbus; own D-Bus service; KWin script via
-  `loadScript`/`run`/`unloadScript`; `resourceClass` + pid → `/proc/exe`).
-  Event-driven cache behind the pull `ActivityBackend` API. Then the shared
-  poller: 3s focused / 15s unfocused, 20s continuous-foreground debounce,
-  hide-list, registry resolution, `presence.update` upstream. Client never sends
-  raw process identity — resolution happens client-side in Rust, registry id only.
-  *Accept:* on Plasma 6 Wayland: switch apps, roster follows within ~25s
-  (debounce); unknown app shows nothing; hide-listed app shows nothing.
-- ⬜ **T-502 · X11 backend** — effort: **medium** — `x11rb`: `_NET_ACTIVE_WINDOW`
-  → `_NET_WM_PID` → `/proc`. Covers GNOME-on-X11 too.
-- ⬜ **T-503 · Windows backend** — effort: **medium** — `windows` crate, per T-004
-  spike learnings.
-- ⬜ **T-504 · macOS backend** — effort: **medium** — `objc2` +
-  `NSWorkspace.frontmostApplication.bundleIdentifier`. No special permission
-  needed *because* we don't read titles — keep it that way.
-- ⬜ **T-505 · Hyprland + sway backends** — effort: **low** — their IPC sockets;
-  both are simple JSON/i3-IPC queries.
-- ⬜ **T-506 · Registry to ~200 entries + local overrides** — effort: **medium**
-  Top games (Steam appids), browsers, creative, editors, media. Local override
-  file in the client config dir; **never synced to the server**.
-- ⬜ **T-507 · Sharing controls UI** — effort: **medium**
-  SPEC §4.3: global one-click off (roster), per-server off, per-app hide,
-  idle-only mode, **persistent visible indicator** + status bar `sharing: <app>`.
-  Default off overall.
+*Matt, 2026-08-23. The whole milestone (T-501…T-507) is still V1, and the spike
+is already retired, but this is not the next thing and it is not on the path to
+a usable product. Tasks live under *Backburner* at the end of this file. **M6
+is next** once M4.5's check passes. Do not start T-501 "while you're in there."*
 
 ## M6 — uploads, media pipeline, the media grid
 
@@ -1829,12 +1807,17 @@ current vendor docs, not memory (AGENTS.md).*
 
 ---
 
-## Backburner — entrance sounds, last on the list
+## Backburner — later, not the next thing
+
+Two V1 pieces live here. They are still in the spec. They are not on the path to a
+usable product. Do not pull either "while you're in there."
+
+### Entrance sounds
 
 *Moved here 2026-08-21 by Matt. These three are still V1 (SPEC §6, item 4) and the
 server already fans out `room.enter` to exactly the right people (T-203). They are
-simply the lowest-value thing left, so they go after M9 rather than in the middle of
-M4. Anything that lands before them must not break the frames they rely on.*
+simply the lowest-value thing left of M4, so they go after M9 rather than in the
+middle of it. Anything that lands before them must not break the frames they rely on.*
 
 - ⬜ **T-403 · Entrance sound playback** — effort: **medium**
   SPEC §4.1. Play on `room.enter` for those in the room; per-user cooldown
@@ -1847,6 +1830,45 @@ M4. Anything that lands before them must not break the frames they rely on.*
 - ⬜ **T-408 · Curate the bundled sounds** — effort: **low** *(Matt-assisted, taste required)*
   12–16 sounds per `assets/sounds/README.md` rules; `ffmpeg -af loudnorm=I=-16`
   for normalization; fill the source/license table.
+
+### M5 — activity detection
+
+*Moved here 2026-08-23 by Matt. Still V1 (SPEC §6, item 8). The Linux and Windows
+spikes are already retired, `linger-activity` already compiles, and the Null backend
+already reports nothing — which is the correct product until this comes back. It is
+not needed for a usable chat app, and it is large: four OS backends, a poller, a
+registry, and a sharing-controls UI. **Do not start T-501.** M6 starts when M4.5's
+check passes.*
+
+*Milestone check, when this comes back: foreground app appears in the roster on
+Plasma 6 Wayland and Windows.*
+
+- ⬜ **T-501 · KWin backend + poller wiring** — effort: **high**
+  The spike-verified recipe is in `crates/linger-activity/src/backend.rs` docs —
+  follow it exactly (zbus; own D-Bus service; KWin script via
+  `loadScript`/`run`/`unloadScript`; `resourceClass` + pid → `/proc/exe`).
+  Event-driven cache behind the pull `ActivityBackend` API. Then the shared
+  poller: 3s focused / 15s unfocused, 20s continuous-foreground debounce,
+  hide-list, registry resolution, `presence.update` upstream. Client never sends
+  raw process identity — resolution happens client-side in Rust, registry id only.
+  *Accept:* on Plasma 6 Wayland: switch apps, roster follows within ~25s
+  (debounce); unknown app shows nothing; hide-listed app shows nothing.
+- ⬜ **T-502 · X11 backend** — effort: **medium** — `x11rb`: `_NET_ACTIVE_WINDOW`
+  → `_NET_WM_PID` → `/proc`. Covers GNOME-on-X11 too.
+- ⬜ **T-503 · Windows backend** — effort: **medium** — `windows` crate, per T-004
+  spike learnings.
+- ⬜ **T-504 · macOS backend** — effort: **medium** — `objc2` +
+  `NSWorkspace.frontmostApplication.bundleIdentifier`. No special permission
+  needed *because* we don't read titles — keep it that way.
+- ⬜ **T-505 · Hyprland + sway backends** — effort: **low** — their IPC sockets;
+  both are simple JSON/i3-IPC queries.
+- ⬜ **T-506 · Registry to ~200 entries + local overrides** — effort: **medium**
+  Top games (Steam appids), browsers, creative, editors, media. Local override
+  file in the client config dir; **never synced to the server**.
+- ⬜ **T-507 · Sharing controls UI** — effort: **medium**
+  SPEC §4.3: global one-click off (roster), per-server off, per-app hide,
+  idle-only mode, **persistent visible indicator** + status bar `sharing: <app>`.
+  Default off overall.
 
 ---
 
