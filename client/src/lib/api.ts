@@ -9,6 +9,7 @@
  * a typed one, and it is one annotated assignment, not a cast.
  */
 import type { AuthResponse } from "../generated/AuthResponse";
+import type { ChangePasswordRequest } from "../generated/ChangePasswordRequest";
 import type { CreateInviteRequest } from "../generated/CreateInviteRequest";
 import type { CreateRoomRequest } from "../generated/CreateRoomRequest";
 import type { ErrorBody } from "../generated/ErrorBody";
@@ -24,6 +25,7 @@ import type { RoomId } from "../generated/RoomId";
 import type { ServerInfo } from "../generated/ServerInfo";
 import type { SetupPreview } from "../generated/SetupPreview";
 import type { SetupRequest } from "../generated/SetupRequest";
+import type { UpdateMeRequest } from "../generated/UpdateMeRequest";
 import type { UpdateRoomRequest } from "../generated/UpdateRoomRequest";
 import type { UpdateServerRequest } from "../generated/UpdateServerRequest";
 import type { User } from "../generated/User";
@@ -311,6 +313,16 @@ export class AuthedApi {
 
   me(signal?: AbortSignal): Promise<User> {
     return this.get<User>("/me", signal);
+  }
+
+  updateMe(request: UpdateMeRequest): Promise<User> {
+    return this.patch<User>("/me", request);
+  }
+
+  changePassword(request: ChangePasswordRequest): Promise<void> {
+    return this.#withAuth((accessToken) =>
+      requestVoid(this.baseUrl, "PATCH", "/me/password", { accessToken, body: request }),
+    );
   }
 
   serverInfo(signal?: AbortSignal): Promise<ServerInfo> {

@@ -48,7 +48,9 @@ import type { RoomId } from "../generated/RoomId";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
-import { type Density, DENSITIES } from "../lib/density";
+import DensityPicker from "../lib/DensityPicker";
+import { type Density } from "../lib/density";
+import { emptyRoom } from "../settings/copy";
 import {
   deleteMessage,
   editMessage,
@@ -451,7 +453,7 @@ export default function Stream({
       >
         {rows.length === 0 ? (
           <p className="placeholder">
-            {loaded && atStart ? "Nothing here yet. Say the first thing." : "…"}
+            {loaded && atStart ? emptyRoom() : "…"}
           </p>
         ) : (
           <div className="stream-rows" style={{ height: virtualizer.getTotalSize() }}>
@@ -1158,26 +1160,4 @@ function listOf(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${last}`;
 }
 
-function DensityPicker({
-  density,
-  onChange,
-}: {
-  density: Density;
-  onChange: (density: Density) => void;
-}) {
-  return (
-    <div className="density" role="group" aria-label="density">
-      {DENSITIES.map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          className="density-option meta"
-          aria-pressed={mode === density}
-          onClick={() => onChange(mode)}
-        >
-          {mode}
-        </button>
-      ))}
-    </div>
-  );
-}
+

@@ -83,8 +83,8 @@
   text-overflow: ellipsis;
 }
 
-/* Density lives in the room header rather than behind a settings screen: it is
-   a way of looking at the stream, and you change it while looking at one. */
+/* Density lives in the room header (you change it while looking at a room)
+   and also in settings, so it is findable without a room (T-411). */
 .density {
   margin-left: auto;
   display: flex;
@@ -310,6 +310,12 @@
   gap: 8px;
 }
 
+.rail-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
 .rail-action {
   background: none;
   border: 0;
@@ -432,6 +438,7 @@
   cursor: pointer;
 }
 
-.status-action:hover {
+.status-action:hover,
+.status-action[aria-pressed="true"] {
   color: var(--text-primary);
 }

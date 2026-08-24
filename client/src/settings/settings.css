@@ -1,0 +1,150 @@
+/*
+ * The member's settings panel (T-411). Console rules: no rounded panels, no
+ * shadows except the focus ring, hairlines for separation, mono for labels
+ * and metadata only.
+ *
+ * Same column layout as the host panel: it sits in the stream's grid area,
+ * the body scrolls, and the roster strip (narrow windows) sits under it.
+ */
+
+.settings-head {
+  gap: 14px;
+}
+
+.settings-close {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-close:hover {
+  color: var(--text-primary);
+}
+
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--gutter);
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+  padding-bottom: 14px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.settings-section:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+
+.settings-lead {
+  color: var(--text-secondary);
+  max-width: 60ch;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-input {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 5px 7px;
+  min-width: 0;
+  user-select: text;
+}
+
+.settings-input:disabled,
+.settings-input[readonly] {
+  color: var(--text-muted);
+}
+
+.settings-hint {
+  color: var(--text-faint);
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Accent's fourth job: the one affordance that moves you forward (SPEC §5.3).
+   On this panel that is saving the display name. Everything else is quieter. */
+.settings-save {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  color: var(--surface-0);
+  font: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.settings-save:disabled {
+  background: none;
+  border-color: var(--hairline-strong);
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.settings-mini {
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.settings-mini:hover:not(:disabled) {
+  border-color: var(--hairline-strong);
+  color: var(--text-primary);
+}
+
+.settings-mini:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.settings-problem {
+  color: var(--text-primary);
+  border-left: 2px solid var(--hairline-strong);
+  padding-left: 8px;
+}
+
+.settings-ok {
+  color: var(--text-secondary);
+}
+
+/* The stream header pins this control to the right; here it is just a row. */
+.settings-density .density {
+  margin-left: 0;
+}
+
+.settings-signout {
+  align-self: flex-start;
+}

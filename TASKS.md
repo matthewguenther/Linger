@@ -110,8 +110,11 @@ task fails its acceptance criteria twice.
   are recorded under *Decided — the host's side* below.
   **T-410 landed 2026-08-21**: the host can make, rename, reorder and archive rooms,
   hand out and revoke invite links, and rename the server, all from inside the app —
-  and a member sees none of those controls. The milestone check is not passed yet;
-  T-411 is the rest of it. **T-415 was added the same day**, from something T-410 hit on
+  and a member sees none of those controls.
+  **T-411 landed 2026-08-23**: a member can change their display name, password and
+  density from inside the app, and the first-run copy no longer assumes they already
+  know how it works. The milestone check still waits on T-412 (the server list).
+  **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
 - ⬜ **M5 … M9** — queued below.
@@ -1467,7 +1470,7 @@ above.
       Recorded rather than fixed: it is `lib/gateway.ts` and the sign-in path (T-301,
       T-302), not this task, and a fix chased on one unreproducible sighting is a guess.
 
-- ⬜ **T-411 · The member's sweep: settings, empty states, first five minutes** — effort: **medium**
+- ✅ **T-411 · The member's sweep: settings, empty states, first five minutes** — effort: **medium**
   The other half, for somebody who is not the host. There is no settings surface in
   the client at all right now — display name, password, and density all live either
   nowhere or in a corner of the status bar.
@@ -1486,6 +1489,34 @@ above.
     and see it update in the roster on the other client.
   - *Note for whoever runs this:* resist inventing new surfaces. The fix for most of
     these is a sentence of copy or a button in a place that already exists.
+  - **Landed 2026-08-23.** One panel over the stream column (`client/src/settings/`),
+    reached from `you` on the rail and from your name in the status bar. Sign-out
+    moved into that panel so the status bar is just the connection and who you are.
+    Density stays on the room header as well, because you change it while reading.
+  - *No wire types were touched.* `PATCH /me` and `PATCH /me/password` already
+    existed; the new REST calls are typed wrappers on the generated types in
+    `lib/api.ts`.
+  - *A display-name save folds the HTTP answer into the gateway store*, the same
+    way a status save does, so your own roster card and the status bar move
+    without waiting for the `user.update` fan-out. The other client still gets
+    that frame, which is the accept path.
+  - *Changing a password revokes every refresh family on the server* (it treats
+    the change as "someone else may have had the old one"). The panel signs back
+    in with the new password so this window is not kicked out fifteen minutes
+    later. If that second login fails, the copy says so rather than pretending
+    you are still signed in.
+  - *Empty-state copy, not empty-state screens.* A member on a server with no
+    rooms is told the host has to make the first one. The rail says `no rooms
+    yet` instead of a dash. The roster says `finding who's around…` until
+    `ready`, so connecting does not look like an empty house. A silent room
+    points at the composer. The invite form says you will see the roster.
+  - *Keyboard.* Every control is a real button or a labelled field. Opening
+    settings focuses the display name. Escape closes the panel. Focus rings are
+    the global `:focus-visible` rule from M0.
+  - *Verified:* `pnpm check` and 223 client tests, including the copy and the
+    request-body helpers. The two-client "rename yourself and watch the other
+    window" walk is the remaining human check — this session could not drive
+    two GUI windows.
 
 - ⬜ **T-412 · The server list (SPEC §3, V1 item 17)** — effort: **high**
   SPEC §3's layout has a `SERVERS` rail — `● home / ○ work / + add` — and SPEC §6

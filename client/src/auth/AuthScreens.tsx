@@ -232,6 +232,10 @@ function Register({
   return (
     <form className="auth-form" onSubmit={submit}>
       <Where baseUrl={step.baseUrl} serverName={step.serverName} onBack={onBack} />
+      <p className="auth-lead">
+        You're joining {step.serverName ?? hostOf(step.baseUrl)}. Pick a username
+        people can mention you by, and a display name they'll see in the roster.
+      </p>
       <Field
         label="username"
         hint="Lowercase letters, numbers and underscores. You can't change it later."
