@@ -16,7 +16,7 @@ T-901/902/903; activity T-501…T-507 are T-911…T-917.
 
 ## How to run a task
 
-**Model: Claude Opus 5** for every task below. One task per fresh session — a
+**Model: ** One task per fresh session — a
 clean context follows the task spec better and costs less than a long-running
 one. The prompt that works: *"Read AGENTS.md and TASKS.md, then do task T-xxx.
 State the current milestone first."*
