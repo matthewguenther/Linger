@@ -484,6 +484,12 @@ first two are the system defaults.
 | 16 | Desktop client: Linux, Windows, macOS | ARCHITECTURE |
 | 17 | Multi-server list in the client | §3 |
 
+Two V1 items are parked and do not block the rest of the build. **Entrance sounds**
+(item 4) and **activity detection** (item 8) are still in this list. They go after
+M8 (export). See `TASKS.md` *Backburner* (T-901…T-903 and T-911…T-917). Activity
+detection in particular is large — four OS backends, a poller, a registry, sharing
+controls — and it is not needed for a usable chat app. Matt parked it on 2026-08-23.
+
 ### V2
 
 - Voice rooms (WebRTC mesh + coturn), push-to-talk, per-user gain

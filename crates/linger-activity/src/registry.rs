@@ -37,7 +37,8 @@ pub struct MatchSpec {
     #[serde(default)]
     pub bundle: Vec<String>,
     /// Steam app id; matched against `steam_app_<id>` exe names and Steam
-    /// launch paths (resolution implemented with the Steam matcher in M5).
+    /// launch paths (resolution implemented with the Steam matcher when
+    /// T-916 comes off the backburner).
     #[serde(default)]
     pub steam_appid: Option<u32>,
 }

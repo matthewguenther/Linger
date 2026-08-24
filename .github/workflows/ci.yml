@@ -54,7 +54,7 @@ jobs:
     # Builds the desktop shell against real WebKitGTK and runs its tests — the
     # gateway client lives here, and its resume/sequence accounting is the kind
     # of thing that has to be gated, not checked by hand. Full bundles and
-    # signing are M8.
+    # signing are M7.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

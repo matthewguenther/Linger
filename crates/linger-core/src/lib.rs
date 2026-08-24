@@ -47,7 +47,7 @@ pub const REACTIONS: [&str; 12] = [
     "sparkles",
 ];
 
-/// Bundled entrance-sound keys (SPEC §4.1). Provisional until T-408 curates the
+/// Bundled entrance-sound keys (SPEC §4.1). Provisional until T-903 curates the
 /// actual audio; the keys are chosen to match the curation directions so files
 /// can land without a contract change. Custom uploads (M4) use object keys and
 /// are validated separately.

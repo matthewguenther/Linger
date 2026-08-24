@@ -24,7 +24,8 @@ struct ActivityProbe {
     registry_id: Option<String>,
 }
 
-/// The one activity command (M5 wires real backends + the poller behind it).
+/// The one activity command (real backends and the poller land with T-911…T-917,
+/// on the backburner — until then this always reports `None`).
 #[tauri::command]
 fn activity_probe() -> ActivityProbe {
     let (kind, _backend) = linger_activity::backend::select_backend();

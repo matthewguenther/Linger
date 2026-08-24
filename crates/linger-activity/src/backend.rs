@@ -5,18 +5,19 @@
 //! gets [`NullBackend`], which cleanly reports nothing. Never crash, never block
 //! startup, never take down presence because activity detection is unavailable.
 //!
-//! Implementation status (real backends land in M5; see TASKS.md):
+//! Implementation status (real backends are on the backburner;
+//! see TASKS.md — do not start T-911):
 //!
 //! | Platform          | Approach                                             | Status |
 //! |-------------------|------------------------------------------------------|--------|
-//! | Windows           | GetForegroundWindow → QueryFullProcessImageNameW —   | M5     |
+//! | Windows           | GetForegroundWindow → QueryFullProcessImageNameW —   | T-913  |
 //! |                   | **spike-verified** 2026-08-19; recipe below          |        |
-//! | macOS             | NSWorkspace.frontmostApplication.bundleIdentifier    | M5     |
-//! | Linux / X11       | _NET_ACTIVE_WINDOW → _NET_WM_PID                     | M5     |
-//! | Linux / KWin      | KWin scripting over D-Bus — **spike-verified** on    | M5     |
+//! | macOS             | NSWorkspace.frontmostApplication.bundleIdentifier    | T-914  |
+//! | Linux / X11       | _NET_ACTIVE_WINDOW → _NET_WM_PID                     | T-912  |
+//! | Linux / KWin      | KWin scripting over D-Bus — **spike-verified** on    | T-911  |
 //! |                   | Plasma 6.6 Wayland, 2026-08-19; recipe below         |        |
-//! | Linux / Hyprland  | IPC socket                                           | M5     |
-//! | Linux / sway      | i3 IPC                                               | M5     |
+//! | Linux / Hyprland  | IPC socket                                           | T-915  |
+//! | Linux / sway      | i3 IPC                                               | T-915  |
 //! | Linux / GNOME     | X11 backend only; Wayland+GNOME = presence without   | never  |
 //! |                   | activity (documented limitation, no shell extension) |        |
 //!
@@ -134,8 +135,9 @@ pub fn classify(
 }
 
 /// Select and construct the backend for this machine. Until the real backends
-/// land (M5), every classification maps to [`NullBackend`] — presence still works,
-/// activity is simply absent, which is the correct degraded behavior.
+/// land (T-911…T-917, on the backburner), every classification maps to
+/// [`NullBackend`] — presence still works, activity is simply absent, which is
+/// the correct degraded behavior.
 #[must_use]
 pub fn select_backend() -> (BackendKind, Box<dyn ActivityBackend>) {
     let kind = classify(

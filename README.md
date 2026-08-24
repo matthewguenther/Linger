@@ -74,11 +74,9 @@ These terms are used everywhere — UI, code, docs, error messages:
 - 🪑 **Rooms you're in** — focusing a room means you're in it; others see
   occupancy, and each person has a personal **entrance sound** that plays on arrival
 - 👥 **A roster-forward layout** — people are the primary surface, not a gutter; each
-  friend is a card showing presence, room, activity, and their status
+  friend is a card showing presence, the room they are in, and their status
 - 🔕 **No unread counts** — a "you left off here" line and a subtle label-weight change,
   never a badge; direct person-to-person mentions are the only real notification
-- 🎮 **Ambient activity** — opt-in, default-off sharing of the app you're using,
-  resolved against a bundled registry; **window titles are never read or transmitted**
 - ✍️ **Styled names** (the AIM feature) — curated fonts, a named 16-color palette,
   gradients, shimmer/glow; and **statuses** with away messages
 - 🗄️ **Media** — everything ever shared, browsable and filterable; star things to
@@ -287,6 +285,10 @@ Current work queue lives in [TASKS.md](TASKS.md).
 
 - **V1** — replaces the text half of a big chat platform for one friend group
   (see [SPEC.md §6](SPEC.md))
+- **Later (still V1, not on the critical path)** — entrance sounds (T-901…T-903);
+  **ambient activity detection** (T-911…T-917: opt-in, default off, bundled app
+  registry, window titles never read or transmitted). Both are in the spec.
+  Neither is next. See [TASKS.md](TASKS.md) *Backburner*.
 - **V2** — voice rooms, ambient voice, DMs, search, knock, mobile
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
 

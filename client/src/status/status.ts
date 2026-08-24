@@ -76,9 +76,9 @@ function trimmed(value: string): string | null {
  * The object to send.
  *
  * `image_key` is carried over rather than edited: setting one needs the media
- * store M6 builds (T-606), and dropping it here would quietly delete an image
+ * store M5 builds (T-506), and dropping it here would quietly delete an image
  * somebody had, since `PATCH /me` replaces the whole status object
- * (PROTOCOL §5). Keep this when T-606 lands — that is the moment it starts to
+ * (PROTOCOL §5). Keep this when T-506 lands — that is the moment it starts to
  * matter.
  *
  * `away_since` is server-owned — it is stamped when an away message appears or

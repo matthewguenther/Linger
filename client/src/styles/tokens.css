@@ -3,7 +3,7 @@
  * properties — density modes and time-of-day warmth are one variable swap, never
  * a second stylesheet.
  *
- * The 16-color name palette is NOT defined here by hand: M7 generates it from
+ * The 16-color name palette is NOT defined here by hand: M6 generates it from
  * linger-core::PALETTE (the single source of truth) into palette.generated.css.
  */
 

@@ -190,7 +190,7 @@ function Console({
 
   // The server's accent, if the host picked one (SPEC §5.3, `PATCH /server`).
   // It names a palette key, and the variable that key points at is generated
-  // from `linger-core::PALETTE` in M7 — until then every key falls back to the
+  // from `linger-core::PALETTE` in M6 — until then every key falls back to the
   // built-in accent and this line quietly does nothing.
   const frameStyle: CSSProperties = {
     "--accent": colorVar(server?.accent_key ?? "", "var(--accent-default)"),

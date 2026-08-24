@@ -1,5 +1,5 @@
 //! Assembling `wire::Message`: page fetch plus reaction grouping.
-//! Attachments join lands in M6; until then every message carries `[]`.
+//! Attachments join lands in M5; until then every message carries `[]`.
 
 use std::collections::HashMap;
 

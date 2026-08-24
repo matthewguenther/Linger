@@ -1,6 +1,6 @@
 //! Route assembly. Everything REST lives under `/api/v1`; the gateway upgrades
 //! at `/api/v1/gateway` (PROTOCOL preamble). Still to mount: `/uploads` and
-//! `/media` (M6), `/export` (M9).
+//! `/media` (M5), `/export` (M8).
 //!
 //! Unknown paths get the PROTOCOL §1 envelope, not axum's plain-text 404, so
 //! the client can always switch on `error.code`.

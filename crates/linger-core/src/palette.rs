@@ -121,7 +121,7 @@ impl PaletteColor {
 }
 
 /// CSS custom properties for every palette entry in one theme, e.g.
-/// `--name-azure: #8FB3FF;`. M7 wires this into the client build so the palette
+/// `--name-azure: #8FB3FF;`. M6 wires this into the client build so the palette
 /// is defined exactly once, here.
 #[must_use]
 pub fn css_variables(theme: Theme) -> String {
