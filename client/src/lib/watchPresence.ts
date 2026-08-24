@@ -7,7 +7,7 @@
  */
 import type { PresenceState } from "../generated/PresenceState";
 import type { RoomId } from "../generated/RoomId";
-import { send } from "./gateway";
+import { send, sendOthers } from "./gateway";
 import { readFocused, setLooking, stopLooking } from "./looking";
 import { decide, frameFor, nextCheckAt, type PresenceAction, type PresenceClock } from "./presence";
 
@@ -108,8 +108,13 @@ async function tick(): Promise<void> {
       for (;;) {
         const action = decide(clock(), Date.now());
         if (action === null) break;
-        const ok = await send(frameFor(action));
+        const frame = frameFor(action);
+        const ok = await send(frame);
         if (!ok) break;
+        // Idle and away belong to the person, not to one server. Room focus
+        // stays on the server we are looking at; the others already got
+        // `room.focus(null)` when we switched away.
+        if (action.kind !== "focus") void sendOthers(frame);
         const next = applySent(
           { roomId: sentRoomId, state: sentState, awayMessage: sentAwayMessage },
           action,

@@ -113,7 +113,10 @@ task fails its acceptance criteria twice.
   and a member sees none of those controls.
   **T-411 landed 2026-08-23**: a member can change their display name, password and
   density from inside the app, and the first-run copy no longer assumes they already
-  know how it works. The milestone check still waits on T-412 (the server list).
+  know how it works.
+  **T-412 landed 2026-08-23**: the server rail is real. Sign into two servers in one
+  window, switch, and the rooms/stream/roster follow; a message on the other server
+  marks that server's name without a count.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
@@ -1518,7 +1521,7 @@ above.
     window" walk is the remaining human check — this session could not drive
     two GUI windows.
 
-- ⬜ **T-412 · The server list (SPEC §3, V1 item 17)** — effort: **high**
+- ✅ **T-412 · The server list (SPEC §3, V1 item 17)** — effort: **high**
   SPEC §3's layout has a `SERVERS` rail — `● home / ○ work / + add` — and SPEC §6
   lists "multi-server list in the client" as V1 item 17. **None of it exists.** The
   client holds exactly one server today: one `baseUrl` in `session.ts`, one keyring
@@ -1540,6 +1543,28 @@ above.
     task at all until now, which is why it is written down here rather than left to
     be discovered again at M8. If the budget is tight, T-410 and T-411 are what make
     the app usable; this one makes it match the spec.
+  - **Landed 2026-08-23.** The keyring holds a list of `{base_url, refresh_token}`
+    and which server the window was last looking at. An old single-session blob is
+    read as a one-item list, so a restart after this build does not demand a
+    re-login. Signing out of one rewrites the list with that row gone.
+  - *The Tauri core holds a `HashMap` of connections*, keyed by origin. Status and
+    frames on the way up are tagged with `base_url`, so two live sockets cannot
+    overwrite each other. Killing one server only drops that handle.
+  - *The gateway store is still one store* (AGENTS: local state plus one store),
+    internally a map. `useGateway()` is the server you are looking at, so the
+    stream, roster, host panel and settings did not all grow a `baseUrl` argument.
+    The rail reads `useServerSummaries()`: live-or-not, and whether anything new
+    is there. That second fact is a boolean. There is no count.
+  - *Switching servers sends `room.focus(null)` to the one you left*, so you do
+    not stay "in" a room you are no longer reading. Idle and away go to every
+    connected server, because those belong to you, not to one house.
+  - *`+ add` is the T-301 paste box*, sitting in the stream column rather than
+    taking over the window. Sign-out in settings is this server only.
+  - *Verified:* `pnpm check`, client tests including `hasNewOnServer`, and the
+    Rust session-list tests (migration of the old blob, upsert leaves the other
+    server's token alone, `kind` tags). The two-server GUI walk — both dots
+    live, a background message marks the other name, kill one and the other
+    stays — still wants a person in front of two running servers.
 
 - ⬜ **T-413 · Removing a member** — effort: **medium**
   The host can remove somebody from the server, and let them back in. There is no

@@ -18,6 +18,7 @@ vi.mock("./gateway", () => ({
     if (accept) sent.push(frame);
     return accept;
   },
+  sendOthers: async (): Promise<void> => undefined,
 }));
 
 const { setAway, setPresenceLive, setPresenceRoom, startPresence } = await import(

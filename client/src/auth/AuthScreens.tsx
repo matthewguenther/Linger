@@ -37,6 +37,11 @@ interface Props {
   /** Set when this computer can't remember a sign-in between launches. */
   keyringNotice: string | null;
   onAuthenticated: (baseUrl: string, auth: AuthResponse) => Promise<void>;
+  /**
+   * When set, this is the in-app "add a server" panel (T-412), not the
+   * full-page first screen. Close is the way back to the server you were on.
+   */
+  onCancel?: () => void;
 }
 
 /** Turn any thrown thing into a sentence worth showing. */
@@ -45,15 +50,30 @@ function messageFor(error: unknown): string {
   return "Something went wrong.";
 }
 
-export default function AuthScreens({ notice, keyringNotice, onAuthenticated }: Props) {
+export default function AuthScreens({
+  notice,
+  keyringNotice,
+  onAuthenticated,
+  onCancel,
+}: Props) {
   const [step, setStep] = useState<Step>({ name: "connect" });
+  const adding = onCancel !== undefined;
 
   return (
-    <div className="auth">
+    <div className={adding ? "auth auth-embed" : "auth"}>
       <div className="auth-panel">
         <header className="auth-head">
-          <h1 className="auth-wordmark">linger</h1>
-          <p className="auth-tagline meta">a small server for people who like each other</p>
+          <h1 className="auth-wordmark">{adding ? "add a server" : "linger"}</h1>
+          <p className="auth-tagline meta">
+            {adding
+              ? "Paste an invite, a setup link, or the address of a server you already have an account on."
+              : "a small server for people who like each other"}
+          </p>
+          {onCancel ? (
+            <button type="button" className="auth-back meta" onClick={onCancel}>
+              close
+            </button>
+          ) : null}
         </header>
 
         {notice && step.name === "connect" ? (

@@ -90,6 +90,9 @@ These terms are used everywhere — UI, code, docs, error messages:
   denser and larger, not "👍 6"
 - 📁 **File sharing** — 500 MB files, resumable uploads, **EXIF always stripped**
 - 🖥️ **Desktop client** for Linux, Windows, and macOS (Tauri 2, not Electron)
+- 🏠 **Multi-server list** — sign into more than one Linger server in one window;
+  a live dot per server, and a background server marks its name (never a count)
+  when something new is there
 - 📦 **Full export** — any member can export all messages and media, any time, no
   gatekeeping
 
@@ -276,10 +279,11 @@ Things that surprise people the first time:
   off. On Linux that means a notification service on the session bus — Plasma, GNOME and
   `dunst` all provide one. Without one, or if you turn notifications off at the OS level,
   the message still arrives in the stream; you just don't get interrupted about it.
-- **Signing in needs a keyring to be remembered.** The refresh token goes to the OS
-  keyring — Keychain, Credential Manager, or a Secret Service provider like
-  gnome-keyring or KWallet. Without one, or with `pnpm dev` in a plain browser, the app
-  still works; it just says so and asks you to sign in again next launch.
+- **Signing in needs a keyring to be remembered.** Each server you are signed into
+  has its own refresh token in the OS keyring — Keychain, Credential Manager, or a
+  Secret Service provider like gnome-keyring or KWallet. Signing out of one does
+  not touch the others. Without a keyring, or with `pnpm dev` in a plain browser,
+  the app still works; it just says so and asks you to sign in again next launch.
 
 Current work queue lives in [TASKS.md](TASKS.md).
 

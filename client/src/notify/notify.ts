@@ -41,12 +41,12 @@ import { notificationText, notifyReason } from "./rules";
  */
 const BATCH_MS = 1_200;
 
-/** The room on screen. Set by the frame that is drawing it. */
-let viewing: RoomId | null = null;
+/** The room on screen, on which server. Set by the frame that is drawing it. */
+let viewing: { baseUrl: string; roomId: RoomId } | null = null;
 
 /** Tell the notifier which room you are looking at, if any. */
-export function setViewing(roomId: RoomId | null): void {
-  viewing = roomId;
+export function setViewing(next: { baseUrl: string; roomId: RoomId } | null): void {
+  viewing = next;
 }
 
 interface Batch {
@@ -66,7 +66,11 @@ let flushIn: number | null = null;
  * Takes the snapshot rather than reading the store, so the decision is made
  * against the state that includes this very frame and nothing later.
  */
-export function considerFrame(frame: ServerFrame, snapshot: GatewayState): void {
+export function considerFrame(
+  frame: ServerFrame,
+  snapshot: GatewayState,
+  baseUrl: string,
+): void {
   if (frame.op !== "message.create") return;
   const me = snapshot.me;
   if (me === null) return;
@@ -75,8 +79,16 @@ export function considerFrame(frame: ServerFrame, snapshot: GatewayState): void 
   if (notifyReason(message, me, snapshot.notifyRules) === null) return;
   // You are looking right at it. `isLooking` is the same clock the
   // read-marker uses: the window has your attention, not merely a room
-  // selected on a second monitor.
-  if (viewing === message.room_id && isLooking()) return;
+  // selected on a second monitor. A mention on a *different* server is
+  // never this, even if the room ids somehow matched.
+  if (
+    viewing !== null &&
+    viewing.baseUrl === baseUrl &&
+    viewing.roomId === message.room_id &&
+    isLooking()
+  ) {
+    return;
+  }
 
   const slug = snapshot.rooms.find((room) => room.id === message.room_id)?.slug ?? "a room";
   const name =
