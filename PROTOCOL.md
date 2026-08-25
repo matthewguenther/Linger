@@ -336,14 +336,20 @@ make them acceptable.
 `DELETE /uploads/:id` throws an upload away, finished or not, along with its bytes. It is
 `CONFLICT` once the attachment is on a message; delete the message instead.
 
-**Serving.** `Attachment.url` (and `poster_url`) point at the object store. On a server
-with `LINGER_DOMAIN` set they are absolute; on one without, they are root-relative and
-the client resolves them against the server it is talking to. The URL is the secret: an
-object key contains a UUIDv7, and the request is not authenticated, which is what lets an
-`<img>` tag work. Only image, video and audio types on the `linger-core::media` inline
-list are served with their own content type; everything else is served as
-`application/octet-stream` with `Content-Disposition: attachment`, and every response
-carries `X-Content-Type-Options: nosniff` (ARCHITECTURE §7).
+**Serving.** `Attachment.url` (and `poster_url`) point at the object store, on the media
+origin — a host of its own, `cdn.<LINGER_DOMAIN>` by default, which serves `/objects/...`
+and nothing else. On a server with `LINGER_DOMAIN` set these URLs are absolute; on one
+without, there is only one origin and they are root-relative, resolved against the server
+the client is talking to. The URL is the secret: an object key contains a UUIDv7, and the
+request is not authenticated, which is what lets an `<img>` tag work. Only image, video
+and audio types on the `linger-core::media` inline list are served with their own content
+type; everything else is served as `application/octet-stream` with
+`Content-Disposition: attachment`, and every response carries
+`X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`
+(ARCHITECTURE §7).
+
+A client should treat these URLs as opaque and use them as given. Nothing else on the
+media origin answers, and the API does not answer there.
 
 ```ts
 type Attachment = {

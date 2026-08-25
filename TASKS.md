@@ -246,15 +246,69 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     environment of the machine it runs on.
   - Still a human check, as with T-501: **a real 400 MB video into a real
     bucket over a real network.** The tests move 16 MB over three parts.
-- ⬜ **T-503 · Separate media origin** — effort: **medium**
-  ARCHITECTURE §7: serve objects on the cdn host; `Content-Disposition:
-  attachment` + `nosniff` off-allowlist; activate the Caddyfile block; strict CSP
-  on the app origin.
-  **Carries a known gap from T-502:** on `LINGER_STORAGE=s3` the response comes
-  from the bucket, and S3 has no `response-` override for
-  `X-Content-Type-Options`, so `nosniff` is currently absent on that backend.
-  The content type and disposition are signed into the presigned URL and do
-  arrive. Closing that gap is part of this task, not an extra.
+- ✅ **T-503 · Separate media origin** — effort: **medium** — landed 2026-08-25
+  Uploads are served from `cdn.<LINGER_DOMAIN>` and nowhere else; the Caddyfile
+  block is live; the app origin's CSP is tightened.
+  `crates/linger-server/tests/media_origin.rs` (4 tests) drives real HTTP with
+  the `Host` header a reverse proxy would set, and
+  `an_object_carries_its_own_headers_in_the_bucket` in `tests/s3.rs` covers the
+  S3 half against MinIO.
+
+  **Decisions and surprises, for whoever picks up T-504…T-506:**
+
+  - **The split is enforced by the server, not just advertised by DNS.** Both
+    names reach one process through Caddy, so a `Host` check in
+    `routes::media_origin_gate` decides what each serves: on the media host,
+    `/objects/...` and nothing else; on every other name, everything *but*
+    `/objects/...`. Without that, "separate origin" would have been a URL shape
+    and no more — the app host would still have served every uploaded file, and
+    a hostile file's own origin would have had the whole API on it.
+  - **`LINGER_MEDIA_DOMAIN` defaults to `cdn.<LINGER_DOMAIN>`**, so the only
+    setup cost is a second DNS record. Setting it equal to `LINGER_DOMAIN` is a
+    startup error rather than a quiet downgrade. A server with no domain has one
+    origin and no split; that is what every test server runs as, and it is why
+    `spawn_server()` still hands out root-relative URLs while
+    `spawn_named_server()` is the one that exercises this.
+  - **The `nosniff` gap from T-502 is closed as far as S3 permits, and it is
+    worth knowing exactly how far that is.** S3 has no `response-` override for
+    `X-Content-Type-Options` or `Content-Security-Policy`, and proxying the
+    bytes back through this process to add them would break the rule the S3
+    backend exists to keep. So: both headers are now on every response the
+    server sends itself, the Caddy media block sets them on everything it
+    serves, and on the S3 path three things stand in for them — active content
+    is not storable at all, anything off the inline list is
+    `application/octet-stream` + `attachment` (which a browser downloads
+    whatever it sniffs), and those two headers are stored **on the object** as
+    well as signed into the URL. That last one is new here and is what makes a
+    CDN-fronted or public bucket safe. A host who wants the literal header on
+    the S3 path adds a response rule at their CDN; README says so.
+  - **`put_object`/`put_bytes` take a `ServeAs` now.** How a file may be served
+    is decided once, at complete, from what the server made of the bytes, and
+    travels with them. `ServeAs::for_object` and the RFC 6266 filename encoding
+    moved out of `routes/objects.rs` into `storage/mod.rs` for that reason —
+    the route was the only caller and is no longer the only place that needs
+    the answer.
+  - **MinIO stores `Content-Type`/`Content-Disposition` sent as unsigned headers
+    on a presigned PUT**, which is what makes the above work without signing
+    them into the upload URL. Real S3 behaves the same way; if some
+    implementation ever does not, the symptom is
+    `an_object_carries_its_own_headers_in_the_bucket` failing, not a security
+    hole — the presigned GET still carries the overrides.
+  - **The upload listener stays on the app host.** `PUT /upload/...` is bytes
+    coming *in* under a signature this server issued; nothing about it is
+    somebody else's content being handed to a browser. Moving it would have
+    bought nothing and given the media host a body-accepting route.
+  - **The app CSP got `base-uri`, `form-action`, `frame-src`, `worker-src` and
+    `manifest-src`.** `style-src 'unsafe-inline'` is still there: it is Vite's
+    dev-mode requirement, and **T-702 already owns dropping the dev
+    relaxations**. Do not remove it before then or `pnpm tauri dev` breaks.
+  - **T-504 and T-506 need nothing new for this.** `Attachment.url` and
+    `poster_url` are already absolute and already point at the media origin —
+    treat them as opaque and use them as given. Do not build a URL by hand from
+    the API base; that base is the app origin and `/objects` does not answer
+    there.
+  - Still a human check, as with T-501/T-502: **a real 400 MB video, over a real
+    network, from a server with real DNS for both names.**
 - ⬜ **T-504 · The media UI + link cards** — effort: **medium**
   SPEC §4.4: grid, filter by person/type/date, stars (starred never expire),
   each item links to its message/moment. Restrained link embeds (favicon, title,

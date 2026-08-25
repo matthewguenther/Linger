@@ -114,7 +114,19 @@ impl S3Store {
     ///
     /// The length is passed explicitly because S3 refuses a chunked PUT: a
     /// streamed file body has no size of its own, so the header has to carry it.
-    async fn put(&self, key: &str, len: u64, body: reqwest::Body) -> anyhow::Result<()> {
+    ///
+    /// `serve` is stored *on the object*, not only signed into the URLs that
+    /// read it back. S3 keeps `Content-Type` and `Content-Disposition` as object
+    /// metadata and sends them on any GET, so a file reached by some other route
+    /// to the bucket — a CDN in front of it, a bucket somebody made public —
+    /// still arrives as a download rather than a page (ARCHITECTURE §7).
+    async fn put(
+        &self,
+        key: &str,
+        len: u64,
+        serve: &ServeAs,
+        body: reqwest::Body,
+    ) -> anyhow::Result<()> {
         let url = self
             .bucket
             .put_object(Some(&self.credentials), key)
@@ -123,6 +135,8 @@ impl S3Store {
             .http
             .put(url)
             .header(reqwest::header::CONTENT_LENGTH, len)
+            .header(reqwest::header::CONTENT_TYPE, &serve.content_type)
+            .header(reqwest::header::CONTENT_DISPOSITION, &serve.disposition)
             .body(body)
             .send()
             .await?;
@@ -232,11 +246,11 @@ impl ObjectStore for S3Store {
         })
     }
 
-    async fn put_object(&self, key: &str, from: &Path) -> anyhow::Result<()> {
+    async fn put_object(&self, key: &str, from: &Path, serve: &ServeAs) -> anyhow::Result<()> {
         let file = tokio::fs::File::open(from).await?;
         let len = file.metadata().await?.len();
         let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
-        self.put(key, len, body).await?;
+        self.put(key, len, serve, body).await?;
         // The local copy was scratch space, not storage. `discard` takes the
         // directory; this takes the file, so a cancelled upload and a finished
         // one both leave nothing behind.
@@ -244,8 +258,8 @@ impl ObjectStore for S3Store {
         Ok(())
     }
 
-    async fn put_bytes(&self, key: &str, bytes: &[u8]) -> anyhow::Result<()> {
-        self.put(key, bytes.len() as u64, bytes.to_vec().into())
+    async fn put_bytes(&self, key: &str, bytes: &[u8], serve: &ServeAs) -> anyhow::Result<()> {
+        self.put(key, bytes.len() as u64, serve, bytes.to_vec().into())
             .await
     }
 
@@ -316,6 +330,7 @@ mod tests {
             data_dir: dir.path().to_path_buf(),
             bind: "127.0.0.1:0".parse().unwrap(),
             domain: None,
+            media_domain: None,
             storage: Storage::S3,
             s3: Some(S3Config {
                 bucket: "linger-test".to_string(),

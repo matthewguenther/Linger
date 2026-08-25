@@ -1,8 +1,11 @@
 # A Linger server in two containers: linger itself and Caddy for automatic TLS.
 # Target: a non-expert friend gets this running in under 15 minutes.
 #
-#   1. Point your domain's DNS at this machine.
-#   2. Set LINGER_DOMAIN below (and in Caddyfile) to that domain.
+#   1. Point your domain's DNS at this machine — two records, the domain
+#      itself and `cdn.` in front of it. Uploaded files are served from the
+#      second one so somebody else's file is never same-origin with the app.
+#   2. Set LINGER_DOMAIN below (and both blocks of the Caddyfile) to that
+#      domain.
 #   3. docker compose up -d
 #   4. docker compose logs linger   ← prints the one-time host-setup URL
 #
@@ -19,6 +22,11 @@ services:
       LINGER_DOMAIN: linger.example.com
       LINGER_DATA_DIR: /data
       LINGER_STORAGE: local
+      # Files are served from cdn.<LINGER_DOMAIN> unless you say otherwise.
+      # Set this only if that name is taken or you want files somewhere else;
+      # it has to be a different host from LINGER_DOMAIN, and the Caddyfile
+      # block has to match it.
+      # LINGER_MEDIA_DOMAIN: files.linger.example.com
       # Files in an S3 bucket instead of ./data/objects — Cloudflare R2 is the
       # one to pick, because it charges nothing for bytes going out. Set
       # LINGER_STORAGE to s3 and fill these in; the server refuses to start if

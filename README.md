@@ -147,12 +147,22 @@ Target: a working server in under 15 minutes. One binary plus one data directory
 
 ```bash
 cd deploy
-# edit compose.yaml: set LINGER_DOMAIN to your domain
+# point two DNS records at this machine: linger.example and cdn.linger.example
+# edit compose.yaml and Caddyfile: set both to your domain
 docker compose up -d
 docker compose logs linger   # prints a one-time host-setup URL on first run
 ```
 
 Caddy is bundled so TLS certificates are automatic.
+
+**Why two names.** Files people upload are served from `cdn.` in front of your domain,
+never from the domain itself. A file somebody sends you is somebody else's file, and a
+browser gives a file a lot of latitude when it comes from the same place as the app.
+Served from its own name it is a stranger, which is what it is. The server holds the line
+itself rather than trusting the setup: files answer on the `cdn.` name and nowhere else,
+and everything else answers everywhere else. It will not start if you point both names at
+one place. If `cdn.` is taken, `LINGER_MEDIA_DOMAIN` names a different host instead — it
+only has to be a different one, and the Caddyfile block has to match.
 
 The setup URL in that log is meant for the desktop client, not a browser: open Linger
 and paste it into the first box. It creates your account, makes you the host, and names
@@ -218,6 +228,16 @@ LINGER_S3_SECRET_ACCESS_KEY: ...
 Any S3-compatible store works. **Cloudflare R2 is the one to pick** — it charges nothing
 for bytes going out, which for a place people share videos is most of the bill. Backblaze
 B2 is the runner-up. Plain AWS S3 will bill you for every view of every photo.
+
+On S3 the download is a redirect to the bucket, so the last hop is the bucket's response
+rather than one Linger writes. Two of the four safety headers can be signed into that
+URL and are; the other two cannot, because S3 has no way to send them. What holds instead
+is that nothing which could run in a browser is storable at all — no SVG, no HTML, no
+programs — and every file that is not an ordinary image, video or audio clip is handed
+over as a download, which a browser never renders. Those instructions are stored on the
+object as well as signed into the link, so they hold even if the bucket is reached some
+other way. If you put a CDN in front of the bucket and want the missing headers back, add
+them as a response rule there.
 
 The server never sits in the middle of the bytes: uploads go straight from the app to the
 bucket, and downloads are a redirect to the bucket. It does pull each upload down once,

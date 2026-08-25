@@ -396,6 +396,41 @@ E2EE launders a false promise, which is worse than an honest limitation.
 - Strict CSP on the app origin: no `unsafe-inline`, no remote script, no remote fonts.
 - Markdown rendering: allowlist-based sanitizer, no raw HTML passthrough, ever.
 
+**The origin split is enforced, not just advertised.** `LINGER_MEDIA_DOMAIN` defaults to
+`cdn.<LINGER_DOMAIN>`, and the server refuses to start if it is the same host as the app.
+Both names reach the same process through the reverse proxy, so a `Host` check decides
+what each one serves: on the media host, `/objects/...` and nothing else; on every other
+name, everything *but* `/objects/...`. A file that talked a browser into running it would
+find no API at its own origin, and an upload cannot be fetched from the app's own name at
+all. A server with no `LINGER_DOMAIN` has one origin and no split — honest for a box on a
+LAN, and what every test server runs as.
+
+Every served object also carries `Content-Security-Policy: default-src 'none'; sandbox`
+and `Cross-Origin-Resource-Policy: cross-origin`, and the `Content-Type` is never the
+uploader's claim: it is one of the thirteen media types the server sniffed for itself, or
+`application/octet-stream`.
+
+**On S3, the bytes come from the bucket**, and S3 has no `response-` override for
+`X-Content-Type-Options` or `Content-Security-Policy` — only for the content type and the
+disposition, both of which are signed into every presigned URL. Proxying the bytes back
+through this process to add the other two would break the rule the S3 backend exists to
+keep (§8). What stands in for them:
+
+1. Active content is not storable. `image/svg+xml`, `text/html` and every script type are
+   off the allowlist in `linger-core::media`, checked against the declared type at slot
+   creation and against the *sniffed* type at complete.
+2. Everything off the inline list is `application/octet-stream` with
+   `Content-Disposition: attachment`, which a browser downloads rather than renders
+   whatever it decides the bytes are.
+3. Those two headers are stored **on the object** as well as signed into the URL, so a
+   bucket behind a CDN, or one somebody made public, still hands the file over as a
+   download.
+
+A host who wants the literal header on the S3 path adds a response-header rule at
+whatever CDN fronts the bucket (an R2 transform rule, a CloudFront response-headers
+policy). It is defence in depth on top of the three above, not the thing holding the
+door.
+
 ---
 
 ## 8. File pipeline
@@ -442,7 +477,8 @@ you on egress.
 
 **The local backend's listener.** Step 3 is trivial with S3 — the client PUTs at Amazon.
 With a filesystem there is no second machine, so the local backend hands out URLs under
-`PUT /upload/{upload_id}/{part}`, and objects come back from `GET /objects/{key}`.
+`PUT /upload/{upload_id}/{part}` on the app host, and objects come back from
+`GET /objects/{key}` on the media host and only there (§7).
 Neither path is under `/api/v1`, neither reads an `Authorization` header, and neither
 touches a session: the part URL is signed with an HMAC over the upload id, the part
 number and an expiry, which is what an S3 presigned URL is. The signing key lives in the
@@ -478,6 +514,8 @@ services:
       LINGER_DOMAIN: linger.example.com
       LINGER_DATA_DIR: /data
       LINGER_STORAGE: local
+      # uploads are served from cdn.<LINGER_DOMAIN>; override with
+      # LINGER_MEDIA_DOMAIN
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -489,7 +527,8 @@ volumes: { caddy_data: {} }
 ```
 
 Caddy is bundled specifically so TLS certificates are automatic. A self-hoster should
-never have to think about certbot.
+never have to think about certbot. Its Caddyfile has two blocks and the deployment needs
+two DNS records: the domain, and `cdn.` in front of it for uploaded files (§7).
 
 **First-run flow:** binary starts, finds no config, prints a one-time host-setup URL with
 a token to stdout. Host opens it, creates their account, names the server. No env-var
