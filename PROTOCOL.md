@@ -370,10 +370,77 @@ EXIF and can change the format (a WebP comes back as a PNG, with its extension c
 
 ```
 GET /media?kind=image|video|audio|file|link|pin
-          &author=<user_id>&before=<id>&limit=<1..100>   → MediaItem[]
+          &author=<user_id>&since=<ms>&until=<ms>
+          &before=<cursor>&limit=<1..100>               → MediaItem[]
 PUT    /media/:attachment_id/star                        → 204
 DELETE /media/:attachment_id/star                        → 204
 ```
+
+Everything shared on the server, in one list: uploads, links people typed, and
+pinned messages. `since`/`until` are Unix ms and inclusive; a range that ends
+before it starts is `VALIDATION_FAILED` rather than an empty answer.
+
+**Order.** Starred first, then newest first. Only an upload can be starred, so
+the whole starred shelf comes ahead of every link and pin.
+
+**Paging** is keyset, not offset: pass the last item's `cursor` back as
+`before`. A cursor is opaque — do not parse it, build one, or compare two. All
+the links in one message share a page, so a page may hold slightly more than
+`limit` items; a page that comes back empty is the end.
+
+```ts
+type MediaKind = "image" | "video" | "audio" | "file" | "link" | "pin"
+
+type LinkPreview = {
+  url: string; domain: string;
+  title: string | null;
+  icon: string | null;              // small data: URI, never a remote address
+}
+
+type MediaItem = {
+  kind: MediaKind;
+  cursor: string;                   // opaque; hand back as `before`
+  author_id: string; created_at: number;
+  message_id: string | null; room_id: string | null;
+  attachment: Attachment | null;    // set iff kind is image|video|audio|file
+  link: LinkPreview | null;         // set iff kind is link
+  excerpt: string | null;           // the message's text, shortened
+  starred_at: number | null;
+}
+```
+
+`PUT`/`DELETE /media/:attachment_id/star` take an **attachment** id: a star is
+what keeps a file from being swept at 365 days, and a link or a pin has no
+object to keep. Anyone may star anything — the collection belongs to the server,
+not to a reader, so there is no per-person star. An id that is not a finished
+upload sitting on a message is `NOT_FOUND`.
+
+**Link cards**
+
+```
+POST /links/preview   { urls: string[] }   → LinkPreview[]
+```
+
+One card per URL asked about, in the order asked, at most 16 per call. The
+client asks about the links it is drawing; the server answers from its cache and
+fetches whatever is missing or stale (a week for a success, an hour for a
+failure).
+
+**The client never fetches a preview itself, and neither does the reader's
+browser.** If it did, every site anyone linked would collect the IP of everyone
+who scrolled past the message — a remote favicon `<img>` alone would do it. So
+the host's IP does the looking, once per URL for everybody, and `icon` comes
+back inline as a `data:` URI. Treat a card as text to draw, and never turn its
+`url` into a request the reader makes without them clicking it.
+
+A URL the server will not fetch — a private or loopback address, a port, a
+scheme other than `http(s)` — still answers with a card made of its domain.
+Refusing would only make a client ask again forever, and a link to `192.168.1.1`
+in a message is far more likely to be somebody's router than an attack. The
+fetch itself resolves the name, refuses the whole name if **any** address it
+answers with is private, pins the connection to the address it checked, follows
+at most three redirects with the same check on every hop, and caps both time and
+bytes (ARCHITECTURE §7).
 
 ---
 

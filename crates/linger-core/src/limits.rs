@@ -28,6 +28,32 @@ pub const MAX_STATUS_IMAGE_BYTES: u64 = 512 * 1024;
 /// Message body cap, chars after trim (PROTOCOL §4).
 pub const MAX_MESSAGE_CHARS: usize = 8_000;
 
+/// Link cards and the media grid (SPEC §4.4/§5.6, PROTOCOL §6).
+///
+/// A message with a dozen URLs in it is a link dump, and the stream renders one
+/// restrained line per link — so only the first few become cards, and the rest
+/// stay plain links in the text.
+pub const MAX_LINKS_PER_MESSAGE: usize = 4;
+/// How many URLs one `POST /links/preview` may ask about.
+pub const MAX_LINK_PREVIEW_BATCH: usize = 16;
+/// A card is one line. A title longer than this is cut, not wrapped.
+pub const MAX_LINK_TITLE_CHARS: usize = 140;
+/// The message text a media item carries, shortened.
+pub const MAX_MEDIA_EXCERPT_CHARS: usize = 140;
+/// How long a fetched preview stands before the server looks again.
+pub const LINK_PREVIEW_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// A refusal is remembered for less time, so a site that was briefly down gets
+/// another chance without every reader re-triggering the fetch meanwhile.
+pub const LINK_PREVIEW_RETRY_MS: i64 = 60 * 60 * 1000;
+/// Caps on what a preview fetch will pull down (the SSRF guard's other half).
+pub const MAX_LINK_PAGE_BYTES: u64 = 256 * 1024;
+pub const MAX_LINK_ICON_BYTES: u64 = 32 * 1024;
+pub const LINK_FETCH_TIMEOUT_MS: u64 = 5_000;
+/// Redirects are followed by hand so every hop is checked again.
+pub const MAX_LINK_REDIRECTS: usize = 3;
+/// Ceiling on `GET /media?limit=` (PROTOCOL §6).
+pub const MAX_MEDIA_PAGE: u32 = 100;
+
 /// Access tokens are short-lived JWTs; refresh tokens rotate (ARCHITECTURE §7).
 pub const ACCESS_TOKEN_TTL_SECS: u64 = 15 * 60;
 pub const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
@@ -54,6 +80,8 @@ pub const RATE_UPLOAD_SLOTS: (u32, u64) = (20, 3_600);
 pub const RATE_INVITE_CREATE: (u32, u64) = (10, 86_400);
 pub const RATE_KNOCK_PER_TARGET: (u32, u64) = (3, 3_600);
 pub const RATE_EXPORT: (u32, u64) = (1, 3_600);
+/// Link previews are cached server-side, so this only bounds the misses.
+pub const RATE_LINK_PREVIEW: (u32, u64) = (60, 60);
 pub const RATE_TYPING_PER_ROOM: (u32, u64) = (1, 4);
 /// Read-marker updates are debounced client-side to once per 5s per room.
 pub const READ_MARKER_DEBOUNCE_MS: u64 = 5_000;

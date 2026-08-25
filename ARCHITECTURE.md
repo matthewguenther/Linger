@@ -201,6 +201,29 @@ CREATE TABLE attachments (
 );
 CREATE INDEX idx_attachments_media ON attachments(created_at DESC) WHERE state='complete';
 
+-- One row per URL in a message body, re-extracted on every edit. This is what
+-- the media grid's `link` shelf pages over; the stream re-extracts client-side
+-- for the inline card. See SPEC §4.4 and §5.6.
+CREATE TABLE message_links (
+  message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  position        INTEGER NOT NULL,            -- 0-based, order of appearance
+  url             TEXT NOT NULL,
+  PRIMARY KEY (message_id, position)
+);
+CREATE INDEX idx_message_links_message ON message_links(message_id DESC);
+
+-- What the web said about a URL: a shared cache, not per-message state. The
+-- host's own IP does the fetching, behind the SSRF guard in `links.rs`, and the
+-- favicon is stored as a small data: URI so that reading a message never makes
+-- a request from the reader's machine.
+CREATE TABLE link_previews (
+  url             TEXT PRIMARY KEY,
+  state           TEXT NOT NULL,               -- ok | failed
+  title           TEXT,
+  icon            TEXT,                        -- small data: URI, or NULL
+  fetched_at      INTEGER NOT NULL
+);
+
 CREATE TABLE reactions (
   message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   user_id         BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -430,6 +453,24 @@ A host who wants the literal header on the S3 path adds a response-header rule a
 whatever CDN fronts the bucket (an R2 transform rule, a CloudFront response-headers
 policy). It is defence in depth on top of the three above, not the thing holding the
 door.
+
+**Link previews are a server-side request forgery machine** if written carelessly, and
+this server sits on a home LAN next to a router admin page. `links.rs` fetches them, and
+the rules are: `http(s)` on default ports only; the hostname is resolved by the server and
+the whole name refused if **any** address it answers with is private, loopback,
+link-local (which is where cloud metadata services live), CGNAT or reserved; the
+connection is then pinned to the address that was checked, so the name cannot resolve to
+something else in between; redirects are followed by hand, three at most, every hop
+re-checked; time and bytes are both capped and the body is read in chunks. Nothing the
+response says is trusted either — the HTML is scanned for a title and an icon href by a
+small tag reader and never rendered, and an icon is kept only if its *bytes* sniff as a
+raster image. SVG is refused wherever it appears, exactly as it is on the upload
+allowlist.
+
+The fetch is host-side for a privacy reason before a caching one: if each client fetched
+its own preview, every site anybody linked would collect the IP of every person who
+scrolled past the message, and a remote favicon would do it without a click. The host's
+IP does it once for everybody, and the icon reaches the client as a small `data:` URI.
 
 ---
 

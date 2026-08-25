@@ -111,6 +111,12 @@ async fn create(
     .execute(&state.db.write)
     .await?;
 
+    // What the message links to, recorded as it is posted so the media grid's
+    // link shelf is a table read rather than a scan of every body ever written
+    // (SPEC §4.4). The cards themselves are filled in later, on demand, by
+    // `POST /links/preview` — nothing here touches the network.
+    repo::links::replace_for_message(&state.db.write, id, &crate::links::extract(&body)).await?;
+
     // Attaching is the last step of the upload pipeline (ARCHITECTURE §8): the
     // file has been stored and checked for a while by now, and this is the
     // moment it becomes part of the conversation.
@@ -194,6 +200,10 @@ async fn edit(
         .bind(id.to_vec())
         .execute(&state.db.write)
         .await?;
+
+    // An edit that takes a link out takes its card out of the collection too.
+    // The archive follows what the message says now, not what it once said.
+    repo::links::replace_for_message(&state.db.write, id, &crate::links::extract(&body)).await?;
 
     let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     state

@@ -440,14 +440,78 @@ pub struct CompleteUploadRequest {
     pub parts: Option<Vec<CompletedPart>>,
 }
 
-/// What the media grid renders: an attachment plus the moment it came from,
-/// so every item links back to its message (SPEC §4.4).
+/// Which shelf of the media collection an item sits on (SPEC §4.4).
+///
+/// The first four come from an upload's stored type (`media::kind_of`). The
+/// last two are properties of a message rather than of a file: a `link` is a
+/// URL somebody typed, a `pin` is a message the room decided to keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum MediaKind {
+    Image,
+    Video,
+    Audio,
+    File,
+    Link,
+    Pin,
+}
+
+/// The one line a link renders as (SPEC §5.6): favicon, title, domain. Not a
+/// billboard, and never a remote fetch from the reader's machine — the server
+/// fetches this once, for everybody, and `icon` arrives as a `data:` URI so
+/// looking at a message cannot tell a website who read it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LinkPreview {
+    pub url: String,
+    /// Host, minus a leading `www.` — the third of the three things shown.
+    pub domain: String,
+    /// `None` when the fetch was refused, failed, or found no title. The card
+    /// still draws: a domain on its own is an honest link card.
+    pub title: Option<String>,
+    /// A small `data:` URI, or `None`. Never a remote URL.
+    pub icon: Option<String>,
+}
+
+/// What the media grid renders: one thing somebody shared, plus the moment it
+/// came from, so every item links back to its message (SPEC §4.4).
+///
+/// Exactly one of `attachment` and `link` is set, decided by `kind`: a `pin`
+/// carries neither and leans on `excerpt`. The flat shape is deliberate — the
+/// grid sorts and filters over the fields every item has, and only reaches for
+/// the payload once it knows which cell it is drawing.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct MediaItem {
-    pub attachment: Attachment,
+    pub kind: MediaKind,
+    /// Paging cursor and React key: the attachment id for a file, the message
+    /// id for a link or a pin. Opaque — hand it back as `before`.
+    pub cursor: String,
+    /// Who shared it. The uploader for a file, the message's author otherwise.
+    pub author_id: UserId,
+    #[ts(type = "number")]
+    pub created_at: i64,
     pub message_id: Option<MessageId>,
     pub room_id: Option<RoomId>,
+    /// Set iff `kind` is image | video | audio | file.
+    pub attachment: Option<Attachment>,
+    /// Set iff `kind` is link.
+    pub link: Option<LinkPreview>,
+    /// The message's text, shortened. Present for pins and links, and for a
+    /// file posted with a caption.
+    pub excerpt: Option<String>,
+    /// Starred items sort first and never expire (SPEC §4.4). Only an
+    /// attachment can be starred — a link or a pin has no object to keep.
+    #[ts(type = "number | null")]
+    pub starred_at: Option<i64>,
+}
+
+/// `POST /links/preview` body: the URLs a client is about to draw cards for.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LinkPreviewRequest {
+    pub urls: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

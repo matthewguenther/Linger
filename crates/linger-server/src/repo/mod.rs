@@ -2,6 +2,8 @@
 //! ever happens (ARCHITECTURE §2 says ~never), this module is the seam.
 
 pub mod attachments;
+pub mod links;
+pub mod media;
 pub mod messages;
 pub mod rooms;
 pub mod users;
