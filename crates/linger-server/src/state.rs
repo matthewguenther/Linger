@@ -9,7 +9,7 @@ use crate::db::Db;
 use crate::gateway::Gateway;
 use crate::ratelimit::RateLimiter;
 use crate::setup::SetupState;
-use crate::storage::{LocalStore, ObjectStore};
+use crate::storage::{LocalStore, ObjectStore, S3Store};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -37,13 +37,16 @@ impl AppState {
             .fetch_one(&db.read)
             .await?;
         let config = Arc::new(config);
-        if config.storage == Storage::S3 {
-            anyhow::bail!(
-                "LINGER_STORAGE=s3 isn't wired up yet — set it to 'local', which keeps \
-                 uploads in the data directory next to linger.db."
-            );
-        }
-        let local = Arc::new(LocalStore::open(config.clone())?);
+        // Only the local backend has a listener on this server, so only the
+        // local backend is kept as a concrete handle as well as a trait object.
+        let (storage, local): (Arc<dyn ObjectStore>, Option<Arc<LocalStore>>) = match config.storage
+        {
+            Storage::Local => {
+                let local = Arc::new(LocalStore::open(config.clone())?);
+                (local.clone(), Some(local))
+            }
+            Storage::S3 => (Arc::new(S3Store::open(&config)?), None),
+        };
         Ok(Self {
             db,
             config,
@@ -51,8 +54,8 @@ impl AppState {
             limiter: Arc::new(RateLimiter::new()),
             gateway: Arc::new(Gateway::new()),
             setup: Arc::new(SetupState::new(user_count == 0)),
-            storage: local.clone(),
-            local: Some(local),
+            storage,
+            local,
         })
     }
 }

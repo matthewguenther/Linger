@@ -33,7 +33,7 @@ use ring::hmac;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use super::{ObjectBody, ObjectStore, Staged};
+use super::{ObjectBody, ObjectStore, ServeAs, Staged};
 use crate::config::Config;
 use crate::db::now_ms;
 
@@ -303,7 +303,9 @@ impl ObjectStore for LocalStore {
         Ok(())
     }
 
-    async fn read_object(&self, key: &str) -> anyhow::Result<Option<ObjectBody>> {
+    /// `serve` is ignored: this backend answers with the bytes, so the route
+    /// that worked those headers out is the thing that sends them.
+    async fn read_object(&self, key: &str, _serve: &ServeAs) -> anyhow::Result<Option<ObjectBody>> {
         let Some(path) = self.object_path(key) else {
             return Ok(None);
         };
@@ -337,6 +339,7 @@ mod tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             domain: None,
             storage: Storage::Local,
+            s3: None,
         }))
         .unwrap()
     }

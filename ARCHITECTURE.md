@@ -422,6 +422,20 @@ four jobs: hand out a slot, gather an upload's parts into one local file the ser
 inspect, store/read/delete a finished object, and throw away the parts of an upload that
 died. Everything that decides *whether* bytes are acceptable is in `media`, not storage.
 
+**The S3 backend does not use S3's own multipart upload.** Each part is presigned to its
+own key, `uploads/{upload_id}/{part}`, and `assemble` streams those down into one local
+file. S3 multipart would assemble the object inside the bucket, and the server's next
+move is to download it anyway — sniffing the real type and re-encoding an image both need
+the bytes on local disk — so the file would cross the wire three times. It would also
+introduce an upload id of S3's own, handed out by a network call, which is exactly the
+per-upload state this design does not want to store. The finished object goes up as one
+PUT; files are capped at 500 MB, well under S3's 5 GB single-PUT limit.
+
+Serving from S3 is a redirect to a presigned GET, so bytes never cross the app process on
+the way out either. The `Content-Type` and `Content-Disposition` that force a download for
+anything off the inline allowlist are signed into that URL as `response-*` overrides,
+because the app server is not the thing sending the response any more.
+
 For cloud hosting, recommend **Cloudflare R2**: zero egress fees, which matters
 enormously for a file-sharing app. Backblaze B2 is the runner-up. Plain AWS S3 will bite
 you on egress.

@@ -3,7 +3,7 @@
 #![allow(dead_code)] // each test binary uses a different subset of helpers
 
 use linger_core::wire::{AuthResponse, Invite};
-use linger_server::config::{Config, Storage};
+use linger_server::config::{Config, S3Config, Storage};
 use linger_server::{db, AppState};
 
 pub struct TestServer {
@@ -25,7 +25,7 @@ impl TestServer {
     }
 }
 
-/// Boot a fully wired server on an ephemeral port.
+/// Boot a fully wired server on an ephemeral port, storing uploads on disk.
 pub async fn spawn_server() -> TestServer {
     let dir = tempfile::tempdir().expect("tempdir");
     let config = Config {
@@ -33,7 +33,81 @@ pub async fn spawn_server() -> TestServer {
         bind: "127.0.0.1:0".parse().unwrap(),
         domain: None,
         storage: Storage::Local,
+        s3: None,
     };
+    spawn_with(dir, config).await
+}
+
+/// The same server with `LINGER_STORAGE=s3`, or `None` when there is no bucket
+/// to talk to.
+///
+/// The S3 tests need a real S3 API on the other end — CI runs MinIO in a
+/// container, and `scripts/minio-test.sh` starts one locally. Without
+/// `LINGER_TEST_S3_ENDPOINT` set they skip rather than fail, so an ordinary
+/// `cargo test --workspace` on a laptop stays green. The variables are
+/// deliberately not the `LINGER_S3_*` ones a real server reads: a test must
+/// never be able to write into somebody's actual bucket by inheriting its
+/// environment.
+pub async fn spawn_s3_server() -> Option<TestServer> {
+    let endpoint = std::env::var("LINGER_TEST_S3_ENDPOINT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    let s3 = S3Config {
+        bucket: std::env::var("LINGER_TEST_S3_BUCKET")
+            .unwrap_or_else(|_| "linger-test".to_string()),
+        region: std::env::var("LINGER_TEST_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+        endpoint,
+        path_style: true,
+        access_key_id: std::env::var("LINGER_TEST_S3_ACCESS_KEY_ID")
+            .expect("LINGER_TEST_S3_ACCESS_KEY_ID"),
+        secret_access_key: std::env::var("LINGER_TEST_S3_SECRET_ACCESS_KEY")
+            .expect("LINGER_TEST_S3_SECRET_ACCESS_KEY"),
+    };
+    ensure_bucket(&s3).await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = Config {
+        data_dir: dir.path().to_path_buf(),
+        bind: "127.0.0.1:0".parse().unwrap(),
+        domain: None,
+        storage: Storage::S3,
+        s3: Some(s3),
+    };
+    Some(spawn_with(dir, config).await)
+}
+
+/// Create the test bucket if this is the first run against a fresh MinIO.
+///
+/// Every test shares it: object keys are UUIDv7s and part keys hang off the
+/// upload id, so two tests running at once cannot collide.
+async fn ensure_bucket(s3: &S3Config) {
+    use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
+
+    let bucket = Bucket::new(
+        s3.endpoint.parse().expect("endpoint is a URL"),
+        UrlStyle::Path,
+        s3.bucket.clone(),
+        s3.region.clone(),
+    )
+    .expect("bucket");
+    let credentials = Credentials::new(s3.access_key_id.clone(), s3.secret_access_key.clone());
+    let url = bucket
+        .create_bucket(&credentials)
+        .sign(std::time::Duration::from_secs(60));
+    let resp = reqwest::Client::new()
+        .put(url)
+        .send()
+        .await
+        .expect("create bucket");
+    // 409 is "it already exists", which is the ordinary case.
+    assert!(
+        resp.status().is_success() || resp.status() == 409,
+        "could not create the test bucket: {}",
+        resp.text().await.unwrap_or_default()
+    );
+}
+
+async fn spawn_with(dir: tempfile::TempDir, config: Config) -> TestServer {
     let database = db::init(&config.db_path()).await.expect("db init");
     let state = AppState::build(database, config).await.expect("state");
     let app = linger_server::app(state.clone());

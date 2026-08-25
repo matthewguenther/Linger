@@ -142,6 +142,7 @@ cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cd client && pnpm check         # typecheck frontend
 cd client && pnpm tauri dev     # needs the GUI system deps listed in the README
 cd client/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+scripts/minio-test.sh           # the S3 backend, against a throwaway MinIO
 ```
 
 Things that trip people up, whatever machine or agent you're on:
@@ -156,6 +157,10 @@ Things that trip people up, whatever machine or agent you're on:
   `scripts/check.sh` runs it when the GUI deps are installed.
 - **If your toolchain has no `rustfmt` or `clippy`**, install a rustup toolchain
   into a scratch directory rather than system-wide, and let CI be the authority.
+- **`crates/linger-server/tests/s3.rs` skips itself** unless
+  `LINGER_TEST_S3_ENDPOINT` points at an S3 API, so `cargo test --workspace`
+  proves nothing about the S3 backend. `scripts/minio-test.sh` starts a
+  throwaway MinIO and runs it for real; CI has its own job that does the same.
 
 TypeScript bindings are generated into `client/src/generated/` by `cargo test -p
 linger-core` (`TS_RS_EXPORT_DIR` is set in `.cargo/config.toml`) and are

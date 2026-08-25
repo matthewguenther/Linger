@@ -29,6 +29,43 @@ jobs:
         # changed a wire type without committing the regenerated bindings.
         run: git diff --exit-code client/src/generated
 
+  s3:
+    # The S3 storage backend, against a real S3 API. These tests skip themselves
+    # when LINGER_TEST_S3_ENDPOINT is unset, which is what keeps the `rust` job
+    # and every laptop green without a bucket — so they need a job that sets it,
+    # or they would never actually run anywhere.
+    runs-on: ubuntu-latest
+    env:
+      LINGER_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+      LINGER_TEST_S3_BUCKET: linger-test
+      LINGER_TEST_S3_REGION: us-east-1
+      LINGER_TEST_S3_ACCESS_KEY_ID: lingertest
+      LINGER_TEST_S3_SECRET_ACCESS_KEY: lingertestsecret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: minio
+        # `docker run` and not a `services:` block: a service container cannot
+        # pass a command, and the MinIO image needs `server /data` to start at
+        # all. The tag is pinned — an object store that changes under the tests
+        # is a flaky suite nobody can debug.
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=$LINGER_TEST_S3_ACCESS_KEY_ID \
+            -e MINIO_ROOT_PASSWORD=$LINGER_TEST_S3_SECRET_ACCESS_KEY \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for _ in $(seq 1 60); do
+            curl -fsS -o /dev/null "$LINGER_TEST_S3_ENDPOINT/minio/health/live" && exit 0
+            sleep 1
+          done
+          echo "minio never came up" >&2
+          docker logs minio >&2
+          exit 1
+      - name: s3 backend tests
+        # The bucket is created by the test harness on first use.
+        run: cargo test -p linger-server --test s3 -- --nocapture
+
   web:
     runs-on: ubuntu-latest
     defaults:

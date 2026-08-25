@@ -16,6 +16,12 @@
 //! download, with sniffing turned off, so it cannot become a page. T-503
 //! finishes the job by moving these responses to their own origin, where they
 //! are not same-site with anybody's session.
+//!
+//! On the S3 backend this route answers with a redirect and the *bucket* sends
+//! the response, so those headers are signed into the presigned URL instead
+//! ([`crate::storage::ServeAs`]). S3 has no `response-` override for
+//! `X-Content-Type-Options`, so `nosniff` is the one header that does not make
+//! the trip — T-503's media origin is where it comes back.
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -31,7 +37,7 @@ use sqlx::Row;
 use crate::error::ApiError;
 use crate::state::AppState;
 use crate::storage::local::PartError;
-use crate::storage::{part_plan, ObjectBody};
+use crate::storage::{part_plan, ObjectBody, ServeAs};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -128,9 +134,27 @@ async fn get_object(
         (filename, row.get::<String, _>("mime"))
     };
 
+    let inline = media::is_inline_mime(&mime);
+    let served_type = if inline {
+        mime.clone()
+    } else {
+        // Refuse to repeat the uploader's claim about what this is. A browser
+        // that is told nothing useful, and told not to guess, cannot be talked
+        // into running it.
+        "application/octet-stream".to_string()
+    };
+    let disposition = content_disposition(inline, &filename);
+
+    // Worked out here and handed down because a store that answers with a
+    // redirect has no response of its own to put them on: S3 signs these two
+    // into the URL, and the bucket sends them back.
+    let serve = ServeAs {
+        content_type: served_type.clone(),
+        disposition: disposition.clone(),
+    };
     let Some(object) = state
         .storage
-        .read_object(&key)
+        .read_object(&key, &serve)
         .await
         .map_err(ApiError::from)?
     else {
@@ -153,24 +177,11 @@ async fn get_object(
         }
     };
 
-    let inline = media::is_inline_mime(&mime);
     let mut headers = HeaderMap::new();
-    let served_type = if inline {
-        mime.as_str()
-    } else {
-        // Refuse to repeat the uploader's claim about what this is. A browser
-        // that is told nothing useful, and told not to guess, cannot be talked
-        // into running it.
-        "application/octet-stream"
-    };
-    insert(&mut headers, header::CONTENT_TYPE, served_type);
+    insert(&mut headers, header::CONTENT_TYPE, &served_type);
     insert(&mut headers, header::CONTENT_LENGTH, &length.to_string());
     insert(&mut headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-    insert(
-        &mut headers,
-        header::CONTENT_DISPOSITION,
-        &content_disposition(inline, &filename),
-    );
+    insert(&mut headers, header::CONTENT_DISPOSITION, &disposition);
     // Objects are immutable: the key contains the id, and re-encoding happens
     // once, before the key is ever handed out.
     insert(
