@@ -27,7 +27,12 @@ image = { version = "0.25", default-features = false, features = ["gif", "jpeg",
 infer = "0.22"
 jsonwebtoken = { workspace = true }
 rand = { workspace = true }
+# The S3 backend talks to the bucket over HTTP; `rusty-s3` only signs the URLs.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 ring = { workspace = true }
+# S3 request signing, sans-IO: it builds and signs URLs and parses replies, and
+# never touches a socket. Far less to carry than the full AWS SDK.
+rusty-s3 = { version = "0.10", default-features = false, features = ["full", "rustcrypto"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -42,5 +47,4 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 tokio-tungstenite = "0.29"

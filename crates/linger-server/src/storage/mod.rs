@@ -5,13 +5,13 @@
 //! this module exists to keep, and it is why the local backend runs its own
 //! listener path outside `/api/v1` instead of accepting a body on an API route.
 //!
-//! One trait, because there will be two backends: `local` (here, and the
-//! default — correct for a home server) and `s3` (T-502). The seam is drawn so
-//! the S3 adapter changes only *how* the four operations happen:
+//! One trait, two backends: `local` (the default — correct for a home server)
+//! and `s3` (any S3-compatible endpoint). The seam is drawn so a backend
+//! changes only *how* the four operations happen:
 //!
 //! - hand out a slot: local signs its own URLs, S3 presigns
-//! - assemble the parts into one file the server can look at: local concatenates
-//!   them, S3 completes the multipart upload and downloads the result
+//! - assemble the parts into one file the server can look at: local
+//!   concatenates them off its own disk, S3 downloads them into scratch space
 //! - store, read and delete a finished object
 //! - throw away the parts of an upload that was cancelled or failed
 //!
@@ -19,6 +19,7 @@
 //! [`crate::media`], not here. This layer moves bytes; it does not judge them.
 
 pub mod local;
+pub mod s3;
 
 use std::path::PathBuf;
 
@@ -27,6 +28,7 @@ use linger_core::wire::{CompletedPart, UploadSlot};
 use linger_core::{AttachmentId, UploadId};
 
 pub use local::LocalStore;
+pub use s3::S3Store;
 
 /// An upload's parts, gathered into one local file so the server can verify the
 /// size, sniff the real type and re-encode it. For S3 this is a temp download;
@@ -39,13 +41,26 @@ pub struct Staged {
 
 /// How to read one stored object back out.
 ///
-/// Local streams the file off disk. S3 will hand back a presigned URL to
-/// redirect to, so that backend also never touches the bytes on the way out.
+/// Local streams the file off disk. S3 hands back a presigned URL to redirect
+/// to, so that backend never touches the bytes on the way out either.
 pub enum ObjectBody {
     /// A file on this machine, and its length.
     File(PathBuf, u64),
     /// Somewhere else; send the client there.
     Redirect(String),
+}
+
+/// The two headers that decide whether a hostile upload can do anything
+/// (ARCHITECTURE §7): what this file will be called, and whether a browser is
+/// allowed to display it rather than download it.
+///
+/// The route works these out — it is the half that knows the filename and the
+/// allowlist — and the store is told, because a backend that answers with a
+/// redirect cannot set a header on a response it never sends. S3 signs them
+/// into the URL instead; local ignores them and the route sets them itself.
+pub struct ServeAs {
+    pub content_type: String,
+    pub disposition: String,
 }
 
 #[async_trait]
@@ -78,7 +93,7 @@ pub trait ObjectStore: Send + Sync {
     /// Store a small object the server produced itself (a video poster frame).
     async fn put_bytes(&self, key: &str, bytes: &[u8]) -> anyhow::Result<()>;
 
-    async fn read_object(&self, key: &str) -> anyhow::Result<Option<ObjectBody>>;
+    async fn read_object(&self, key: &str, serve: &ServeAs) -> anyhow::Result<Option<ObjectBody>>;
 
     async fn delete_object(&self, key: &str) -> anyhow::Result<()>;
 

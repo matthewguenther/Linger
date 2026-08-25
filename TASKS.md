@@ -194,12 +194,67 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
   - `LINGER_STORAGE=s3` now refuses to start rather than booting a server whose
     uploads cannot work. T-502 removes that.
 
-- ⬜ **T-502 · S3 storage adapter** — effort: **medium** — same trait, presigned
-  URLs; test against MinIO in CI (service container).
+- ✅ **T-502 · S3 storage adapter** — effort: **medium** — landed 2026-08-25
+  Same `ObjectStore` trait, presigned URLs, `LINGER_STORAGE=s3` now boots.
+  `crates/linger-server/tests/s3.rs` (7 tests) drives the public endpoints
+  against a real MinIO; CI has an `s3` job that starts one, and
+  `scripts/minio-test.sh` does the same locally.
+
+  **Decisions and surprises, for whoever picks up T-503…T-506:**
+
+  - **No S3 multipart upload, on purpose.** Each part is a presigned PUT to its
+    own key, `uploads/{upload_id}/{part:05}`, and `assemble` streams them down
+    into `data/staging/`. S3's own multipart would assemble the object inside
+    the bucket, and the next thing the server does is download it anyway —
+    sniffing and EXIF-stripping need the bytes locally — so the file would
+    cross the wire three times. It would also hand out an upload id of S3's
+    own, which would have to be stored: exactly the per-upload row T-501 got
+    rid of. ARCHITECTURE §8 is updated to say this.
+  - **A server on S3 still needs a data directory.** `linger.db` and the JWT
+    key live there, and every upload passes through `data/staging/` on its way
+    to the bucket. It is deleted immediately afterwards, whether the upload
+    succeeded or was thrown away, but the disk has to be able to hold one file.
+  - **`read_object` now takes a `ServeAs`.** The download-forcing headers
+    (ARCHITECTURE §7) used to be set by the route, which works while the route
+    is the thing sending bytes. With S3 it is a redirect, so the route works
+    the two headers out and the store signs them into the presigned URL as
+    `response-content-type` / `response-content-disposition`. The local backend
+    ignores the argument. **`X-Content-Type-Options: nosniff` cannot be signed
+    into an S3 URL** — S3 has no `response-` override for it — so on S3 that one
+    header is missing until **T-503** puts these responses behind the CDN host,
+    where the proxy can add it. Worth knowing before T-503 is called done.
+  - **Serving is still `GET /objects/{key}` and then a 307.** The redirect keeps
+    one URL shape in `Attachment.url` for both backends and keeps the row lookup
+    that knows the filename and mime. It costs a round trip per image; if that
+    ever matters, the fix is a public bucket domain, not a change to the client.
+  - **`rusty-s3` + `reqwest`, not the AWS SDK.** `rusty-s3` only builds and signs
+    URLs — no sockets, no runtime of its own — which is a much smaller thing to
+    carry into a binary that already has an HTTP stack. Presigned URLs are the
+    whole S3 API surface this needs.
+  - **`reqwest` is a real dependency now**, not just a dev one, with
+    `rustls-tls`. Integration tests can still use it: cargo gives test targets
+    the regular dependencies as well as the dev ones.
+  - **MinIO in CI is `docker run`, not a `services:` block.** A service container
+    cannot pass a command, and the MinIO image needs `server /data` to start.
+    The image tag is pinned.
+  - **The S3 tests skip when `LINGER_TEST_S3_ENDPOINT` is unset**, printing a
+    line saying so. That is what keeps `cargo test --workspace` green on a
+    laptop — and it means a green workspace run proves nothing about this
+    backend. Run `scripts/minio-test.sh` before claiming it works.
+  - The test variables are `LINGER_TEST_S3_*`, deliberately not `LINGER_S3_*`.
+    A test must not be able to write into a real bucket by inheriting the
+    environment of the machine it runs on.
+  - Still a human check, as with T-501: **a real 400 MB video into a real
+    bucket over a real network.** The tests move 16 MB over three parts.
 - ⬜ **T-503 · Separate media origin** — effort: **medium**
   ARCHITECTURE §7: serve objects on the cdn host; `Content-Disposition:
   attachment` + `nosniff` off-allowlist; activate the Caddyfile block; strict CSP
   on the app origin.
+  **Carries a known gap from T-502:** on `LINGER_STORAGE=s3` the response comes
+  from the bucket, and S3 has no `response-` override for
+  `X-Content-Type-Options`, so `nosniff` is currently absent on that backend.
+  The content type and disposition are signed into the presigned URL and do
+  arrive. Closing that gap is part of this task, not an extra.
 - ⬜ **T-504 · The media UI + link cards** — effort: **medium**
   SPEC §4.4: grid, filter by person/type/date, stars (starred never expire),
   each item links to its message/moment. Restrained link embeds (favicon, title,

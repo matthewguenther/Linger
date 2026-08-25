@@ -6,7 +6,8 @@
 #   3. docker compose up -d
 #   4. docker compose logs linger   ← prints the one-time host-setup URL
 #
-# Backup = ./data/linger.db + ./data/objects/. That's the whole server.
+# Backup = ./data/linger.db + ./data/objects/. That's the whole server. (With
+# LINGER_STORAGE=s3, the bucket replaces ./data/objects/.)
 
 services:
   linger:
@@ -18,6 +19,15 @@ services:
       LINGER_DOMAIN: linger.example.com
       LINGER_DATA_DIR: /data
       LINGER_STORAGE: local
+      # Files in an S3 bucket instead of ./data/objects — Cloudflare R2 is the
+      # one to pick, because it charges nothing for bytes going out. Set
+      # LINGER_STORAGE to s3 and fill these in; the server refuses to start if
+      # any of them are missing.
+      # LINGER_S3_BUCKET: linger
+      # LINGER_S3_ENDPOINT: https://ACCOUNT.r2.cloudflarestorage.com
+      # LINGER_S3_REGION: auto
+      # LINGER_S3_ACCESS_KEY_ID: ...
+      # LINGER_S3_SECRET_ACCESS_KEY: ...
 
   caddy:
     image: caddy:2

@@ -202,8 +202,33 @@ office formats, plain text. Not SVG, not HTML, not programs. Those are scripts w
 file extension, and the safe way to handle them is not to store them. A file the server
 does not recognise is kept as a plain download rather than being shown in place.
 
+**Where files live.** By default, in the data directory next to the database — right for
+a home server, and the reason backup is two paths. A server that would rather keep files
+in an S3 bucket sets `LINGER_STORAGE=s3` and five more variables:
+
+```yaml
+LINGER_STORAGE: s3
+LINGER_S3_BUCKET: linger
+LINGER_S3_ENDPOINT: https://ACCOUNT.r2.cloudflarestorage.com
+LINGER_S3_REGION: auto          # "auto" for R2; a real region on AWS
+LINGER_S3_ACCESS_KEY_ID: ...
+LINGER_S3_SECRET_ACCESS_KEY: ...
+```
+
+Any S3-compatible store works. **Cloudflare R2 is the one to pick** — it charges nothing
+for bytes going out, which for a place people share videos is most of the bill. Backblaze
+B2 is the runner-up. Plain AWS S3 will bill you for every view of every photo.
+
+The server never sits in the middle of the bytes: uploads go straight from the app to the
+bucket, and downloads are a redirect to the bucket. It does pull each upload down once,
+briefly, to check what it really is and strip EXIF, and deletes that copy afterwards — so
+a server on S3 still needs a data directory, just not much room in it. If the endpoint or
+the keys are missing, the server says so and stops rather than starting up unable to
+accept a single file.
+
 **Backup** is the whole point of self-hosting your friendships — it's two paths:
-`data/linger.db` and `data/objects/`. A cron one-liner:
+`data/linger.db` and `data/objects/`. (On a server using S3, `data/objects/` is empty
+and the bucket is the other half.) A cron one-liner:
 
 ```bash
 sqlite3 data/linger.db ".backup data/backups/linger-$(date +%F).db"
@@ -250,7 +275,8 @@ registry/apps.json        bundled app registry for activity detection
 deploy/                   Dockerfile, compose, Caddyfile
 docs/                     screenshots; docs/tasks/ archives closed milestones,
                           docs/decisions.md records settled questions
-scripts/                  check.sh (the whole local gate), lint-rules.sh
+scripts/                  check.sh (the whole local gate), lint-rules.sh,
+                          minio-test.sh (the S3 backend, against a real MinIO)
 ```
 
 Read first, in order: [SPEC.md](SPEC.md) → [ARCHITECTURE.md](ARCHITECTURE.md) →
@@ -284,6 +310,10 @@ cd client && pnpm check && pnpm test && pnpm exec vite build
 
 # the desktop shell — outside the workspace, so it needs its own pass
 cd client/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+
+# the S3 storage backend, which needs a bucket to talk to; skipped by the line
+# above. Starts a throwaway MinIO, runs the tests, stops it again.
+scripts/minio-test.sh
 ```
 
 Things that surprise people the first time:
