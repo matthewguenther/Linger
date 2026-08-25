@@ -246,7 +246,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     environment of the machine it runs on.
   - Still a human check, as with T-501: **a real 400 MB video into a real
     bucket over a real network.** The tests move 16 MB over three parts.
-- ⬜ **T-503 · Separate media origin** — effort: **medium**
+- ⏳ **T-503 · Separate media origin** — effort: **medium** — Matt, 2026-08-25
   ARCHITECTURE §7: serve objects on the cdn host; `Content-Disposition:
   attachment` + `nosniff` off-allowlist; activate the Caddyfile block; strict CSP
   on the app origin.
