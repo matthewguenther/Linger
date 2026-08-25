@@ -14,6 +14,13 @@
  * history — because history arrives two ways, as pages over REST and as frames
  * over the socket, and the two have to be stitched together in one place.
  *
+ * **One snapshot per server, keyed by base URL (T-412).** The client can be
+ * signed into several servers at once, and each one has its own rooms, its own
+ * people and its own read markers. Nothing is shared between them: a room id
+ * only means anything next to the server it came from. The core tags every
+ * event it sends up with the server it belongs to, and every function here
+ * either takes that server's `AuthedApi` or the base URL itself.
+ *
  * Running `pnpm dev` in a plain browser, with no Tauri underneath, leaves the
  * status on `offline` — the same honest degrading as session storage.
  */
@@ -147,12 +154,34 @@ const EMPTY: GatewayState = {
   offlineAt: {},
 };
 
-let state: GatewayState = EMPTY;
+/**
+ * Every server's snapshot, keyed by base URL. Replaced rather than mutated, so
+ * `useSyncExternalStore` sees a new object exactly when something changed.
+ */
+let states: Record<string, GatewayState> = {};
 const listeners = new Set<() => void>();
 
-function publish(next: GatewayState): void {
-  state = next;
+function announce(): void {
   for (const notify of listeners) notify();
+}
+
+/** One server's snapshot. A server we have never connected to reads as empty,
+ *  which is what lets a component render before its connection is up. */
+function stateOf(server: string): GatewayState {
+  return states[server] ?? EMPTY;
+}
+
+function publish(server: string, next: GatewayState): void {
+  states = { ...states, [server]: next };
+  announce();
+}
+
+function forget(server: string): void {
+  if (!(server in states)) return;
+  const next = { ...states };
+  delete next[server];
+  states = next;
+  announce();
 }
 
 function subscribe(notify: () => void): () => void {
@@ -162,9 +191,34 @@ function subscribe(notify: () => void): () => void {
   };
 }
 
-/** Subscribe a component to the gateway. */
-export function useGateway(): GatewayState {
-  return useSyncExternalStore(subscribe, () => state);
+/** Subscribe a component to one server's gateway. */
+export function useGateway(server: string): GatewayState {
+  return useSyncExternalStore(subscribe, () => stateOf(server));
+}
+
+/** One server's snapshot, outside React. The hook above is the door for
+ *  components; this is the same read for anything that is not one. */
+export function serverState(server: string): GatewayState {
+  return stateOf(server);
+}
+
+/** Subscribe to every server at once. The rail is the only caller: it draws a
+ *  dot per server and needs all of them, not one. */
+export function useServers(): Record<string, GatewayState> {
+  return useSyncExternalStore(subscribe, () => states);
+}
+
+/**
+ * True when this server is holding something you have not read, in any room.
+ *
+ * Still a boolean, still not a count (SPEC §4.2, AGENTS rule 3). It is the
+ * server-rail half of the same signal the room list already draws: a server you
+ * are not looking at gets a mark, never a number.
+ */
+export function anyNewActivity(current: GatewayState): boolean {
+  return current.rooms.some(
+    (room) => room.archived_at === null && hasNewActivity(current, room.id),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -466,26 +520,54 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
 // Talking to the Tauri core
 // ---------------------------------------------------------------------------
 
-/** The signed-in connection this store is currently following. */
-let connected: AuthedApi | null = null;
-let unlisteners: UnlistenFn[] = [];
 /**
- * The token we last handed down. Cleared once the handshake works, so a second
- * request for a token means the last one was refused rather than expired — the
- * case where only forcing a refresh gets us back on.
+ * The per-server bookkeeping that is not part of any snapshot: which sign-in we
+ * are following, the token we last handed down, and the small timers the read
+ * marker and the typing throttle keep. All of it dies with the connection.
  */
-let givenToken: string | null = null;
-let supplying: Promise<void> | null = null;
+interface Link {
+  api: AuthedApi;
+  /**
+   * The token we last handed down. Cleared once the handshake works, so a
+   * second request for a token means the last one was refused rather than
+   * expired — the case where only forcing a refresh gets us back on.
+   */
+  givenToken: string | null;
+  supplying: Promise<void> | null;
+  /** Room id → when we last wrote its read marker. */
+  readSentAt: Record<string, number>;
+  /** Room id → a pending read-marker write. */
+  readTimers: Record<string, number>;
+  /** Room id → when we last said we were typing in it. */
+  typingSentAt: Record<string, number>;
+}
 
-async function supplyToken(): Promise<void> {
-  if (supplying) return supplying;
-  const api = connected;
-  if (!api) return;
-  supplying = (async () => {
+/** The connections this store is following, keyed by base URL. */
+const links = new Map<string, Link>();
+
+/**
+ * The link for this exact sign-in, or null if it has been replaced.
+ *
+ * Every async path checks this before publishing. Comparing the `AuthedApi`
+ * itself rather than the URL is what makes signing out and back into the same
+ * server discard the first session's late answers.
+ */
+function linkFor(api: AuthedApi): Link | null {
+  const link = links.get(api.baseUrl);
+  return link !== undefined && link.api === api ? link : null;
+}
+
+async function supplyToken(server: string): Promise<void> {
+  const link = links.get(server);
+  if (!link) return;
+  if (link.supplying) return link.supplying;
+  const { api } = link;
+  link.supplying = (async () => {
     try {
-      const fresh = await api.accessToken(givenToken !== null);
-      givenToken = fresh.token;
+      const fresh = await api.accessToken(link.givenToken !== null);
+      link.givenToken = fresh.token;
       await invoke("gateway_token", {
+        baseUrl: server,
         token: fresh.token,
         expiresAtMs: fresh.expiresAt,
       });
@@ -493,73 +575,136 @@ async function supplyToken(): Promise<void> {
       // A refused refresh already ends the session through `AuthedApi`; a
       // network failure is temporary and the core will ask again.
     } finally {
-      supplying = null;
+      link.supplying = null;
     }
   })();
-  return supplying;
+  return link.supplying;
 }
 
-/** Open the connection and start following it. Replaces any previous one. */
-export async function connect(api: AuthedApi): Promise<void> {
-  await disconnect();
-  connected = api;
+/**
+ * Connects and disconnects for one server, one at a time.
+ *
+ * This queue is load-bearing, not tidiness. Both calls are async and both touch
+ * the same module state, so two of them overlapping could leave a live socket
+ * in the core with nothing in the WebView listening to it — the app looks
+ * connected, says `ready`, and never applies another frame. React's StrictMode
+ * double-invoke in development runs connect → disconnect → connect on every
+ * mount, which is exactly that overlap, and it is the cause of the "one client
+ * instance held a live socket that delivered no frames" sighting recorded
+ * under T-410 and reproduced under T-412.
+ */
+const queues = new Map<string, Promise<void>>();
+
+function inTurn(server: string, work: () => Promise<void>): Promise<void> {
+  const held = queues.get(server) ?? Promise.resolve();
+  // Both arms, so one failure does not wedge every later call for this server.
+  const next = held.then(work, work);
+  queues.set(server, next);
+  return next;
+}
+
+/**
+ * The two event listeners, attached once for every server rather than once per
+ * connection. The core tags each event with the server it came from, so one
+ * pair routes for all of them — and attaching a second pair would deliver every
+ * frame twice.
+ *
+ * They are never taken down. There is one WebView and they cost nothing when
+ * nobody is connected — every event for a server with no link is dropped by the
+ * guard below. Detaching them was the other half of the bug above: a teardown
+ * that landed after the next connect left the app deaf for the rest of its run.
+ */
+let listening: Promise<UnlistenFn[]> | null = null;
+
+async function attachListeners(): Promise<void> {
+  listening ??= Promise.all([
+    listen<{ server: string; status: GatewayStatus }>("gateway:status", (event) => {
+      const { server, status } = event.payload;
+      const link = links.get(server);
+      if (!link) return;
+      // Nothing else knows the token was accepted, so this is where we learn
+      // it, and where a later request means "refused", not "expired".
+      if (status.kind === "ready") link.givenToken = null;
+      if (status.kind === "needs_token") void supplyToken(server);
+      publish(server, { ...stateOf(server), status });
+    }),
+    listen<{ server: string; frame: ServerFrame }>("gateway:frame", (event) => {
+      const { server, frame } = event.payload;
+      if (!links.has(server)) return;
+      const next = apply(stateOf(server), frame);
+      publish(server, next);
+      // After the fold, never before: whether a message is worth interrupting
+      // somebody for depends on who they are and what rules they have, and
+      // the snapshot is where both of those live.
+      considerFrame(server, frame, next);
+    }),
+  ]);
+  await listening;
+}
+
+/** Stop a link's pending writes. Its timers outlive it otherwise, and would
+ *  fire against a sign-in that is gone. */
+function clearTimers(link: Link): void {
+  if (typeof window === "undefined") return;
+  for (const timer of Object.values(link.readTimers)) window.clearTimeout(timer);
+}
+
+/**
+ * Open a connection to one server and start following it. Replaces any previous
+ * connection to the *same* server and leaves every other one alone.
+ */
+export function connect(api: AuthedApi): Promise<void> {
+  return inTurn(api.baseUrl, () => open(api));
+}
+
+async function open(api: AuthedApi): Promise<void> {
+  const server = api.baseUrl;
+  await close(server);
+  const link: Link = {
+    api,
+    givenToken: null,
+    supplying: null,
+    readSentAt: {},
+    readTimers: {},
+    typingSentAt: {},
+  };
+  links.set(server, link);
+  publish(server, EMPTY);
   if (!isTauri()) return;
 
-  const following = api;
-  const attach = async (): Promise<void> => {
-    const stop = [
-      await listen<GatewayStatus>("gateway:status", (event) => {
-        if (connected !== following) return;
-        // Nothing else knows the token was accepted, so this is where we learn
-        // it, and where a later request means "refused", not "expired".
-        if (event.payload.kind === "ready") givenToken = null;
-        if (event.payload.kind === "needs_token") void supplyToken();
-        publish({ ...state, status: event.payload });
-      }),
-      await listen<ServerFrame>("gateway:frame", (event) => {
-        if (connected !== following) return;
-        publish(apply(state, event.payload));
-        // After the fold, never before: whether a message is worth interrupting
-        // somebody for depends on who they are and what rules they have, and
-        // the snapshot is where both of those live.
-        considerFrame(event.payload, state);
-      }),
-    ];
-    // A disconnect that landed while we were attaching: don't leak listeners.
-    if (connected !== following) {
-      for (const off of stop) off();
-      return;
-    }
-    unlisteners = stop;
-  };
-  await attach();
-
+  await attachListeners();
+  // No guard on the way out. Nothing can have disconnected this server while we
+  // were on the network — the queue holds it until this returns — and a sign-out
+  // that arrived meanwhile runs next and closes what we just opened.
   const token = await api.accessToken();
-  givenToken = token.token;
+  link.givenToken = token.token;
   await invoke("gateway_connect", {
-    baseUrl: api.baseUrl,
+    baseUrl: server,
     token: token.token,
     expiresAtMs: token.expiresAt,
   });
 }
 
-/** Close the connection and forget everything it told us. */
-export async function disconnect(): Promise<void> {
-  connected = null;
-  givenToken = null;
-  for (const off of unlisteners) off();
-  unlisteners = [];
-  publish(EMPTY);
-  if (isTauri()) await invoke("gateway_disconnect");
+/** Close one server's connection and forget everything it told us. */
+export function disconnect(server: string): Promise<void> {
+  return inTurn(server, () => close(server));
+}
+
+async function close(server: string): Promise<void> {
+  const link = links.get(server);
+  links.delete(server);
+  if (link) clearTimers(link);
+  forget(server);
+  if (isTauri()) await invoke("gateway_disconnect", { baseUrl: server });
 }
 
 /**
  * Send one frame upstream. `false` means there was no live connection, which
  * callers treat as "say it again after the next `ready`" rather than an error.
  */
-export async function send(frame: ClientFrame): Promise<boolean> {
+export async function send(server: string, frame: ClientFrame): Promise<boolean> {
   if (!isTauri()) return false;
-  const sent: boolean = await invoke("gateway_send", { frame });
+  const sent: boolean = await invoke("gateway_send", { baseUrl: server, frame });
   return sent;
 }
 
@@ -568,11 +713,13 @@ export async function send(frame: ClientFrame): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /** Put one room's stream into the snapshot, creating it if it is new. */
-function putStream(roomId: RoomId, stream: RoomStream): void {
-  publish({ ...state, streams: { ...state.streams, [roomId]: stream } });
+function putStream(server: string, roomId: RoomId, stream: RoomStream): void {
+  const current = stateOf(server);
+  publish(server, { ...current, streams: { ...current.streams, [roomId]: stream } });
 }
 
 async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | null): Promise<void> {
+  const server = api.baseUrl;
   const room = encodeURIComponent(roomId);
   const range = before === null ? "" : `&before=${encodeURIComponent(before)}`;
   let page: Message[];
@@ -581,13 +728,13 @@ async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | nul
   } catch {
     // A page that didn't arrive doesn't need a state of its own. The status bar
     // is already saying what is wrong, and the next scroll asks again.
-    const stream = state.streams[roomId];
-    if (connected === api && stream) putStream(roomId, { ...stream, loading: false });
+    const stream = stateOf(server).streams[roomId];
+    if (linkFor(api) !== null && stream) putStream(server, roomId, { ...stream, loading: false });
     return;
   }
-  const stream = state.streams[roomId];
-  if (connected !== api || !stream) return;
-  putStream(roomId, {
+  const stream = stateOf(server).streams[roomId];
+  if (linkFor(api) === null || !stream) return;
+  putStream(server, roomId, {
     messages: mergePage(stream.messages, page),
     // A short page means the range scan ran out of room: this is the beginning.
     atStart: page.length < PAGE_SIZE,
@@ -606,8 +753,8 @@ async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | nul
  * scrollback when you switch away and come back.
  */
 export async function openRoom(api: AuthedApi, roomId: RoomId): Promise<void> {
-  if (connected !== api || state.streams[roomId]) return;
-  putStream(roomId, { messages: [], atStart: false, loading: true });
+  if (linkFor(api) === null || stateOf(api.baseUrl).streams[roomId]) return;
+  putStream(api.baseUrl, roomId, { messages: [], atStart: false, loading: true });
   await fetchPage(api, roomId, null);
 }
 
@@ -629,23 +776,23 @@ const MAX_CATCHUP_PAGES = 10;
  */
 export async function loadUntil(api: AuthedApi, roomId: RoomId, id: MessageId): Promise<void> {
   for (let page = 0; page < MAX_CATCHUP_PAGES; page += 1) {
-    const stream = state.streams[roomId];
-    if (connected !== api || !stream || stream.atStart) return;
+    const stream = stateOf(api.baseUrl).streams[roomId];
+    if (linkFor(api) === null || !stream || stream.atStart) return;
     const oldest = stream.messages[0];
     if (oldest !== undefined && oldest.id <= id) return;
     await loadOlder(api, roomId);
     // `loadOlder` declines while a page is already in flight. Nothing changed,
     // so asking again in a tight loop would only spin.
-    if (state.streams[roomId] === stream) return;
+    if (stateOf(api.baseUrl).streams[roomId] === stream) return;
   }
 }
 
 /** Fetch the page before the oldest message held. Safe to call repeatedly. */
 export async function loadOlder(api: AuthedApi, roomId: RoomId): Promise<void> {
-  const stream = state.streams[roomId];
-  if (connected !== api || !stream || stream.loading || stream.atStart) return;
+  const stream = stateOf(api.baseUrl).streams[roomId];
+  if (linkFor(api) === null || !stream || stream.loading || stream.atStart) return;
   const oldest = stream.messages[0];
-  putStream(roomId, { ...stream, loading: true });
+  putStream(api.baseUrl, roomId, { ...stream, loading: true });
   await fetchPage(api, roomId, oldest?.id ?? null);
 }
 
@@ -672,9 +819,9 @@ export async function sendMessage(
   };
   const path = `/rooms/${encodeURIComponent(roomId)}/messages`;
   const message = await api.post<Message>(path, request);
-  const stream = state.streams[roomId];
-  if (connected !== api || !stream) return;
-  putStream(roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
+  const stream = stateOf(api.baseUrl).streams[roomId];
+  if (linkFor(api) === null || !stream) return;
+  putStream(api.baseUrl, roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
 }
 
 /**
@@ -692,9 +839,12 @@ export async function editMessage(
 ): Promise<void> {
   const request: EditMessageRequest = { body };
   const edited = await api.patch<Message>(`/messages/${encodeURIComponent(message.id)}`, request);
-  const stream = state.streams[edited.room_id];
-  if (connected !== api || !stream) return;
-  putStream(edited.room_id, { ...stream, messages: mergeMessage(stream.messages, edited) });
+  const stream = stateOf(api.baseUrl).streams[edited.room_id];
+  if (linkFor(api) === null || !stream) return;
+  putStream(api.baseUrl, edited.room_id, {
+    ...stream,
+    messages: mergeMessage(stream.messages, edited),
+  });
 }
 
 /**
@@ -706,8 +856,14 @@ export async function editMessage(
  */
 export async function deleteMessage(api: AuthedApi, message: Message): Promise<void> {
   await api.delete(`/messages/${encodeURIComponent(message.id)}`);
-  if (connected !== api) return;
-  publish(apply(state, { op: "message.delete", d: { id: message.id, room_id: message.room_id } }));
+  if (linkFor(api) === null) return;
+  publish(
+    api.baseUrl,
+    apply(stateOf(api.baseUrl), {
+      op: "message.delete",
+      d: { id: message.id, room_id: message.room_id },
+    }),
+  );
 }
 
 /**
@@ -724,7 +880,8 @@ export async function toggleReaction(
   message: Message,
   key: string,
 ): Promise<void> {
-  const me = state.me;
+  const server = api.baseUrl;
+  const me = stateOf(server).me;
   if (!me) return;
   const held = message.reactions.find((group) => group.key === key);
   const mine = held?.user_ids.includes(me.id) ?? false;
@@ -733,7 +890,8 @@ export async function toggleReaction(
   const guess = mine ? others : [...others, me.id];
   const guessed = (user_ids: UserId[]): void => {
     publish(
-      apply(state, {
+      server,
+      apply(stateOf(server), {
         op: "reaction.update",
         d: { message_id: message.id, key, count: user_ids.length, user_ids },
       }),
@@ -749,7 +907,7 @@ export async function toggleReaction(
     // Put it back. With the socket up a frame would have corrected this
     // anyway, but a refusal while the socket is down would otherwise leave a
     // mark on screen that the server never accepted.
-    if (connected === api) guessed(held?.user_ids ?? []);
+    if (linkFor(api) !== null) guessed(held?.user_ids ?? []);
     throw error;
   }
 }
@@ -766,10 +924,11 @@ export async function toggleReaction(
  * back to. Walking out and back in is a different matter — that is a new visit,
  * and pinning it again is the only way the line means anything the second time.
  */
-export function enterRoom(roomId: RoomId): void {
-  const marker = state.read[roomId];
-  if (marker === undefined || state.leftOff[roomId] === marker) return;
-  publish({ ...state, leftOff: { ...state.leftOff, [roomId]: marker } });
+export function enterRoom(server: string, roomId: RoomId): void {
+  const current = stateOf(server);
+  const marker = current.read[roomId];
+  if (marker === undefined || current.leftOff[roomId] === marker) return;
+  publish(server, { ...current, leftOff: { ...current.leftOff, [roomId]: marker } });
 }
 
 /**
@@ -787,28 +946,27 @@ export async function loadReadMarkers(api: AuthedApi): Promise<void> {
   } catch {
     return;
   }
-  if (connected !== api) return;
+  if (linkFor(api) === null) return;
+  const current = stateOf(api.baseUrl);
   // Pin from the server's copy rather than the merged one. This answer and the
   // gateway's `ready` race on every cold start, so by the time it lands the open
   // room may already have been marked read — and the whole point of the line is
   // where you were *before* this session began.
-  const leftOff = { ...state.leftOff };
+  const leftOff = { ...current.leftOff };
   for (const [roomId, id] of Object.entries(map)) {
     leftOff[roomId] ??= id;
   }
-  publish({ ...state, read: { ...map, ...state.read }, leftOff });
+  publish(api.baseUrl, { ...current, read: { ...map, ...current.read }, leftOff });
 }
 
 /** PROTOCOL §4: at most one read-marker write per five seconds per room. */
 const READ_DEBOUNCE_MS = 5_000;
 
-const readSentAt: Record<string, number> = {};
-const readTimers: Record<string, number> = {};
-
 function flushRead(api: AuthedApi, roomId: RoomId): void {
-  const last_read_id = state.read[roomId];
-  if (connected !== api || last_read_id === undefined) return;
-  readSentAt[roomId] = Date.now();
+  const link = linkFor(api);
+  const last_read_id = stateOf(api.baseUrl).read[roomId];
+  if (link === null || last_read_id === undefined) return;
+  link.readSentAt[roomId] = Date.now();
   const body: UpdateReadMarkerRequest = { last_read_id };
   // Nothing shows a failure and nothing retries. The marker is a convenience,
   // the next `GET /read` is the truth, and a red line in the UI because a
@@ -823,18 +981,21 @@ function flushRead(api: AuthedApi, roomId: RoomId): void {
  * was pinned when you walked in and stays where it is for the session.
  */
 export function markRead(api: AuthedApi, roomId: RoomId, messageId: MessageId): void {
-  const held = state.read[roomId];
+  const link = linkFor(api);
+  if (link === null) return;
+  const current = stateOf(api.baseUrl);
+  const held = current.read[roomId];
   if (held !== undefined && held >= messageId) return;
-  publish({ ...state, read: { ...state.read, [roomId]: messageId } });
+  publish(api.baseUrl, { ...current, read: { ...current.read, [roomId]: messageId } });
 
-  if (readTimers[roomId] !== undefined) return;
-  const since = Date.now() - (readSentAt[roomId] ?? 0);
+  if (link.readTimers[roomId] !== undefined) return;
+  const since = Date.now() - (link.readSentAt[roomId] ?? 0);
   if (since >= READ_DEBOUNCE_MS) {
     flushRead(api, roomId);
     return;
   }
-  readTimers[roomId] = window.setTimeout(() => {
-    delete readTimers[roomId];
+  link.readTimers[roomId] = window.setTimeout(() => {
+    delete link.readTimers[roomId];
     flushRead(api, roomId);
   }, READ_DEBOUNCE_MS - since);
 }
@@ -858,8 +1019,8 @@ function sameRule(a: NotifyRule, b: NotifyRule): boolean {
 /** "Always notify me when this person posts" — the whole list (SPEC §4.2). */
 export async function loadNotifyRules(api: AuthedApi): Promise<void> {
   const rules = await api.get<NotifyRule[]>("/me/notify-rules");
-  if (connected !== api) return;
-  publish({ ...state, notifyRules: rules });
+  if (linkFor(api) === null) return;
+  publish(api.baseUrl, { ...stateOf(api.baseUrl), notifyRules: rules });
 }
 
 /**
@@ -871,14 +1032,15 @@ export async function setNotifyRule(
   rule: NotifyRule,
   on: boolean,
 ): Promise<void> {
-  const before = state.notifyRules;
+  const server = api.baseUrl;
+  const before = stateOf(server).notifyRules;
   const without = before.filter((held) => !sameRule(held, rule));
-  publish({ ...state, notifyRules: on ? [...without, rule] : without });
+  publish(server, { ...stateOf(server), notifyRules: on ? [...without, rule] : without });
   try {
     if (on) await api.put("/me/notify-rules", rule);
     else await api.delete("/me/notify-rules", rule);
   } catch (error) {
-    if (connected === api) publish({ ...state, notifyRules: before });
+    if (linkFor(api) !== null) publish(server, { ...stateOf(server), notifyRules: before });
     throw error;
   }
 }
@@ -905,20 +1067,19 @@ export function typistsIn(current: GatewayState, roomId: RoomId, now: number): U
     .map(([userId]) => userId);
 }
 
-/** When we last told each room we were writing something. */
-const typingSentAt: Record<string, number> = {};
-
 /**
  * Tell the room you are writing something. Throttled here as well as on the
  * server, because being rate-limited is a refusal and there is no reason to
  * collect one on every keystroke. The server's window is four seconds
  * (`RATE_TYPING_PER_ROOM`), so this stays just inside it.
  */
-export function startedTyping(roomId: RoomId): void {
+export function startedTyping(api: AuthedApi, roomId: RoomId): void {
+  const link = linkFor(api);
+  if (link === null) return;
   const now = Date.now();
-  if (now - (typingSentAt[roomId] ?? 0) < TYPING_TTL_MS - 2_000) return;
-  typingSentAt[roomId] = now;
-  void send({ op: "typing.start", d: { room_id: roomId } });
+  if (now - (link.typingSentAt[roomId] ?? 0) < TYPING_TTL_MS - 2_000) return;
+  link.typingSentAt[roomId] = now;
+  void send(api.baseUrl, { op: "typing.start", d: { room_id: roomId } });
 }
 
 /**
@@ -938,11 +1099,12 @@ export function startedTyping(roomId: RoomId): void {
  * that can tell the person it did not save.
  */
 function foldUser(api: AuthedApi, user: User): void {
-  if (connected !== api) return;
-  publish({
-    ...state,
-    me: state.me?.id === user.id ? user : state.me,
-    users: upsert(state.users, user, (u) => u.id === user.id),
+  if (linkFor(api) === null) return;
+  const current = stateOf(api.baseUrl);
+  publish(api.baseUrl, {
+    ...current,
+    me: current.me?.id === user.id ? user : current.me,
+    users: upsert(current.users, user, (u) => u.id === user.id),
   });
 }
 

@@ -19,6 +19,10 @@
  * **No numbers, ever.** The notification names people and quotes the last
  * thing said. It never says how many messages are waiting, because that is the
  * badge wearing a different coat.
+ *
+ * Everything here is per server (T-412). Two servers can have a `#garage` each,
+ * so a batch is keyed by both, and "the room you are looking at" is a server
+ * and a room rather than a room on its own.
  */
 import { isTauri } from "@tauri-apps/api/core";
 import {
@@ -41,12 +45,12 @@ import { notificationText, notifyReason } from "./rules";
  */
 const BATCH_MS = 1_200;
 
-/** The room on screen. Set by the frame that is drawing it. */
-let viewing: RoomId | null = null;
+/** Which server's room is on screen. Set by the frame that is drawing it. */
+let viewing: { server: string; roomId: RoomId } | null = null;
 
 /** Tell the notifier which room you are looking at, if any. */
-export function setViewing(roomId: RoomId | null): void {
-  viewing = roomId;
+export function setViewing(at: { server: string; roomId: RoomId } | null): void {
+  viewing = at;
 }
 
 interface Batch {
@@ -57,8 +61,14 @@ interface Batch {
   excerpt: string;
 }
 
+/** Keyed by server and room, because a room id only means anything next to
+ *  the server it came from. */
 const batches = new Map<string, Batch>();
 let flushIn: number | null = null;
+
+function batchKey(server: string, roomId: RoomId): string {
+  return `${server}\u0000${roomId}`;
+}
 
 /**
  * Look at one frame and decide whether it is worth saying something about.
@@ -66,7 +76,11 @@ let flushIn: number | null = null;
  * Takes the snapshot rather than reading the store, so the decision is made
  * against the state that includes this very frame and nothing later.
  */
-export function considerFrame(frame: ServerFrame, snapshot: GatewayState): void {
+export function considerFrame(
+  server: string,
+  frame: ServerFrame,
+  snapshot: GatewayState,
+): void {
   if (frame.op !== "message.create") return;
   const me = snapshot.me;
   if (me === null) return;
@@ -76,15 +90,16 @@ export function considerFrame(frame: ServerFrame, snapshot: GatewayState): void 
   // You are looking right at it. `isLooking` is the same clock the
   // read-marker uses: the window has your attention, not merely a room
   // selected on a second monitor.
-  if (viewing === message.room_id && isLooking()) return;
+  if (viewing?.server === server && viewing.roomId === message.room_id && isLooking()) return;
 
   const slug = snapshot.rooms.find((room) => room.id === message.room_id)?.slug ?? "a room";
   const name =
     snapshot.users.find((person) => person.id === message.author_id)?.display_name ?? "someone";
 
-  const held = batches.get(message.room_id);
+  const key = batchKey(server, message.room_id);
+  const held = batches.get(key);
   if (held === undefined) {
-    batches.set(message.room_id, { slug, names: [name], excerpt: plainText(message.body) });
+    batches.set(key, { slug, names: [name], excerpt: plainText(message.body) });
   } else {
     if (!held.names.includes(name)) held.names.push(name);
     held.excerpt = plainText(message.body);
@@ -126,10 +141,22 @@ async function show(title: string, body: string): Promise<void> {
   }
 }
 
-/** Drop everything pending. Used when the account changes. */
+/** Drop everything pending. Used when the app goes away. */
 export function resetNotifications(): void {
   if (flushIn !== null) window.clearTimeout(flushIn);
   flushIn = null;
   batches.clear();
   viewing = null;
+}
+
+/**
+ * Drop what one server was about to say. Signing out of a server should not
+ * fire a notification about it a second later, and the other servers' pending
+ * batches have nothing to do with it.
+ */
+export function forgetNotifications(server: string): void {
+  for (const key of [...batches.keys()]) {
+    if (key.startsWith(`${server}\u0000`)) batches.delete(key);
+  }
+  if (viewing?.server === server) viewing = null;
 }

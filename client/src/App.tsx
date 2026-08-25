@@ -7,10 +7,17 @@
  * stream column as a horizontal strip above the composer — it is never hidden
  * and it never becomes a menu, so `Stream` takes it as a slot.
  *
- * The rail is also where the host's own controls hang: `+ room` beside the
- * room list and `manage` beside the server's name. They are *absent* for
+ * The rail starts with the server list (SPEC §3, T-412): a live dot per server,
+ * a mark when one is holding something you have not read, and `+ add` for the
+ * next one. You can be signed into several at once. Each has its own connection,
+ * its own people and its own rooms, and switching between them takes the stream,
+ * the roster and your presence with it — you are only ever standing in one room.
+ *
+ * Below that, the rail is where the host's own controls hang: `+ room` beside
+ * the room list and `manage` beside the server's name. They are *absent* for
  * everybody else rather than greyed out — a disabled control is a permission
- * matrix drawn in CSS, and this product refuses to have one.
+ * matrix drawn in CSS, and this product refuses to have one. Host or member is
+ * decided per server: you can host one and be a guest on the next.
  *
  * `you` is the other door: display name, password, density, sign out. It is
  * drawn for everybody, because those are yours, not the host's. The panel
@@ -20,7 +27,7 @@
  * have not seen changes *weight*, and nothing else. No number, no dot, no
  * color. It is one line of CSS and it is the whole feature.
  */
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useState } from "react";
 
 import AuthScreens from "./auth/AuthScreens";
 import type { AuthResponse } from "./generated/AuthResponse";
@@ -28,35 +35,37 @@ import type { RoomId } from "./generated/RoomId";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { User } from "./generated/User";
 import HostPanel, { type HostSection } from "./host/HostPanel";
-import type { AuthedApi } from "./lib/api";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
 import SettingsPanel from "./settings/SettingsPanel";
 import { noRoomsBody, noRoomsRail } from "./settings/copy";
 import {
+  anyNewActivity,
   connect,
   disconnect,
+  type GatewayState,
   hasNewActivity,
   loadNotifyRules,
   loadReadMarkers,
   statusText,
   useGateway,
+  useServers,
 } from "./lib/gateway";
 import { useNarrow } from "./lib/layout";
 import { hostOf } from "./lib/link";
 import { personStyle } from "./lib/names";
 import { occupancyLine, occupantsOf, STACK_VISIBLE } from "./lib/occupancy";
 import { colorVar } from "./lib/palette";
-import { useSession } from "./lib/session";
-import { setPresenceLive, setPresenceRoom, startPresence } from "./lib/watchPresence";
-import { resetNotifications, setViewing } from "./notify/notify";
+import { type ServerSession, useSessions } from "./lib/session";
+import { dropPresence, setPresenceLive, setPresenceRoom, startPresence } from "./lib/watchPresence";
+import { forgetNotifications, resetNotifications, setViewing } from "./notify/notify";
 import Roster from "./roster/Roster";
 import Stream from "./stream/Stream";
 import "./app.css";
 
 export default function App() {
-  const session = useSession();
+  const sessions = useSessions();
 
-  if (session.state.status === "restoring") {
+  if (sessions.state.status === "restoring") {
     return (
       <div className="auth">
         <p className="meta">signing you back in…</p>
@@ -64,73 +73,58 @@ export default function App() {
     );
   }
 
-  if (session.state.status === "signed_out") {
+  // Destructured rather than length-checked so the type says what the frame
+  // relies on: there is always a server to be looking at.
+  const [first, ...rest] = sessions.state.servers;
+  if (first === undefined) {
     return (
       <AuthScreens
-        notice={session.notice}
-        keyringNotice={session.keyringNotice}
-        onAuthenticated={session.signIn}
+        notice={sessions.notice}
+        keyringNotice={sessions.keyringNotice}
+        onAuthenticated={sessions.addServer}
       />
     );
   }
 
   return (
     <Console
-      api={session.state.api}
-      user={session.state.user}
-      keyringNotice={session.keyringNotice}
-      onSignOut={session.signOut}
-      onSignIn={session.signIn}
+      servers={[first, ...rest]}
+      keyringNotice={sessions.keyringNotice}
+      onSignOut={sessions.signOut}
+      onAddServer={sessions.addServer}
     />
   );
 }
 
-function Console({
-  api,
-  user,
-  keyringNotice,
-  onSignOut,
-  onSignIn,
+/**
+ * One server's connection, as a component.
+ *
+ * Connecting in an effect keyed on the sign-in is what makes adding and
+ * removing a server clean: React mounts one of these per server and unmounts
+ * it when the server goes, so the socket, the pending notifications and the
+ * presence record all die with it. Doing the same thing in a loop over the
+ * list would reconnect every server whenever any one of them changed.
+ *
+ * It draws nothing. The server's name is the one thing `ready` does not carry,
+ * so it is fetched here and handed up for the rail to draw.
+ */
+function ServerLink({
+  session,
+  onInfo,
 }: {
-  api: AuthedApi;
-  user: User;
-  keyringNotice: string | null;
-  onSignOut: () => Promise<void>;
-  onSignIn: (baseUrl: string, auth: AuthResponse) => Promise<void>;
+  session: ServerSession;
+  onInfo: (baseUrl: string, info: ServerInfo | null) => void;
 }) {
-  const gateway = useGateway();
-  const [server, setServer] = useState<ServerInfo | null>(null);
-  const [openRoomId, setOpenRoomId] = useState<RoomId | null>(null);
-  const [density, setDensity] = useState<Density>(loadDensity);
-  // Which host surface is open over the stream, if any (T-410).
-  const [hostSection, setHostSection] = useState<HostSection | null>(null);
-  // The member's own settings (T-411). Mutually exclusive with the host panel:
-  // both take the stream column, and two overlays is a modal stack.
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const narrow = useNarrow();
-
-  const openSettings = (): void => {
-    setHostSection(null);
-    setSettingsOpen(true);
-  };
-  const openHost = (section: HostSection): void => {
-    setSettingsOpen(false);
-    setHostSection(section);
-  };
-
-  useEffect(() => {
-    applyDensity(density);
-  }, [density]);
+  const { api, baseUrl } = session;
 
   useEffect(() => {
     void connect(api);
-    const stop = startPresence();
     return () => {
-      stop();
-      resetNotifications();
-      void disconnect();
+      forgetNotifications(baseUrl);
+      dropPresence(baseUrl);
+      void disconnect(baseUrl);
     };
-  }, [api]);
+  }, [api, baseUrl]);
 
   // Where you had got to, and who you asked to hear from. Both are small, both
   // are needed before the first frame is judged worth interrupting anyone for,
@@ -142,34 +136,129 @@ function Console({
 
   useEffect(() => {
     const abort = new AbortController();
-    // The server's name is the one thing `ready` doesn't carry. A failure isn't
-    // worth a screen of its own: the rail falls back to the hostname.
+    // A failure isn't worth a screen of its own: the rail falls back to the
+    // hostname.
     void api
       .serverInfo(abort.signal)
-      .then(setServer)
+      .then((info) => onInfo(baseUrl, info))
       .catch(() => undefined);
-    return () => abort.abort();
-  }, [api]);
+    return () => {
+      abort.abort();
+      onInfo(baseUrl, null);
+    };
+  }, [api, baseUrl, onInfo]);
+
+  return null;
+}
+
+function Console({
+  servers,
+  keyringNotice,
+  onSignOut,
+  onAddServer,
+}: {
+  /** At least one, always. The frame has nothing to draw without it. */
+  servers: [ServerSession, ...ServerSession[]];
+  keyringNotice: string | null;
+  onSignOut: (baseUrl: string) => Promise<void>;
+  onAddServer: (baseUrl: string, auth: AuthResponse) => Promise<void>;
+}) {
+  const all = useServers();
+  const [activeUrl, setActiveUrl] = useState(servers[0].baseUrl);
+  // Each server's own name, once it has answered. Keyed by base URL like
+  // everything else about a server.
+  const [info, setInfo] = useState<Record<string, ServerInfo>>({});
+  // Which room you were reading on each server, so switching back returns you
+  // to where you were rather than to the top of its list.
+  const [openRoomIds, setOpenRoomIds] = useState<Record<string, RoomId>>({});
+  const [density, setDensity] = useState<Density>(loadDensity);
+  // Which host surface is open over the stream, if any (T-410).
+  const [hostSection, setHostSection] = useState<HostSection | null>(null);
+  // The member's own settings (T-411). Mutually exclusive with the host panel:
+  // both take the stream column, and two overlays is a modal stack.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // The paste box, reached from inside the app rather than only before
+  // sign-in (T-301's screen, T-412's door to it).
+  const [addingServer, setAddingServer] = useState(false);
+  const narrow = useNarrow();
+
+  // A server that has gone — signed out of, or refused — must not leave the
+  // frame pointing at nothing.
+  const active = servers.find((server) => server.baseUrl === activeUrl) ?? servers[0];
+  const api = active.api;
+  const server = info[active.baseUrl] ?? null;
+  const gateway = useGateway(active.baseUrl);
+
+  const closePanels = (): void => {
+    setHostSection(null);
+    setSettingsOpen(false);
+    setAddingServer(false);
+  };
+  const openSettings = (): void => {
+    closePanels();
+    setSettingsOpen(true);
+  };
+  const openHost = (section: HostSection): void => {
+    closePanels();
+    setHostSection(section);
+  };
+  const openAdd = (): void => {
+    closePanels();
+    setAddingServer(true);
+  };
+
+  const noteInfo = useCallback((baseUrl: string, next: ServerInfo | null): void => {
+    setInfo((held) => {
+      if (next === null) {
+        if (!(baseUrl in held)) return held;
+        const without = { ...held };
+        delete without[baseUrl];
+        return without;
+      }
+      return { ...held, [baseUrl]: next };
+    });
+  }, []);
+
+  useEffect(() => {
+    applyDensity(density);
+  }, [density]);
+
+  // One watcher for the window, however many servers there are. The per-server
+  // records live inside it and are added and dropped by `ServerLink`.
+  //
+  // Nothing here closes a connection. Each `ServerLink` owns exactly one and
+  // closes it when it unmounts, and reaching around them from up here to close
+  // all of them is how the frame listener ends up racing a connect that has not
+  // finished — a live socket with nobody following it (see `lib/gateway.ts`).
+  useEffect(() => {
+    const stop = startPresence();
+    return () => {
+      stop();
+      resetNotifications();
+    };
+  }, []);
 
   const rooms = [...gateway.rooms]
     .filter((room) => room.archived_at === null)
     .sort((a, b) => a.position - b.position);
   // Land in the first room, and don't hold a room that was archived or that
   // this account can no longer see.
-  const open = rooms.find((room) => room.id === openRoomId) ?? rooms[0] ?? null;
+  const open = rooms.find((room) => room.id === openRoomIds[active.baseUrl]) ?? rooms[0] ?? null;
 
-  // Nothing interrupts you about the room you are already reading.
+  // Nothing interrupts you about the room you are already reading, and you are
+  // only ever standing in one room — switching servers takes you out of the
+  // last one.
   useEffect(() => {
-    setViewing(open?.id ?? null);
-    setPresenceRoom(open?.id ?? null);
-  }, [open?.id]);
+    setViewing(open === null ? null : { server: active.baseUrl, roomId: open.id });
+    setPresenceRoom(active.baseUrl, open?.id ?? null);
+  }, [active.baseUrl, open?.id]);
 
   // A fresh `ready` is a new session on the server: we are `around` until
   // this clock re-announces the room. Anything short of ready is not a
   // connection worth sending presence on.
   useEffect(() => {
-    setPresenceLive(gateway.status.kind === "ready");
-  }, [gateway.status.kind]);
+    setPresenceLive(active.baseUrl, gateway.status.kind === "ready");
+  }, [active.baseUrl, gateway.status.kind]);
 
   const status = statusText(gateway.status);
   const statusDetail = gateway.status.kind === "waiting" ? gateway.status.reason : undefined;
@@ -181,12 +270,12 @@ function Console({
   // `ready` is the fresher answer about who we are; the stored session is what
   // we have before it arrives. Neither is the lock — every host endpoint checks
   // for itself — so this only decides whether the controls are drawn at all.
-  const isHost = gateway.me?.is_host ?? user.is_host;
+  const isHost = gateway.me?.is_host ?? active.user.is_host;
   const host = isHost ? hostSection : null;
   // `ready` is the live copy of who we are; the stored session is the fallback
   // until it arrives. The status bar and settings both prefer the live one so
   // a display-name save shows up without a reload.
-  const you = gateway.me ?? user;
+  const you = gateway.me ?? active.user;
 
   // The server's accent, if the host picked one (SPEC §5.3, `PATCH /server`).
   // It names a palette key, and the variable that key points at is generated
@@ -198,7 +287,39 @@ function Console({
 
   return (
     <div className="frame" data-narrow={narrow ? "true" : undefined} style={frameStyle}>
+      {servers.map((session) => (
+        <ServerLink key={session.baseUrl} session={session} onInfo={noteInfo} />
+      ))}
+
       <aside className="rail">
+        <section className="rail-section">
+          <div className="rail-head">
+            <h2 className="panel-label">servers</h2>
+            <button
+              type="button"
+              className="rail-action meta"
+              aria-pressed={addingServer}
+              onClick={() => (addingServer ? setAddingServer(false) : openAdd())}
+            >
+              + add
+            </button>
+          </div>
+          <ul className="server-list">
+            {servers.map((session) => (
+              <li key={session.baseUrl}>
+                <ServerRow
+                  name={info[session.baseUrl]?.name ?? hostOf(session.baseUrl)}
+                  state={all[session.baseUrl]}
+                  current={session.baseUrl === active.baseUrl}
+                  onOpen={() => {
+                    setActiveUrl(session.baseUrl);
+                    closePanels();
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
         <section className="rail-section">
           <div className="rail-head">
             <h2 className="panel-label">server</h2>
@@ -226,7 +347,7 @@ function Console({
               </button>
             </div>
           </div>
-          <p className="rail-server">{server?.name ?? hostOf(api.baseUrl)}</p>
+          <p className="rail-server">{server?.name ?? hostOf(active.baseUrl)}</p>
         </section>
         <section className="rail-section rail-rooms">
           <div className="rail-head">
@@ -256,11 +377,10 @@ function Console({
                     // endpoint that would answer if there were.
                     data-new={hasNewActivity(gateway, room.id) ? "true" : undefined}
                     onClick={() => {
-                      setOpenRoomId(room.id);
+                      setOpenRoomIds((held) => ({ ...held, [active.baseUrl]: room.id }));
                       // You clicked a room to read it, so the host panel gets
                       // out of the way rather than sitting over the stream.
-                      setHostSection(null);
-                      setSettingsOpen(false);
+                      closePanels();
                     }}
                   >
                     <span className="room-slug">#{room.slug}</span>
@@ -280,14 +400,37 @@ function Console({
         </section>
       </aside>
 
-      {settingsOpen ? (
+      {addingServer ? (
+        <main className="stream">
+          <header className="stream-header">
+            <span className="room-name">add a server</span>
+            <button
+              type="button"
+              className="rail-action meta"
+              onClick={() => setAddingServer(false)}
+            >
+              close
+            </button>
+          </header>
+          <AuthScreens
+            inline
+            notice={null}
+            keyringNotice={keyringNotice}
+            onAuthenticated={async (baseUrl, auth) => {
+              await onAddServer(baseUrl, auth);
+              setActiveUrl(baseUrl);
+              setAddingServer(false);
+            }}
+          />
+        </main>
+      ) : settingsOpen ? (
         <SettingsPanel
           api={api}
           user={you}
           density={density}
           onDensityChange={setDensity}
-          onSignOut={onSignOut}
-          onReauthenticated={(auth) => onSignIn(api.baseUrl, auth)}
+          onSignOut={() => onSignOut(active.baseUrl)}
+          onReauthenticated={(auth) => onAddServer(api.baseUrl, auth)}
           onClose={() => setSettingsOpen(false)}
           roster={narrow ? roster : undefined}
         />
@@ -298,7 +441,7 @@ function Console({
           server={server}
           section={host}
           onSection={setHostSection}
-          onServerChange={setServer}
+          onServerChange={(next) => noteInfo(active.baseUrl, next)}
           onClose={() => setHostSection(null)}
           roster={narrow ? roster : undefined}
         />
@@ -358,6 +501,47 @@ function Console({
         </span>
       </footer>
     </div>
+  );
+}
+
+/**
+ * One server in the rail: a dot, a name, and nothing else (SPEC §3).
+ *
+ * The dot is the connection — filled once that server has said `ready`, hollow
+ * while it is retrying. A server holding something you have not read gets the
+ * same weight change the room list uses: heavier text, never a badge and never
+ * a count (SPEC §4.2, AGENTS rule 3). The accessible name says it in words,
+ * because a font weight is not something a screen reader can read out.
+ */
+function ServerRow({
+  name,
+  state,
+  current,
+  onOpen,
+}: {
+  name: string;
+  state: GatewayState | undefined;
+  current: boolean;
+  onOpen: () => void;
+}) {
+  const live = state?.status.kind === "ready";
+  const waiting = state !== undefined && anyNewActivity(state);
+  const label = [name, live ? "connected" : "not connected", waiting ? "something new" : null]
+    .filter((part) => part !== null)
+    .join(", ");
+  return (
+    <button
+      type="button"
+      className="server-item"
+      aria-current={current ? "true" : undefined}
+      aria-label={label}
+      data-live={live ? "true" : undefined}
+      data-new={waiting ? "true" : undefined}
+      onClick={onOpen}
+    >
+      <span className="server-dot" aria-hidden="true" />
+      <span className="server-name">{name}</span>
+    </button>
   );
 }
 

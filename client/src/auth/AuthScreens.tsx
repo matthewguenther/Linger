@@ -9,6 +9,11 @@
  * Console rules apply here as much as anywhere (SPEC §5): square panels,
  * hairline separation, mono for labels and metadata, accent on exactly one
  * thing per screen — the button that moves you forward.
+ *
+ * The same screen is also the `+ add` door in the server rail (T-412). Inside
+ * the app it drops the wordmark — the panel it sits in already says what it is —
+ * and everything else about it is identical, because adding your second server
+ * is the same job as arriving at your first.
  */
 import { useState } from "react";
 
@@ -37,6 +42,8 @@ interface Props {
   /** Set when this computer can't remember a sign-in between launches. */
   keyringNotice: string | null;
   onAuthenticated: (baseUrl: string, auth: AuthResponse) => Promise<void>;
+  /** Drawn inside the app frame rather than as the whole window (T-412). */
+  inline?: boolean;
 }
 
 /** Turn any thrown thing into a sentence worth showing. */
@@ -45,16 +52,23 @@ function messageFor(error: unknown): string {
   return "Something went wrong.";
 }
 
-export default function AuthScreens({ notice, keyringNotice, onAuthenticated }: Props) {
+export default function AuthScreens({
+  notice,
+  keyringNotice,
+  onAuthenticated,
+  inline = false,
+}: Props) {
   const [step, setStep] = useState<Step>({ name: "connect" });
 
   return (
-    <div className="auth">
+    <div className={inline ? "auth auth-inline" : "auth"}>
       <div className="auth-panel">
-        <header className="auth-head">
-          <h1 className="auth-wordmark">linger</h1>
-          <p className="auth-tagline meta">a small server for people who like each other</p>
-        </header>
+        {inline ? null : (
+          <header className="auth-head">
+            <h1 className="auth-wordmark">linger</h1>
+            <p className="auth-tagline meta">a small server for people who like each other</p>
+          </header>
+        )}
 
         {notice && step.name === "connect" ? (
           <p className="auth-notice" role="status">
