@@ -15,6 +15,9 @@ anyhow = { workspace = true }
 argon2 = { workspace = true }
 async-trait = "0.1"
 axum = { workspace = true }
+# Favicons are stored and served as `data:` URIs, so a link card never makes a
+# request from the reader's machine (SPEC §5.6).
+base64 = { workspace = true }
 # Blurhash: the smear of colour shown while an image loads (PROTOCOL §6).
 blurhash = "0.2"
 dashmap = { workspace = true }

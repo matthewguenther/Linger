@@ -309,11 +309,87 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     there.
   - Still a human check, as with T-501/T-502: **a real 400 MB video, over a real
     network, from a server with real DNS for both names.**
-- ⬜ **T-504 · The media UI + link cards** — effort: **medium**
-  SPEC §4.4: grid, filter by person/type/date, stars (starred never expire),
-  each item links to its message/moment. Restrained link embeds (favicon, title,
-  domain — one line): server-side metadata fetch **with SSRF guard** (deny
-  private ranges, cap size/time), cached.
+- ✅ **T-504 · The media UI + link cards** — effort: **medium** — landed 2026-08-25
+  `GET /media` plus the grid in the rail, filters by person/kind/date, stars,
+  and each item clicks back to its message. Link cards are one line and the
+  server fetches them. **The client can now share a file at all** — `+ file`,
+  drag, or paste in the composer — which M5 needed and nothing before this had.
+  `crates/linger-server/tests/media.rs` (10 tests) drives it all over real HTTP;
+  `media.test.ts`, `upload.test.ts` and four new `markdown.test.ts` cases cover
+  the client's arithmetic.
+
+  **Decisions and surprises, for whoever picks up T-505/T-506:**
+
+  - **`MediaItem` grew, as the parking lot expected.** It is flat and carries
+    `kind`, `cursor`, `author_id`, `created_at`, `excerpt` and `starred_at`
+    alongside an optional `attachment` *or* `link`. A pin carries neither and
+    leans on `excerpt`. The grid sorts and filters over the fields every item
+    has and only reaches for the payload once it knows which cell it is drawing.
+  - **Paging is a keyset cursor, not `before=<id>`, and PROTOCOL §6 says so
+    now.** The three sources are three tables and their ids are not comparable
+    with each other, so the cursor is `<created_at>:<id hex>` — the sort key —
+    and it is opaque. A link item appends its position so every item has a
+    unique key; `before` ignores that part.
+  - **A message's links stay in one page.** Each source is limited by *group*
+    (an upload is one, a message's links are however many it has) and the merge
+    stops on a group boundary, so a page can hold slightly more than `limit`.
+    Without that, a page ending halfway through a message's links would step
+    over the rest of them on the next cursor. It is why `link_groups` runs the
+    filter twice — once outside, once in a subquery that picks the messages.
+  - **Stars are on uploads only**, which is PROTOCOL's shape (`PUT
+    /media/:attachment_id/star`) and the honest one: a star is what stops T-505
+    sweeping a file at 365 days, and a link or a pin has no object to keep. The
+    grid draws the control only where it means something. Anyone can star
+    anything and there is no per-person star — the collection belongs to the
+    server, not to a reader.
+  - **`starred_at IS NOT NULL DESC` before the date makes paging subtle.** If
+    the cursor points at a starred item we are still inside the starred run, so
+    the attachment query has to return starred items after the cursor *and*
+    every unstarred one; if it does not, everything starred is behind us and no
+    starred item may come back at all. `a_star_sorts_first_and_paging_never_
+    repeats_or_skips` walks nine items two at a time and compares with one big
+    page, which is the test that would catch getting this backwards.
+  - **Links are extracted when a message is written, into `message_links`**, and
+    re-extracted on every edit — an edit that drops a link drops its card from
+    the collection. The alternative was scanning every body ever written on
+    every grid load. `linger-server::links::extract` and the client's
+    `linkTargets` deliberately agree, including the trailing-punctuation and
+    unbalanced-paren rules, and both normalise through a URL parser so the
+    string the card is keyed by is identical on both sides.
+  - **The SSRF guard refuses ports and bare IPs before it does any DNS**, which
+    is also why the fetch cannot be integration-tested against a local server:
+    a test HTTP listener is on `127.0.0.1:<port>`, and that is precisely what
+    the guard exists to refuse. So `a_preview_never_goes_looking_inside_the_
+    network` proves the negative — a real listener on loopback, eight shapes of
+    URL aimed at it, zero connections — and the resolve half (every address a
+    name answers with must be public) is unit-tested in `links::tests`. Making a
+    public name resolve to a private address needs a network a test cannot have.
+  - **A refused or failed fetch is stored as `state='failed'`,** not left blank.
+    Without that row every reader who scrolled past the message would trigger
+    the same doomed fetch. Successes stand for a week, failures for an hour.
+  - **Favicons come back as `data:` URIs.** A remote `<img>` would hand the
+    linked site the IP of everyone who scrolled past. Only sniffed raster bytes
+    are accepted — an SVG "favicon" is a script, and it would be inlined into
+    the app's own origin, which is the worst place for one.
+  - **The app CSP now allows `http://localhost:*` and `http://127.0.0.1:*` in
+    `img-src` and `media-src`**, matching what `connect-src` already had, so
+    `pnpm dev` against a local server can draw an uploaded picture. **A LAN
+    server on plain http at, say, `192.168.1.5` still cannot** — its images are
+    blocked. T-702 owns the CSP; that is the decision to make there, and the
+    alternative is telling LAN hosts to put a certificate on it.
+  - **Going to an old item's message reuses `loadUntil`**, the same reach "since
+    you were gone" uses, so it walks back at most ten pages (a thousand
+    messages). Past that the room simply opens at the newest message rather than
+    hanging. A real jump to an eight-month-old item would need a message window
+    endpoint (`GET /messages/:id` plus paging both ways) and a stream store that
+    can hold a window it did not anchor at the end — worth doing, not worth
+    doing inside this task.
+  - **Not verified by a human yet:** the React half. Types, unit tests, the
+    production build and a server-side render of the panel and the attachments
+    all pass, but nobody has clicked `+ file` in a running app. That belongs
+    with the milestone check the last three tasks also deferred — **a real
+    400 MB video, over a real network, from a server with real DNS** — and it is
+    now possible to do end to end for the first time.
 - ⬜ **T-505 · Expiry + storage accounting** — effort: **medium**
   365-day expiry of non-starred/non-pinned (host-configurable/off), background
   task; storage-used figure for the status bar and `GET /server`.
@@ -479,7 +555,9 @@ Plasma 6 Wayland and Windows.*
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
-- `MediaItem` wire shape is minimal (attachment + message/room link) — revisit
-  when T-504 starts if the grid needs more.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
-  member's). Confirm this trade-off is intended before T-504.
+  member's). **Built that way in T-504** — the favicon is inlined as a `data:`
+  URI so a reader's machine never touches the linked site either. Matt has not
+  confirmed the trade-off; the cost is that the server's IP appears in the logs
+  of every site anybody links, and turning it off means either no cards or
+  every reader fetching for themselves.

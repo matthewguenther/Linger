@@ -40,6 +40,7 @@ import {
   useState,
 } from "react";
 
+import type { Attachment } from "../generated/Attachment";
 import type { Message } from "../generated/Message";
 import type { MessageId } from "../generated/MessageId";
 import type { PresenceState } from "../generated/PresenceState";
@@ -66,12 +67,15 @@ import {
   useGateway,
 } from "../lib/gateway";
 import { isLooking } from "../lib/looking";
+import Attachments from "../media/Attachments";
+import LinkCards from "../media/LinkCards";
 import { personStyle } from "../lib/names";
 import { occupancyLine, occupantsOf } from "../lib/occupancy";
 import { peopleList } from "../notify/rules";
 import PersonName from "../status/PersonName";
 import Markdown, { type MentionLookup } from "./Markdown";
-import { mentionHandles, plainText } from "./markdown";
+import { uploadFile } from "../lib/upload";
+import { linkTargets, mentionHandles, plainText } from "./markdown";
 import { REACTIONS, reactionOf, reactionTitle, reactionWeight } from "./reactions";
 import { buildRows, type StreamRow } from "./rows";
 import { ageOpacity, clockTime, fullTime, sessionLabel } from "./time";
@@ -93,6 +97,11 @@ const MAX_MESSAGE_CHARS = 8000;
 
 /** How much of a quoted message the reply line shows before it trails off. */
 const REPLY_EXCERPT_CHARS = 140;
+
+/** `linger-core::limits::MAX_ATTACHMENTS_PER_MESSAGE`, mirrored like the char
+ *  cap above so the composer can refuse the eleventh file without a round
+ *  trip. */
+const MAX_ATTACHMENTS = 10;
 
 /**
  * How close to the bottom counts as having seen the newest message. A couple of
@@ -125,6 +134,15 @@ interface StreamProps {
   density: Density;
   onDensityChange: (density: Density) => void;
   /**
+   * A message to go and find, from the media collection (SPEC §4.4: "each item
+   * links back to the message and moment it was posted in"). It may be well
+   * outside the loaded history, so finding it means loading backwards until it
+   * is in range.
+   */
+  focus?: MessageId | null;
+  /** Called once the hunt is over, found or not, so the frame can let go. */
+  onFocused?: () => void;
+  /**
    * The roster, on a window too narrow to give it a column of its own. It
    * belongs here rather than in the frame because SPEC §3 puts the strip
    * *above the composer*, and the composer is in this file.
@@ -138,6 +156,8 @@ export default function Stream({
   users,
   density,
   onDensityChange,
+  focus,
+  onFocused,
   roster,
 }: StreamProps) {
   const gateway = useGateway(api.baseUrl);
@@ -384,6 +404,48 @@ export default function Stream({
     [api, rowOf, virtualizer],
   );
 
+  /**
+   * Going to a message the media grid pointed at.
+   *
+   * It can be eight months old, which is the whole point of the collection, so
+   * the room is opened and then walked backwards until the message is inside
+   * the loaded range — `loadUntil` is the same reach "since you were gone"
+   * uses, and it stops at a thousand messages rather than pulling a year of
+   * history. `done` is how the hunt ends when it does not find it: without it,
+   * a message further back than that would leave the frame waiting forever.
+   */
+  const [hunting, setHunting] = useState<{ id: MessageId; done: boolean } | null>(null);
+  useEffect(() => {
+    if (focus === null || focus === undefined) return undefined;
+    let alive = true;
+    setHunting({ id: focus, done: false });
+    void (async () => {
+      await openRoom(api, room.id);
+      await loadUntil(api, room.id, focus);
+      if (alive) {
+        setHunting((held) => (held?.id === focus ? { id: focus, done: true } : held));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [api, room.id, focus]);
+
+  useEffect(() => {
+    if (hunting === null) return;
+    if (rowOf.has(hunting.id)) {
+      actions.jumpTo(hunting.id);
+      setHunting(null);
+      onFocused?.();
+    } else if (hunting.done) {
+      // Further back than the client will reach. The room is open at the
+      // newest message, which is where somebody who cannot get there is best
+      // left — and better than a spinner that never stops.
+      setHunting(null);
+      onFocused?.();
+    }
+  }, [hunting, rowOf, actions, onFocused]);
+
   // The composer's Up-arrow shortcut, and the keyboard's only route to editing.
   const lastMine = useMemo(() => {
     const held = messages ?? [];
@@ -612,6 +674,20 @@ function MessageRow({
   const mine = me !== null && message.author_id === me.id;
   const bodyStyle: CSSProperties = { "--age": ageOpacity(message.created_at, now) };
 
+  // What the message links to, taken from the parsed tree rather than a scan of
+  // the text, so a card is drawn for exactly what draws as a link.
+  const links = useMemo(
+    () => (deleted || editing ? [] : linkTargets(message.body)),
+    [message.body, deleted, editing],
+  );
+  const extras =
+    deleted || editing ? null : (
+      <>
+        <Attachments files={message.attachments} />
+        <LinkCards api={api} urls={links} />
+      </>
+    );
+
   return (
     <div
       className="msg"
@@ -651,6 +727,8 @@ function MessageRow({
           </div>
         </>
       )}
+
+      {extras}
 
       {problem ? <p className="msg-problem meta">{problem}</p> : null}
 
@@ -990,6 +1068,17 @@ function EditBox({
 // The composer
 // ---------------------------------------------------------------------------
 
+/** One file on its way up, as the composer holds it. */
+interface Pending {
+  key: string;
+  name: string;
+  /** 0 to 1. */
+  progress: number;
+  /** Set once the server has the bytes and has looked at them. */
+  attachment: Attachment | null;
+  problem: string | null;
+}
+
 function Composer({
   api,
   room,
@@ -1006,13 +1095,74 @@ function Composer({
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [files, setFiles] = useState<Pending[]>([]);
+  const [dropping, setDropping] = useState(false);
   const box = useRef<HTMLTextAreaElement | null>(null);
+  const picker = useRef<HTMLInputElement | null>(null);
 
   // Switching rooms should not carry a half-typed line into the new one.
   useEffect(() => {
     setDraft("");
     setProblem(null);
+    // Files, though, are not dropped: they are already on the server, and
+    // throwing one away because somebody clicked another room would be losing
+    // an upload they have been waiting for. They go with the composer.
   }, [room.id]);
+
+  /**
+   * Start uploading whatever was dropped, pasted or picked.
+   *
+   * Each file goes up on its own and reports its own progress, because that is
+   * what the pipeline is: one dropped connection costs one part, not the
+   * afternoon (PROTOCOL §6). A refusal is shown against the file it was about.
+   */
+  const attach = (chosen: File[]): void => {
+    setProblem(null);
+    setFiles((held) => {
+      const room = MAX_ATTACHMENTS - held.length;
+      if (chosen.length > room) {
+        setProblem(`One message carries at most ${MAX_ATTACHMENTS} files.`);
+      }
+      const taking = chosen.slice(0, Math.max(0, room));
+      for (const file of taking) {
+        const key = `${file.name}:${file.size}:${Date.now()}:${Math.random()}`;
+        void uploadFile(api, file, {
+          onProgress: (fraction) =>
+            setFiles((current) =>
+              current.map((one) => (one.key === key ? { ...one, progress: fraction } : one)),
+            ),
+        })
+          .then((attachment) =>
+            setFiles((current) =>
+              current.map((one) => (one.key === key ? { ...one, attachment, progress: 1 } : one)),
+            ),
+          )
+          .catch((error: unknown) =>
+            setFiles((current) =>
+              current.map((one) =>
+                one.key === key
+                  ? {
+                      ...one,
+                      problem:
+                        error instanceof ApiError ? error.message : "That file didn't go up.",
+                    }
+                  : one,
+              ),
+            ),
+          );
+        held = [...held, { key, name: file.name, progress: 0, attachment: null, problem: null }];
+      }
+      return held;
+    });
+  };
+
+  const drop = (key: string): void => {
+    const going = files.find((one) => one.key === key);
+    setFiles((held) => held.filter((one) => one.key !== key));
+    // An upload that finished is a file sitting on the server with nothing
+    // pointing at it. Take it back rather than leaving it against the pool.
+    if (going?.attachment) void api.cancelUpload(String(going.attachment.id)).catch(() => undefined);
+  };
 
   // Choosing to reply is choosing to type, so put the cursor where the typing
   // goes.
@@ -1022,13 +1172,25 @@ function Composer({
 
   useAutoGrow(box, draft);
 
+  const ready = files.filter((one) => one.attachment !== null);
+  const working = files.some((one) => one.attachment === null && one.problem === null);
+
   const submit = async (): Promise<void> => {
     const body = draft.trim();
-    if (body.length === 0 || sending) return;
+    // A message with a file on it may say nothing at all — sharing a photo
+    // without a caption is the ordinary case (PROTOCOL §4).
+    if ((body.length === 0 && ready.length === 0) || sending || working) return;
     setSending(true);
     try {
-      await sendMessage(api, room.id, body, replyTo?.id ?? null);
+      await sendMessage(
+        api,
+        room.id,
+        body,
+        replyTo?.id ?? null,
+        ready.map((one) => one.attachment).flatMap((one) => (one === null ? [] : [one.id])),
+      );
       setDraft("");
+      setFiles([]);
       setProblem(null);
       onClearReply();
     } catch (error) {
@@ -1065,9 +1227,23 @@ function Composer({
   return (
     <form
       className="composer"
+      data-dropping={dropping ? "true" : undefined}
       onSubmit={(event: FormEvent) => {
         event.preventDefault();
         void submit();
+      }}
+      // Dropping a file on the composer is how people expect to share one, and
+      // the browser's own answer to a dropped file is to navigate to it — which
+      // in a webview would replace the app with somebody's photo.
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDropping(false);
+        attach([...event.dataTransfer.files]);
       }}
     >
       {replyTo ? (
@@ -1080,6 +1256,30 @@ function Composer({
         </p>
       ) : null}
       {problem ? <p className="composer-problem meta">{problem}</p> : null}
+      {files.length === 0 ? null : (
+        <ul className="composer-files">
+          {files.map((one) => (
+            <li key={one.key} className="composer-file" data-problem={one.problem ? "true" : undefined}>
+              <span>{one.name}</span>
+              {one.problem ? (
+                <span>{one.problem}</span>
+              ) : one.attachment ? null : (
+                <span className="composer-bar" aria-label="uploading">
+                  <span style={{ width: `${Math.round(one.progress * 100)}%` }} />
+                </span>
+              )}
+              <button
+                type="button"
+                className="att-get"
+                aria-label={`don't send ${one.name}`}
+                onClick={() => drop(one.key)}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="composer-row">
         <textarea
           ref={box}
@@ -1092,11 +1292,40 @@ function Composer({
             if (event.target.value !== "") startedTyping(api, room.id);
           }}
           onKeyDown={onKeyDown}
+          onPaste={(event) => {
+            const pasted = [...event.clipboardData.files];
+            if (pasted.length > 0) {
+              event.preventDefault();
+              attach(pasted);
+            }
+          }}
           placeholder={replyTo ? "say something back" : `say something in #${room.slug}`}
           aria-label={`message #${room.slug}`}
           autoComplete="off"
         />
-        <button className="composer-send" type="submit" disabled={draft.trim().length === 0}>
+        <button
+          type="button"
+          className="composer-attach"
+          onClick={() => picker.current?.click()}
+          aria-label="attach a file"
+        >
+          + file
+        </button>
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          onChange={(event) => {
+            attach([...(event.target.files ?? [])]);
+            event.target.value = "";
+          }}
+        />
+        <button
+          className="composer-send"
+          type="submit"
+          disabled={(draft.trim().length === 0 && ready.length === 0) || working}
+        >
           send
         </button>
       </div>

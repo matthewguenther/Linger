@@ -9,6 +9,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod gateway;
+pub mod links;
 pub mod media;
 pub mod ratelimit;
 pub mod repo;

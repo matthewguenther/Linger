@@ -35,6 +35,8 @@ import type { RoomId } from "./generated/RoomId";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { User } from "./generated/User";
 import HostPanel, { type HostSection } from "./host/HostPanel";
+import type { MessageId } from "./generated/MessageId";
+import MediaPanel from "./media/MediaPanel";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
 import SettingsPanel from "./settings/SettingsPanel";
 import { noRoomsBody, noRoomsRail } from "./settings/copy";
@@ -57,6 +59,7 @@ import { occupancyLine, occupantsOf, STACK_VISIBLE } from "./lib/occupancy";
 import { colorVar } from "./lib/palette";
 import { type ServerSession, useSessions } from "./lib/session";
 import { dropPresence, setPresenceLive, setPresenceRoom, startPresence } from "./lib/watchPresence";
+import { forgetPreviews } from "./lib/previews";
 import { forgetNotifications, resetNotifications, setViewing } from "./notify/notify";
 import Roster from "./roster/Roster";
 import Stream from "./stream/Stream";
@@ -121,6 +124,7 @@ function ServerLink({
     void connect(api);
     return () => {
       forgetNotifications(baseUrl);
+      forgetPreviews(baseUrl);
       dropPresence(baseUrl);
       void disconnect(baseUrl);
     };
@@ -180,6 +184,12 @@ function Console({
   // The paste box, reached from inside the app rather than only before
   // sign-in (T-301's screen, T-412's door to it).
   const [addingServer, setAddingServer] = useState(false);
+  // The media collection (T-504). A destination in the rail, not a search
+  // result (SPEC §4.4) — it takes the stream column like the other panels.
+  const [mediaOpen, setMediaOpen] = useState(false);
+  // A message the collection pointed at, on its way to the stream that holds
+  // it. Cleared once that stream has been and looked.
+  const [jumpTo, setJumpTo] = useState<MessageId | null>(null);
   const narrow = useNarrow();
 
   // A server that has gone — signed out of, or refused — must not leave the
@@ -193,6 +203,11 @@ function Console({
     setHostSection(null);
     setSettingsOpen(false);
     setAddingServer(false);
+    setMediaOpen(false);
+  };
+  const openMedia = (): void => {
+    closePanels();
+    setMediaOpen(true);
   };
   const openSettings = (): void => {
     closePanels();
@@ -206,6 +221,9 @@ function Console({
     closePanels();
     setAddingServer(true);
   };
+
+  // Stable, because the stream holds it in an effect's dependency list.
+  const forgetJump = useCallback(() => setJumpTo(null), []);
 
   const noteInfo = useCallback((baseUrl: string, next: ServerInfo | null): void => {
     setInfo((held) => {
@@ -349,6 +367,19 @@ function Console({
           </div>
           <p className="rail-server">{server?.name ?? hostOf(active.baseUrl)}</p>
         </section>
+        <section className="rail-section">
+          {/* SPEC §4.4: a first-class destination, not something you find by
+              searching. It sits above the rooms because it is *of* the server
+              rather than in one — everything anybody has shared, in one place. */}
+          <button
+            type="button"
+            className="room-item"
+            aria-pressed={mediaOpen}
+            onClick={() => (mediaOpen ? setMediaOpen(false) : openMedia())}
+          >
+            <span className="room-slug">media</span>
+          </button>
+        </section>
         <section className="rail-section rail-rooms">
           <div className="rail-head">
             <h2 className="panel-label">rooms</h2>
@@ -434,6 +465,19 @@ function Console({
           onClose={() => setSettingsOpen(false)}
           roster={narrow ? roster : undefined}
         />
+      ) : mediaOpen ? (
+        <MediaPanel
+          api={api}
+          users={gateway.users}
+          rooms={rooms}
+          onOpen={(roomId, messageId) => {
+            setOpenRoomIds((held) => ({ ...held, [active.baseUrl]: roomId }));
+            setJumpTo(messageId);
+            closePanels();
+          }}
+          onClose={() => setMediaOpen(false)}
+          roster={narrow ? roster : undefined}
+        />
       ) : host !== null ? (
         <HostPanel
           api={api}
@@ -479,6 +523,8 @@ function Console({
           users={gateway.users}
           density={density}
           onDensityChange={setDensity}
+          focus={jumpTo}
+          onFocused={forgetJump}
           roster={narrow ? roster : undefined}
         />
       )}

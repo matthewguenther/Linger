@@ -46,7 +46,7 @@ fn row_to_record(row: &SqliteRow) -> Result<Record, ApiError> {
 }
 
 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-fn row_to_attachment(row: &SqliteRow, config: &Config) -> Result<Attachment, ApiError> {
+pub(crate) fn row_to_attachment(row: &SqliteRow, config: &Config) -> Result<Attachment, ApiError> {
     let record = row_to_record(row)?;
     Ok(Attachment {
         id: record.id,
