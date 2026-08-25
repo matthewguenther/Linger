@@ -107,7 +107,7 @@ task fails its acceptance criteria twice.
   finished the milestone: a status editor, an away message that supersedes the
   status, and a card on any name in the stream. The entrance-sound tasks are on
   the Backburner (below), so **M4 is done**.
-- ⬜ **M4.5 — the shell's missing surfaces** — new, added 2026-08-21. There is no
+- ✅ **M4.5 — the shell's missing surfaces** — new, added 2026-08-21. There is no
   way to add a room from inside the client, no invite screen, no server settings,
   no member settings, and no server list. T-410, T-411, T-412. **T-413 and T-414
   were added later the same day**, after reading T-410 with Matt turned up two
@@ -133,11 +133,15 @@ task fails its acceptance criteria twice.
   card and let them back in from the host panel's new `people` section. Removal
   is immediate on all four doors — the access token, the refresh family, the
   live socket and the roster — and it also killed the invites they had made.
-  It settled the gateway pair T-415 was waiting on, which leaves T-415 at one
+  It settled the gateway pair T-415 was waiting on, which left T-415 at one
   line of server code plus its test.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
+  **T-415 landed 2026-08-25**: `POST /auth/register` now fans out `user.update`,
+  so somebody who joins while you are connected appears in your roster right
+  away instead of after a restart — and their first message has their name on
+  it rather than "someone". **M4.5 is complete.**
 - ⬜ **M5 … M8** — queued below. M5 starts when M4.5's check passes.
 - ⏬ **Backburner (after M8)** — entrance sounds (T-901, T-902, T-903) and
   activity detection (T-911…T-917). Sounds: Matt, 2026-08-21. Activity: Matt,
@@ -1787,7 +1791,7 @@ above.
     `docker compose` form of the command has not been run against a live
     deployment.
 
-- ⬜ **T-415 · A new friend shows up without anybody restarting** — effort: **medium**
+- ✅ **T-415 · A new friend shows up without anybody restarting** — effort: **medium**
   Found during T-410 on 2026-08-21, on a real server. **Somebody who joins after you
   are already connected does not appear in your roster at all until you restart the
   app** — not when they register, and not when they come online and start talking.
@@ -1850,6 +1854,31 @@ above.
     on every presence frame for an unknown id. Both are polling with extra steps, and
     the second one is a request storm triggered by strangers. The server knows when
     somebody joined; it should say so once.
+
+  - **Landed 2026-08-25, and it really was one line of server code.** `POST
+    /auth/register` publishes `ServerEvent::UserUpdate` with the new `User` after the
+    row is committed. No new wire type, no new op, no client change: T-413 had already
+    widened `user.update` to "here is this person, whether or not you had them", and
+    the client's fold appends on an unknown id. PROTOCOL §2 now says register announces
+    itself, so the fan-out is documented next to the endpoint that does it and not only
+    in §8.
+  - **Published after the commit, and after the response is built.** The row has to
+    exist before anybody is told about it, and `auth_response` already fetches the
+    `User` to answer with, so the frame reuses that read instead of doing its own.
+  - **The test cost more than the fix, which is the point.** A gateway integration test
+    where the host is connected first, a member registers over REST, and the host gets
+    exactly one frame — `user.update` carrying them — with nothing before it and
+    nothing repeated after. It then connects as the new member and focuses a room, so
+    the presence half that already worked is pinned down too: their dot and their room
+    now land on a card that exists.
+  - *One thing the test had to account for:* a client's own "I am around" presence frame
+    arrives right after `ready`, so the host's socket is drained once before the member
+    registers. Without that the "nothing else changed" assertion catches the watcher's
+    own arrival.
+  - **Not verified on a real server.** The two-client run in the accept list — register
+    a third account through an invite with both clients open and watch the card appear
+    on both — has not been done; it needs two clients on a live server, which this
+    session did not have.
 
 ## M5 — uploads, media pipeline, the media grid
 

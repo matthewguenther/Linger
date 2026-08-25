@@ -6,6 +6,7 @@ use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use linger_core::gateway::ServerEvent;
 use linger_core::limits::{ACCESS_TOKEN_TTL_SECS, RATE_LOGIN_PER_IP};
 use linger_core::wire::{
     AuthResponse, ErrorCode, InvitePreview, LoginRequest, RefreshRequest, RefreshResponse,
@@ -112,7 +113,17 @@ async fn register(
         Err(e) => return Err(e.into()),
     }
 
-    auth_response(&state, user_id).await.map(Json)
+    let response = auth_response(&state, user_id).await?;
+
+    // Nothing else tells a connected client that this person exists: the roster
+    // is built from the `users` list in `ready`, and their presence frames have
+    // no card to land on. `user.update` is "here is this person, whether or not
+    // you had them" (PROTOCOL §8) and the client's fold appends an unknown id,
+    // so one announcement is the whole fix.
+    state
+        .gateway
+        .publish(ServerEvent::UserUpdate(response.user.clone()));
+    Ok(Json(response))
 }
 
 /// A stable argon2 hash to verify against when the username doesn't exist, so

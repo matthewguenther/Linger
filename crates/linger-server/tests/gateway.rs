@@ -378,3 +378,48 @@ async fn removing_a_member_hangs_up_on_them_and_tells_everybody_else() {
     let (frame, _) = wait_for(&mut again, "invalid_session").await;
     assert_eq!(frame["d"]["reason"], "unknown user");
 }
+
+#[tokio::test]
+async fn a_new_member_shows_up_without_anybody_restarting() {
+    let (server, host, room) = common::server_with_room("garage").await;
+    let (mut watcher, _) = connect_ready(&server, &host.access_token).await;
+    // The host's own "I am around" lands first; clear it so what follows is
+    // only what registering caused.
+    drain_for(&mut watcher, Duration::from_millis(200)).await;
+
+    // Somebody joins while the host is already connected (T-415).
+    let member = common::join_member(&server, &host.access_token, "callie").await;
+
+    let (frame, skipped) = wait_for(&mut watcher, "user.update").await;
+    assert_eq!(frame["d"]["id"], member.user.id.to_string());
+    assert_eq!(frame["d"]["username"], "callie");
+    assert_eq!(frame["d"]["is_host"], false);
+    assert!(
+        skipped.is_empty(),
+        "registering says one thing and nothing else: {skipped:?}"
+    );
+    assert!(
+        drain_for(&mut watcher, Duration::from_millis(300))
+            .await
+            .is_empty(),
+        "and it does not repeat itself"
+    );
+
+    // The half that already worked and has to keep working: their dot and the
+    // room they are in follow, now that there is a card to hang them on.
+    let (mut theirs, _) = connect_ready(&server, &member.access_token).await;
+    send_json(
+        &mut theirs,
+        json!({ "op": "room.focus", "d": { "room_id": room.id.to_string() } }),
+    )
+    .await;
+    // Their first frame is `online`; the one worth asserting is the room.
+    loop {
+        let (presence, _) = wait_for(&mut watcher, "presence.update").await;
+        assert_eq!(presence["d"]["user_id"], member.user.id.to_string());
+        if presence["d"]["state"] == "in_room" {
+            assert_eq!(presence["d"]["room_id"], room.id.to_string());
+            break;
+        }
+    }
+}

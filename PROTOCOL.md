@@ -48,6 +48,11 @@ POST /auth/logout       { refresh_token }              → 204
 GET  /auth/invite/:code → { valid, server_name, expires_at }  # unauthenticated preview
 ```
 
+`POST /auth/register` announces the new account on the gateway: it fans out
+`user.update` carrying the new `User`, which is "here is this person, whether or not
+you had them" (§8). Without it a client that is already connected has no card to draw
+the newcomer with, and would not see them until it reconnected.
+
 ### 2.2 Shareable links
 
 Nothing on the server serves these paths — they exist so a person has one thing to

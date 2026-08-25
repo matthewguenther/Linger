@@ -125,7 +125,8 @@ pub enum ServerEvent {
     /// The current state of this person, whether or not the client already had
     /// them. It carries a whole `User`, and the client's fold appends when the
     /// id is unknown — so this is also how somebody who was not on the roster a
-    /// moment ago arrives on it (a member restored after removal, T-413).
+    /// moment ago arrives on it: somebody who just registered (T-415), or a
+    /// member restored after removal (T-413).
     #[serde(rename = "user.update")]
     UserUpdate(User),
     /// This person is off the server (T-413). The mirror of `user.update`, and

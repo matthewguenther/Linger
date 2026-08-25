@@ -432,7 +432,8 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
       const user = frame.d;
       // `upsert` appends when the id is unknown, which is what makes this frame
       // do double duty: it is "their name changed" and "here is somebody you
-      // did not have" — a member the host just let back in (PROTOCOL §8).
+      // did not have" — a person who just registered, or a member the host let
+      // back in (PROTOCOL §8).
       return {
         ...current,
         me: current.me?.id === user.id ? user : current.me,
