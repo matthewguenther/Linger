@@ -1,5 +1,4 @@
-//! Assembling `wire::Message`: page fetch plus reaction grouping.
-//! Attachments join lands in M5; until then every message carries `[]`.
+//! Assembling `wire::Message`: page fetch, reaction grouping, attachments.
 
 use std::collections::HashMap;
 
@@ -8,6 +7,7 @@ use linger_core::{MessageId, RoomId, UserId, REACTIONS};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
+use crate::config::Config;
 use crate::error::ApiError;
 
 fn row_to_message(row: &SqliteRow) -> Result<Message, ApiError> {
@@ -76,7 +76,11 @@ async fn hydrate_reactions(db: &SqlitePool, messages: &mut [Message]) -> Result<
 }
 
 /// One fully assembled message.
-pub async fn by_id(db: &SqlitePool, id: MessageId) -> Result<Option<Message>, ApiError> {
+pub async fn by_id(
+    db: &SqlitePool,
+    config: &Config,
+    id: MessageId,
+) -> Result<Option<Message>, ApiError> {
     let row = sqlx::query("SELECT * FROM messages WHERE id = ?")
         .bind(id.to_vec())
         .fetch_optional(db)
@@ -84,11 +88,12 @@ pub async fn by_id(db: &SqlitePool, id: MessageId) -> Result<Option<Message>, Ap
     let Some(row) = row else { return Ok(None) };
     let mut messages = vec![row_to_message(&row)?];
     hydrate_reactions(db, &mut messages).await?;
+    crate::repo::attachments::hydrate(db, config, &mut messages).await?;
     Ok(messages.pop())
 }
 
-pub async fn expect(db: &SqlitePool, id: MessageId) -> Result<Message, ApiError> {
-    by_id(db, id)
+pub async fn expect(db: &SqlitePool, config: &Config, id: MessageId) -> Result<Message, ApiError> {
+    by_id(db, config, id)
         .await?
         .ok_or_else(|| ApiError::not_found("No such message."))
 }
@@ -97,6 +102,7 @@ pub async fn expect(db: &SqlitePool, id: MessageId) -> Result<Message, ApiError>
 /// UUIDv7 blobs compare chronologically so this is a pure range scan.
 pub async fn page(
     db: &SqlitePool,
+    config: &Config,
     room_id: RoomId,
     before: Option<MessageId>,
     after: Option<MessageId>,
@@ -126,6 +132,7 @@ pub async fn page(
         .map(row_to_message)
         .collect::<Result<Vec<_>, _>>()?;
     hydrate_reactions(db, &mut messages).await?;
+    crate::repo::attachments::hydrate(db, config, &mut messages).await?;
     Ok(messages)
 }
 

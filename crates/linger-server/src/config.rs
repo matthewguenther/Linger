@@ -68,4 +68,31 @@ impl Config {
     pub fn objects_dir(&self) -> PathBuf {
         self.data_dir.join("objects")
     }
+
+    /// Where this server is reachable from outside, for URLs it hands the
+    /// client (upload slots, attachment links).
+    ///
+    /// A configured `LINGER_DOMAIN` means the documented deployment has Caddy
+    /// terminating TLS in front (ARCHITECTURE §9), so it is `https`. Without
+    /// one we are a bare bind address with no name and no certificate, and the
+    /// only honest answer is a root-relative URL the client resolves against
+    /// whatever address it reached us on.
+    #[must_use]
+    pub fn public_origin(&self) -> String {
+        match &self.domain {
+            Some(domain) => format!("https://{domain}"),
+            None => String::new(),
+        }
+    }
+
+    /// The URL an uploaded object is served from.
+    ///
+    /// **T-503 moves this to a separate origin** (`cdn.<domain>`), which is the
+    /// real defence against a hostile upload touching an app session. Until it
+    /// lands, objects come off the app host under `/objects`, with the
+    /// download-forcing headers already in place (ARCHITECTURE §7).
+    #[must_use]
+    pub fn object_url(&self, key: &str) -> String {
+        format!("{}/objects/{key}", self.public_origin())
+    }
 }

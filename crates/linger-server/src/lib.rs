@@ -9,12 +9,14 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod gateway;
+pub mod media;
 pub mod ratelimit;
 pub mod repo;
 pub mod reset;
 pub mod routes;
 pub mod setup;
 pub mod state;
+pub mod storage;
 pub mod validate;
 
 pub use state::AppState;

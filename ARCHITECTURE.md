@@ -417,9 +417,35 @@ Never proxy bytes through the app server.
 - `local` — filesystem under the data dir. Default. Correct for a home server.
 - `s3` — any S3-compatible endpoint.
 
+Both sit behind one `ObjectStore` trait (`crates/linger-server/src/storage/`). It has
+four jobs: hand out a slot, gather an upload's parts into one local file the server can
+inspect, store/read/delete a finished object, and throw away the parts of an upload that
+died. Everything that decides *whether* bytes are acceptable is in `media`, not storage.
+
 For cloud hosting, recommend **Cloudflare R2**: zero egress fees, which matters
 enormously for a file-sharing app. Backblaze B2 is the runner-up. Plain AWS S3 will bite
 you on egress.
+
+**The local backend's listener.** Step 3 is trivial with S3 — the client PUTs at Amazon.
+With a filesystem there is no second machine, so the local backend hands out URLs under
+`PUT /upload/{upload_id}/{part}`, and objects come back from `GET /objects/{key}`.
+Neither path is under `/api/v1`, neither reads an `Authorization` header, and neither
+touches a session: the part URL is signed with an HMAC over the upload id, the part
+number and an expiry, which is what an S3 presigned URL is. The signing key lives in the
+data dir beside the JWT key, because it has to survive a restart or a resumed upload
+would find every URL it was holding invalid — the exact case resumability exists for.
+
+An upload id **is** an attachment id. The part layout is a pure function of the declared
+size, so nothing about an in-flight upload needs its own table.
+
+**Failing at step 5 is two different things.** Parts missing is the ordinary shape of a
+dropped connection: the slot stays pending and the client sends what is missing. Anything
+else — wrong size, a file that is not the type it claimed, an image that will not decode
+— is final, and the parts go.
+
+**ffmpeg is optional.** `ffprobe` supplies video and audio duration and video dimensions;
+`ffmpeg` grabs the poster frame. A server without them stores media perfectly well and
+simply has no poster. The published image installs them.
 
 ---
 

@@ -3,8 +3,8 @@
 //! so handlers read as straight-line code.
 
 use linger_core::limits::{
-    MAX_DISPLAY_NAME_CHARS, MAX_MESSAGE_CHARS, MAX_STATUS_FIELD_CHARS, MAX_STATUS_LINE_CHARS,
-    MIN_PASSWORD_CHARS,
+    MAX_DISPLAY_NAME_CHARS, MAX_FILENAME_CHARS, MAX_MESSAGE_CHARS, MAX_STATUS_FIELD_CHARS,
+    MAX_STATUS_LINE_CHARS, MIN_PASSWORD_CHARS,
 };
 use linger_core::wire::{Fill, Style, UserStatus};
 
@@ -64,15 +64,42 @@ pub fn password(s: &str) -> Result<(), ApiError> {
 
 /// Trimmed message body, 1..=8000 chars (PROTOCOL §4).
 pub fn message_body(s: &str) -> Result<String, ApiError> {
-    let trimmed = s.trim();
-    let len = trimmed.chars().count();
-    if len == 0 {
+    let trimmed = caption(s)?;
+    if trimmed.is_empty() {
         return Err(ApiError::validation("Say something."));
     }
-    if len > MAX_MESSAGE_CHARS {
+    Ok(trimmed)
+}
+
+/// The same body, but allowed to be empty because the message carries files.
+///
+/// Handing somebody a photo without typing a caption over it is the ordinary
+/// way to share a photo, so a message with an attachment on it does not have to
+/// say anything as well (PROTOCOL §4).
+pub fn caption(s: &str) -> Result<String, ApiError> {
+    let trimmed = s.trim();
+    if trimmed.chars().count() > MAX_MESSAGE_CHARS {
         return Err(ApiError::validation("That's too long for one message."));
     }
     Ok(trimmed.to_string())
+}
+
+/// A filename is stored and echoed back in a download header, so it is stripped
+/// of anything that could steer a filesystem or forge a header line: directory
+/// components, control characters, quotes.
+pub fn filename(s: &str) -> Result<String, ApiError> {
+    let base = s.rsplit(['/', '\\']).next().unwrap_or(s).trim();
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '"' | '\\'))
+        .collect();
+    let cleaned = cleaned.trim_matches('.').trim().to_string();
+    if cleaned.is_empty() || cleaned.chars().count() > MAX_FILENAME_CHARS {
+        return Err(ApiError::validation(
+            "That file needs a name, and a shorter one.",
+        ));
+    }
+    Ok(cleaned)
 }
 
 /// The AGENTS.md hard rule: palette and font keys are validated server-side
@@ -139,6 +166,28 @@ mod tests {
         assert!(username("Matt").is_err());
         assert!(username("matt guenther").is_err());
         assert!(username(&"x".repeat(25)).is_err());
+    }
+
+    #[test]
+    fn filenames_lose_paths_and_anything_that_could_forge_a_header() {
+        assert_eq!(filename("holiday.jpg").unwrap(), "holiday.jpg");
+        assert_eq!(filename("../../etc/passwd").unwrap(), "passwd");
+        assert_eq!(filename("C:\\Users\\me\\notes.txt").unwrap(), "notes.txt");
+        assert_eq!(
+            filename("a\"; filename=\"evil.html").unwrap(),
+            "a; filename=evil.html"
+        );
+        assert!(filename("   ").is_err());
+        assert!(filename("...").is_err());
+        assert!(filename(&"x".repeat(300)).is_err());
+    }
+
+    #[test]
+    fn a_message_with_a_file_on_it_does_not_have_to_say_anything() {
+        assert!(message_body("   ").is_err());
+        assert_eq!(caption("   ").unwrap(), "");
+        assert_eq!(caption(" hello ").unwrap(), "hello");
+        assert!(caption(&"x".repeat(MAX_MESSAGE_CHARS + 1)).is_err());
     }
 
     #[test]

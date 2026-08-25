@@ -86,7 +86,8 @@ These terms are used everywhere — UI, code, docs, error messages:
   into a tree and drawn as elements; **no raw HTML from a message, ever**
 - 🎚️ **Reactions by weight** — a fixed palette of 12; six identical reactions render
   denser and larger, not "👍 6"
-- 📁 **File sharing** — 500 MB files, resumable uploads, **EXIF always stripped**
+- 📁 **File sharing** — 500 MB files, resumable uploads, **EXIF always stripped**, a
+  poster frame and a blurhash generated for you
 - 🖥️ **Desktop client** for Linux, Windows, and macOS (Tauri 2, not Electron)
 - 🏘️ **Several servers at once** — a list in the rail with a live dot each, and
   `+ add` to join another. Each one is its own sign-in, its own people and its own
@@ -179,6 +180,28 @@ it for you — it is your server's address with the code hung off it,
 same box the setup link goes in. The box also takes a bare address (`linger.example`)
 for signing back in.
 
+**Files.** Uploads go straight from the app to storage — the bytes never pass through
+the part of the server that answers questions about messages. Anything over 8 MB is sent
+in 8 MB pieces, so a connection that drops costs you one piece and not the file; sending
+the missing pieces picks up where it stopped.
+
+Every image is decoded and written out again on the way in. That is what removes EXIF —
+the block of camera data attached to a photo, which for a phone photo usually includes
+the GPS coordinates of where you were standing. There is no setting for this. It also
+means an image that is secretly two files at once stops being the second one. A WebP
+comes back as a PNG, because the encoder Linger uses can read WebP but not write it; the
+picture and the file extension both stay honest.
+
+Videos get a poster frame and their duration if the machine has `ffmpeg` on it. The
+published Docker image includes it. Without it, videos still upload and play — there is
+just no still frame to show first.
+
+What a server takes: images (JPEG, PNG, GIF, WebP), video (MP4, WebM, MOV), audio (MP3,
+Ogg, WAV, FLAC, AAC, M4A), and ordinary documents and archives — PDF, zip, tar, the
+office formats, plain text. Not SVG, not HTML, not programs. Those are scripts wearing a
+file extension, and the safe way to handle them is not to store them. A file the server
+does not recognise is kept as a plain download rather than being shown in place.
+
 **Backup** is the whole point of self-hosting your friendships — it's two paths:
 `data/linger.db` and `data/objects/`. A cron one-liner:
 
@@ -232,6 +255,7 @@ Read first, in order: [SPEC.md](SPEC.md) → [ARCHITECTURE.md](ARCHITECTURE.md) 
 
 ```bash
 # server + core + activity (no GUI deps needed)
+# optional: `ffmpeg` on PATH makes the video-poster test run instead of skipping
 cargo test --workspace
 
 # frontend

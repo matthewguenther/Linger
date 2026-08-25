@@ -3,13 +3,17 @@
 //! Deletes are tombstones — the row stays so reply chains survive. And per the
 //! AGENTS.md hard rule: nothing here computes or returns an unread count, and
 //! nothing ever will.
+//!
+//! Files are uploaded first and attached second (PROTOCOL §6): by the time an
+//! `attachment_id` reaches this module the bytes are already stored, checked
+//! and re-encoded, and all that is left is to say which message they belong to.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use linger_core::gateway::ServerEvent;
-use linger_core::limits::RATE_MESSAGE_SEND;
+use linger_core::limits::{MAX_ATTACHMENTS_PER_MESSAGE, RATE_MESSAGE_SEND};
 use linger_core::wire::{
     CreateMessageRequest, EditMessageRequest, Message, UpdateReadMarkerRequest,
 };
@@ -50,9 +54,16 @@ async fn page(
 ) -> Result<Json<Vec<Message>>, ApiError> {
     repo::rooms::expect(&state.db.read, room_id).await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
-    repo::messages::page(&state.db.read, room_id, query.before, query.after, limit)
-        .await
-        .map(Json)
+    repo::messages::page(
+        &state.db.read,
+        &state.config,
+        room_id,
+        query.before,
+        query.after,
+        limit,
+    )
+    .await
+    .map(Json)
 }
 
 async fn create(
@@ -72,16 +83,15 @@ async fn create(
     if room.archived_at.is_some() {
         return Err(ApiError::validation("That room is archived."));
     }
-    let body = validate::message_body(&req.body)?;
-    if req
-        .attachment_ids
-        .as_ref()
-        .is_some_and(|ids| !ids.is_empty())
-    {
-        return Err(ApiError::validation("Attachments arrive with M5."));
-    }
+    let attachment_ids = req.attachment_ids.clone().unwrap_or_default();
+    check_attachments(&state, auth.id, &attachment_ids).await?;
+    let body = if attachment_ids.is_empty() {
+        validate::message_body(&req.body)?
+    } else {
+        validate::caption(&req.body)?
+    };
     if let Some(reply_to) = req.reply_to {
-        let parent = repo::messages::expect(&state.db.read, reply_to).await?;
+        let parent = repo::messages::expect(&state.db.read, &state.config, reply_to).await?;
         if parent.room_id != room_id {
             return Err(ApiError::validation("Replies stay in their room."));
         }
@@ -101,11 +111,62 @@ async fn create(
     .execute(&state.db.write)
     .await?;
 
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    // Attaching is the last step of the upload pipeline (ARCHITECTURE §8): the
+    // file has been stored and checked for a while by now, and this is the
+    // moment it becomes part of the conversation.
+    for attachment_id in &attachment_ids {
+        sqlx::query("UPDATE attachments SET message_id = ? WHERE id = ? AND message_id IS NULL")
+            .bind(id.to_vec())
+            .bind(attachment_id.to_vec())
+            .execute(&state.db.write)
+            .await?;
+    }
+
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     state
         .gateway
         .publish(ServerEvent::MessageCreate(message.clone()));
     Ok(Json(message))
+}
+
+/// A message may only carry uploads that finished, that this person uploaded,
+/// and that are not already hanging off another message.
+///
+/// The uploader check is the one that matters: without it, an attachment id is
+/// a bearer token for somebody else's file, and posting it would republish
+/// their upload under your name.
+async fn check_attachments(
+    state: &AppState,
+    author: UserId,
+    ids: &[linger_core::AttachmentId],
+) -> Result<(), ApiError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    if ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(ApiError::validation(format!(
+            "One message carries at most {MAX_ATTACHMENTS_PER_MESSAGE} files."
+        )));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for id in ids {
+        if !seen.insert(*id) {
+            return Err(ApiError::validation("That file is on the message twice."));
+        }
+        let record = repo::attachments::record(&state.db.read, *id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("No such upload."))?;
+        if record.uploader_id != author {
+            return Err(ApiError::forbidden("That upload isn't yours."));
+        }
+        if record.state != "complete" {
+            return Err(ApiError::validation("That upload hasn't finished."));
+        }
+        if record.message_id.is_some() {
+            return Err(ApiError::conflict("That file is already on a message."));
+        }
+    }
+    Ok(())
 }
 
 async fn edit(
@@ -114,14 +175,18 @@ async fn edit(
     Path(id): Path<MessageId>,
     Json(req): Json<EditMessageRequest>,
 ) -> Result<Json<Message>, ApiError> {
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
     }
     if message.author_id != auth.id {
         return Err(ApiError::forbidden("Only the author can edit a message."));
     }
-    let body = validate::message_body(&req.body)?;
+    let body = if message.attachments.is_empty() {
+        validate::message_body(&req.body)?
+    } else {
+        validate::caption(&req.body)?
+    };
 
     sqlx::query("UPDATE messages SET body = ?, edited_at = ? WHERE id = ?")
         .bind(&body)
@@ -130,7 +195,7 @@ async fn edit(
         .execute(&state.db.write)
         .await?;
 
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     state
         .gateway
         .publish(ServerEvent::MessageUpdate(message.clone()));
@@ -150,7 +215,7 @@ async fn delete(
     auth: AuthedUser,
     Path(id): Path<MessageId>,
 ) -> Result<StatusCode, ApiError> {
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     if message.deleted_at.is_some() {
         return Ok(StatusCode::NO_CONTENT); // idempotent
     }
@@ -175,7 +240,7 @@ async fn delete(
 }
 
 async fn set_pin(state: &AppState, id: MessageId, pinned: bool) -> Result<Json<Message>, ApiError> {
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
     }
@@ -184,7 +249,7 @@ async fn set_pin(state: &AppState, id: MessageId, pinned: bool) -> Result<Json<M
         .bind(id.to_vec())
         .execute(&state.db.write)
         .await?;
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     state
         .gateway
         .publish(ServerEvent::MessageUpdate(message.clone()));
@@ -217,7 +282,7 @@ async fn add_reaction(
             "Reactions come from the fixed set of 12.",
         ));
     }
-    let message = repo::messages::expect(&state.db.read, id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
     }
@@ -275,7 +340,7 @@ async fn put_read_marker(
     Path(room_id): Path<RoomId>,
     Json(req): Json<UpdateReadMarkerRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let message = repo::messages::expect(&state.db.read, req.last_read_id).await?;
+    let message = repo::messages::expect(&state.db.read, &state.config, req.last_read_id).await?;
     if message.room_id != room_id {
         return Err(ApiError::validation("That message isn't in that room."));
     }

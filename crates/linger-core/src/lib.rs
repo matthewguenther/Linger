@@ -10,6 +10,7 @@
 pub mod gateway;
 pub mod id;
 pub mod limits;
+pub mod media;
 pub mod palette;
 pub mod wire;
 

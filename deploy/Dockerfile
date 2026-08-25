@@ -10,8 +10,11 @@ COPY registry ./registry
 RUN cargo build --release -p linger-server
 
 FROM debian:bookworm-slim
+# ffmpeg is optional (ARCHITECTURE §8): without it a server stores video fine
+# and simply has no poster frame or duration. It is installed here because the
+# published image should do the whole job.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /data linger
 COPY --from=build /src/target/release/linger-server /usr/local/bin/linger-server
