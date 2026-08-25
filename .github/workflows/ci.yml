@@ -81,3 +81,14 @@ jobs:
         run: |
           mkdir -p client/dist
           cargo test --manifest-path client/src-tauri/Cargo.toml
+
+  rules:
+    # The AGENTS.md hard rules a grep can catch: no AI attribution in commits,
+    # identities, or the tree, and the dropped vocabulary stays dropped (SPEC §1).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: rules lint
+        run: scripts/lint-rules.sh "${{ github.event.pull_request.base.sha || '' }}"

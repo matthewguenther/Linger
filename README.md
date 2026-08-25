@@ -248,10 +248,15 @@ crates/linger-activity/   foreground-app detection, per-OS backends
 client/                   Tauri 2 shell + React/TypeScript frontend
 registry/apps.json        bundled app registry for activity detection
 deploy/                   Dockerfile, compose, Caddyfile
+docs/                     screenshots; docs/tasks/ archives closed milestones,
+                          docs/decisions.md records settled questions
+scripts/                  check.sh (the whole local gate), lint-rules.sh
 ```
 
 Read first, in order: [SPEC.md](SPEC.md) → [ARCHITECTURE.md](ARCHITECTURE.md) →
 [PROTOCOL.md](PROTOCOL.md) → [AGENTS.md](AGENTS.md). The docs are the source of truth.
+Contributing — with any coding agent, or none — starts at
+[CONTRIBUTING.md](CONTRIBUTING.md); the work queue is [TASKS.md](TASKS.md).
 
 ```bash
 # server + core + activity (no GUI deps needed)
@@ -267,7 +272,9 @@ cd client && pnpm install && pnpm check && pnpm test
 cd client && pnpm tauri dev
 ```
 
-Before you push, run what CI runs — it gates on all of it:
+Before you push, run what CI runs — `scripts/check.sh` does all of it in one
+go, including a lint that rejects AI attribution and dropped vocabulary
+(`scripts/lint-rules.sh`). Piece by piece it is:
 
 ```bash
 cargo fmt --all --check
