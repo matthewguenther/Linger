@@ -212,6 +212,38 @@ office formats, plain text. Not SVG, not HTML, not programs. Those are scripts w
 file extension, and the safe way to handle them is not to store them. A file the server
 does not recognise is kept as a plain download rather than being shown in place.
 
+**Sharing one** is `+ file` next to the composer, or dragging it onto the composer, or
+pasting it. It starts going up straight away, with a small bar per file, and you can
+still type while it does. A message with a file on it does not need any words. Pictures
+land in the conversation at their own shape, up to 400px tall, and click to expand;
+video gets a player and its poster frame; anything else is one line with the filename,
+the size, and `save`, which hands the file to your browser rather than opening it in the
+app.
+
+**Media** is the third thing in the rail, above the rooms, and it is everything anybody
+has ever shared here: pictures, video, sound, files, links, and the messages people
+pinned. Filter it by person, by kind, or between two dates. Click anything to go back to
+the message it came from, in the room it was posted in — that is the point of it. A star
+keeps an item forever; starred things sort to the front and are never swept by the
+year-old cleanup.
+
+**Links** in a message get one line under it: the site's icon, the page title, and the
+domain. Not a 400px billboard with somebody's hero image in it.
+
+The server fetches that line, once per address, for everybody — your client never
+touches the linked site, and neither does anyone else's. If it did, every site anyone
+ever linked would collect the IP address of every person who scrolled past the message.
+The icon comes down inside the answer rather than as a web address, so drawing the card
+makes no request at all.
+
+The fetch itself is careful, because a link in a message is a stranger telling your
+server what to go and open. It looks up the address itself and refuses the whole name if
+any part of it points inside a network — your router, your NAS, a cloud metadata service
+— then holds the connection to the address it checked, so the name cannot change
+underneath it. It follows at most three redirects and checks every one, gives up after a
+few seconds, and stops reading after 256 KB. A link it will not fetch still gets a card
+with its domain on it.
+
 **Where files live.** By default, in the data directory next to the database — right for
 a home server, and the reason backup is two paths. A server that would rather keep files
 in an S3 bucket sets `LINGER_STORAGE=s3` and five more variables:

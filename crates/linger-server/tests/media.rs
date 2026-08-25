@@ -39,7 +39,13 @@ fn png() -> Vec<u8> {
 
 /// Slot, PUT, complete — the whole upload, since every media test starts with
 /// something having been uploaded.
-async fn upload(server: &TestServer, token: &str, filename: &str, mime: &str, bytes: Vec<u8>) -> Attachment {
+async fn upload(
+    server: &TestServer,
+    token: &str,
+    filename: &str,
+    mime: &str,
+    bytes: Vec<u8>,
+) -> Attachment {
     let slot: UploadSlot = client()
         .post(server.url("/uploads"))
         .bearer_auth(token)
@@ -68,7 +74,13 @@ async fn upload(server: &TestServer, token: &str, filename: &str, mime: &str, by
     resp.json().await.unwrap()
 }
 
-async fn post(server: &TestServer, token: &str, room: &Room, body: &str, files: &[&Attachment]) -> Message {
+async fn post(
+    server: &TestServer,
+    token: &str,
+    room: &Room,
+    body: &str,
+    files: &[&Attachment],
+) -> Message {
     let ids: Vec<String> = files.iter().map(|file| file.id.to_string()).collect();
     let resp = client()
         .post(server.url(&format!("/rooms/{}/messages", room.id)))
@@ -81,7 +93,12 @@ async fn post(server: &TestServer, token: &str, room: &Room, body: &str, files: 
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "post refused: {}", resp.text().await.unwrap());
+    assert_eq!(
+        resp.status(),
+        200,
+        "post refused: {}",
+        resp.text().await.unwrap()
+    );
     resp.json().await.unwrap()
 }
 
@@ -92,14 +109,25 @@ async fn media(server: &TestServer, token: &str, query: &str) -> Vec<MediaItem> 
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "media refused: {}", resp.text().await.unwrap());
+    assert_eq!(
+        resp.status(),
+        200,
+        "media refused: {}",
+        resp.text().await.unwrap()
+    );
     resp.json().await.unwrap()
 }
 
 fn kinds(items: &[MediaItem]) -> Vec<String> {
     items
         .iter()
-        .map(|item| serde_json::to_value(item.kind).unwrap().as_str().unwrap().to_string())
+        .map(|item| {
+            serde_json::to_value(item.kind)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
         .collect()
 }
 
@@ -112,7 +140,14 @@ async fn the_collection_holds_everything_shared_and_every_item_names_its_moment(
 
     let image = upload(&server, token, "holiday.png", "image/png", png()).await;
     let with_image = post(&server, token, &room, "the good one", &[&image]).await;
-    let with_link = post(&server, token, &room, "read this https://example.com/a", &[]).await;
+    let with_link = post(
+        &server,
+        token,
+        &room,
+        "read this https://example.com/a",
+        &[],
+    )
+    .await;
     let pinned = post(&server, token, &room, "keep this", &[]).await;
     client()
         .post(server.url(&format!("/messages/{}/pin", pinned.id)))
@@ -165,7 +200,14 @@ async fn the_grid_filters_by_person_by_type_and_by_date() {
     )
     .await;
     let their_message = post(&server, &friend.access_token, &room, "", &[&theirs]).await;
-    post(&server, &friend.access_token, &room, "https://example.com/b", &[]).await;
+    post(
+        &server,
+        &friend.access_token,
+        &room,
+        "https://example.com/b",
+        &[],
+    )
+    .await;
 
     // By type.
     let images = media(&server, &host.access_token, "?kind=image").await;
@@ -183,14 +225,23 @@ async fn the_grid_filters_by_person_by_type_and_by_date() {
     )
     .await;
     assert_eq!(theirs_only.len(), 2);
-    assert!(theirs_only.iter().all(|item| item.author_id == friend.user.id));
+    assert!(theirs_only
+        .iter()
+        .all(|item| item.author_id == friend.user.id));
 
     // By date range. `mid` is a moment with things on both sides of it, so the
     // two halves have to add back up to the whole.
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     let mid = their_message.created_at + 10;
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    let latest = post(&server, &host.access_token, &room, "https://example.com/c", &[]).await;
+    let latest = post(
+        &server,
+        &host.access_token,
+        &room,
+        "https://example.com/c",
+        &[],
+    )
+    .await;
 
     let newer = media(&server, &host.access_token, &format!("?since={mid}")).await;
     assert_eq!(newer.len(), 1, "only what was shared after mid");
@@ -226,7 +277,14 @@ async fn a_star_sorts_first_and_paging_never_repeats_or_skips() {
         uploaded.push(file);
     }
     for n in 0..3 {
-        post(&server, token, &room, &format!("https://example.com/{n}"), &[]).await;
+        post(
+            &server,
+            token,
+            &room,
+            &format!("https://example.com/{n}"),
+            &[],
+        )
+        .await;
     }
     for n in 0..2 {
         let message = post(&server, token, &room, &format!("pin {n}"), &[]).await;
@@ -274,10 +332,16 @@ async fn a_star_sorts_first_and_paging_never_repeats_or_skips() {
         walked.extend(page.into_iter().map(|item| item.cursor));
     }
     let unique: HashSet<&String> = walked.iter().collect();
-    assert_eq!(unique.len(), walked.len(), "an item came back twice: {walked:?}");
+    assert_eq!(
+        unique.len(),
+        walked.len(),
+        "an item came back twice: {walked:?}"
+    );
     assert_eq!(
         walked,
-        all.iter().map(|item| item.cursor.clone()).collect::<Vec<_>>(),
+        all.iter()
+            .map(|item| item.cursor.clone())
+            .collect::<Vec<_>>(),
         "paging saw a different collection than one big page did"
     );
 
@@ -290,7 +354,10 @@ async fn a_star_sorts_first_and_paging_never_repeats_or_skips() {
         .unwrap();
     assert_eq!(resp.status(), 204);
     let after = media(&server, token, "?limit=100").await;
-    assert_ne!(after[0].attachment.as_ref().map(|file| file.id), Some(starred.id));
+    assert_ne!(
+        after[0].attachment.as_ref().map(|file| file.id),
+        Some(starred.id)
+    );
     assert!(after.iter().all(|item| item.starred_at.is_none()));
 }
 
@@ -310,7 +377,14 @@ async fn only_things_that_were_actually_shared_are_in_the_collection() {
 
     // Posted and then deleted: it left the room.
     let doomed = upload(&server, token, "gone.png", "image/png", png()).await;
-    let message = post(&server, token, &room, "https://example.com/gone", &[&doomed]).await;
+    let message = post(
+        &server,
+        token,
+        &room,
+        "https://example.com/gone",
+        &[&doomed],
+    )
+    .await;
     client()
         .delete(server.url(&format!("/messages/{}", message.id)))
         .bearer_auth(token)
@@ -329,7 +403,10 @@ async fn an_edit_changes_what_the_collection_remembers() {
     let message = post(&server, token, &room, "look https://example.com/first", &[]).await;
     let before = media(&server, token, "?kind=link").await;
     assert_eq!(before.len(), 1);
-    assert_eq!(before[0].link.as_ref().unwrap().url, "https://example.com/first");
+    assert_eq!(
+        before[0].link.as_ref().unwrap().url,
+        "https://example.com/first"
+    );
 
     client()
         .patch(server.url(&format!("/messages/{}", message.id)))
@@ -374,7 +451,12 @@ async fn previews(server: &TestServer, token: &str, urls: &[&str]) -> Vec<serde_
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200, "preview refused: {}", resp.text().await.unwrap());
+    assert_eq!(
+        resp.status(),
+        200,
+        "preview refused: {}",
+        resp.text().await.unwrap()
+    );
     resp.json().await.unwrap()
 }
 
@@ -415,8 +497,14 @@ async fn a_preview_never_goes_looking_inside_the_network() {
 
     assert_eq!(cards.len(), targets.len(), "one card per URL asked about");
     for card in &cards {
-        assert!(card["title"].is_null(), "a refused fetch has no title: {card}");
-        assert!(card["icon"].is_null(), "a refused fetch has no icon: {card}");
+        assert!(
+            card["title"].is_null(),
+            "a refused fetch has no title: {card}"
+        );
+        assert!(
+            card["icon"].is_null(),
+            "a refused fetch has no icon: {card}"
+        );
     }
     // Give anything in flight a moment to land before counting.
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -454,7 +542,9 @@ async fn a_card_that_could_not_be_fetched_is_still_a_card_and_is_remembered() {
 async fn a_link_dump_cannot_ask_for_an_unbounded_batch() {
     let server = spawn_server().await;
     let host = bootstrap_host(&server).await;
-    let many: Vec<String> = (0..40).map(|n| format!("https://example.com/{n}")).collect();
+    let many: Vec<String> = (0..40)
+        .map(|n| format!("https://example.com/{n}"))
+        .collect();
     let resp = client()
         .post(server.url("/links/preview"))
         .bearer_auth(&host.access_token)

@@ -440,7 +440,7 @@ pub struct CompleteUploadRequest {
     pub parts: Option<Vec<CompletedPart>>,
 }
 
-/// Which shelf of the media collection an item sits on (SPEC §4.4).
+/// Which part of the media collection an item belongs to (SPEC §4.4).
 ///
 /// The first four come from an upload's stored type (`media::kind_of`). The
 /// last two are properties of a message rather than of a file: a `link` is a

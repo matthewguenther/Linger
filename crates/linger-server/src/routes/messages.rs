@@ -112,7 +112,7 @@ async fn create(
     .await?;
 
     // What the message links to, recorded as it is posted so the media grid's
-    // link shelf is a table read rather than a scan of every body ever written
+    // links are a table read rather than a scan of every body ever written
     // (SPEC §4.4). The cards themselves are filled in later, on demand, by
     // `POST /links/preview` — nothing here touches the network.
     repo::links::replace_for_message(&state.db.write, id, &crate::links::extract(&body)).await?;

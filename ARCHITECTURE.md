@@ -202,7 +202,7 @@ CREATE TABLE attachments (
 CREATE INDEX idx_attachments_media ON attachments(created_at DESC) WHERE state='complete';
 
 -- One row per URL in a message body, re-extracted on every edit. This is what
--- the media grid's `link` shelf pages over; the stream re-extracts client-side
+-- the media grid pages over for `kind=link`; the stream re-extracts client-side
 -- for the inline card. See SPEC §4.4 and §5.6.
 CREATE TABLE message_links (
   message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

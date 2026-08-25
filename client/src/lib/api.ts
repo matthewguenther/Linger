@@ -8,6 +8,8 @@
  * boundary: `send()` is the single place where an untyped response body becomes
  * a typed one, and it is one annotated assignment, not a cast.
  */
+import type { Attachment } from "../generated/Attachment";
+import type { AttachmentId } from "../generated/AttachmentId";
 import type { AuthResponse } from "../generated/AuthResponse";
 import type { ChangePasswordRequest } from "../generated/ChangePasswordRequest";
 import type { CreateInviteRequest } from "../generated/CreateInviteRequest";
@@ -16,7 +18,12 @@ import type { ErrorBody } from "../generated/ErrorBody";
 import type { ErrorCode } from "../generated/ErrorCode";
 import type { Invite } from "../generated/Invite";
 import type { InvitePreview } from "../generated/InvitePreview";
+import type { CompletedPart } from "../generated/CompletedPart";
+import type { CreateUploadRequest } from "../generated/CreateUploadRequest";
+import type { LinkPreview } from "../generated/LinkPreview";
 import type { LoginRequest } from "../generated/LoginRequest";
+import type { MediaItem } from "../generated/MediaItem";
+import type { MediaKind } from "../generated/MediaKind";
 import type { RefreshRequest } from "../generated/RefreshRequest";
 import type { RefreshResponse } from "../generated/RefreshResponse";
 import type { RegisterRequest } from "../generated/RegisterRequest";
@@ -26,6 +33,7 @@ import type { ServerInfo } from "../generated/ServerInfo";
 import type { SetupPreview } from "../generated/SetupPreview";
 import type { SetupRequest } from "../generated/SetupRequest";
 import type { UpdateMeRequest } from "../generated/UpdateMeRequest";
+import type { UploadSlot } from "../generated/UploadSlot";
 import type { UpdateRoomRequest } from "../generated/UpdateRoomRequest";
 import type { UpdateServerRequest } from "../generated/UpdateServerRequest";
 import type { User } from "../generated/User";
@@ -173,6 +181,31 @@ async function requestVoid(
   options: RequestOptions = {},
 ): Promise<void> {
   await send(baseUrl, method, path, options);
+}
+
+/** What the media grid is asking for (PROTOCOL §6). */
+export interface MediaQuery {
+  kind?: MediaKind | null;
+  author?: UserId | null;
+  /** Unix ms, inclusive. */
+  since?: number | null;
+  until?: number | null;
+  /** The last item's `cursor` from the previous page. Opaque. */
+  before?: string | null;
+  limit?: number;
+}
+
+/** Built here rather than in the panel so the query shape lives with the call. */
+export function mediaQuery(query: MediaQuery): string {
+  const parts = new URLSearchParams();
+  if (query.kind) parts.set("kind", query.kind);
+  if (query.author) parts.set("author", query.author);
+  if (query.since !== null && query.since !== undefined) parts.set("since", String(query.since));
+  if (query.until !== null && query.until !== undefined) parts.set("until", String(query.until));
+  if (query.before) parts.set("before", query.before);
+  if (query.limit !== undefined) parts.set("limit", String(query.limit));
+  const text = parts.toString();
+  return text === "" ? "" : `?${text}`;
 }
 
 /**
@@ -381,6 +414,49 @@ export class AuthedApi {
         accessToken,
       }),
     );
+  }
+
+  // --- uploads and the media collection (PROTOCOL §6) -----------------------
+
+  /** Reserve a slot. The bytes go straight at `slot.url`, never through here. */
+  createUpload(request: CreateUploadRequest): Promise<UploadSlot> {
+    return this.post<UploadSlot>("/uploads", request);
+  }
+
+  /** Say the bytes are all there. This is where the server looks at them. */
+  completeUpload(id: string, parts: CompletedPart[] | null): Promise<Attachment> {
+    return this.post<Attachment>(`/uploads/${encodeURIComponent(id)}/complete`, { parts });
+  }
+
+  /** Throw an upload away, finished or not. */
+  cancelUpload(id: string): Promise<void> {
+    return this.delete(`/uploads/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * A page of the media collection. `before` is the previous page's last
+   * `cursor`, handed back untouched — it is opaque and must not be built,
+   * parsed or compared (PROTOCOL §6).
+   */
+  media(query: MediaQuery, signal?: AbortSignal): Promise<MediaItem[]> {
+    return this.get<MediaItem[]>(`/media${mediaQuery(query)}`, signal);
+  }
+
+  starMedia(id: AttachmentId): Promise<void> {
+    return this.put(`/media/${encodeURIComponent(id)}/star`);
+  }
+
+  unstarMedia(id: AttachmentId): Promise<void> {
+    return this.delete(`/media/${encodeURIComponent(id)}/star`);
+  }
+
+  /**
+   * Cards for the links about to be drawn. The server fetches them with its own
+   * IP and hands the favicon back inline, so nothing here — and nothing in the
+   * webview — ever touches the linked site (PROTOCOL §6).
+   */
+  linkPreviews(urls: string[]): Promise<LinkPreview[]> {
+    return this.post<LinkPreview[]>("/links/preview", { urls });
   }
 
   invites(signal?: AbortSignal): Promise<Invite[]> {

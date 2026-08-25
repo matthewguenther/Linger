@@ -381,7 +381,7 @@ pinned messages. `since`/`until` are Unix ms and inclusive; a range that ends
 before it starts is `VALIDATION_FAILED` rather than an empty answer.
 
 **Order.** Starred first, then newest first. Only an upload can be starred, so
-the whole starred shelf comes ahead of every link and pin.
+everything starred comes ahead of every link and pin.
 
 **Paging** is keyset, not offset: pass the last item's `cursor` back as
 `before`. A cursor is opaque — do not parse it, build one, or compare two. All

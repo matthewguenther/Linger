@@ -6,7 +6,7 @@
 //! SQLite into a `UNION` of columns that do not line up.
 //!
 //! **Ordering.** Starred first (SPEC §4.4), then newest first. Only an upload
-//! can be starred, so "starred first" means the whole starred shelf comes before
+//! can be starred, so "starred first" means everything starred comes before
 //! any link or pin.
 //!
 //! **Paging** is keyset, not offset: a grid that people scroll while other
@@ -86,7 +86,7 @@ pub async fn page(
     query: &Query,
 ) -> Result<Vec<MediaItem>, ApiError> {
     // Where the cursor sits decides what the sources are allowed to return: an
-    // unstarred cursor means the starred shelf is already behind us, so no
+    // unstarred cursor means everything starred is already behind us, so no
     // starred item may come back at all.
     let past_starred = match &query.before {
         None => false,
@@ -214,7 +214,7 @@ async fn attachment_groups(
         if past_starred {
             sql.push_str(&format!(" AND a.starred_at IS NULL AND {compare}"));
         } else {
-            // Still inside the starred shelf: step through the rest of it, and
+            // Still among the starred: step through the rest of them, and
             // everything unstarred is still ahead.
             sql.push_str(&format!(
                 " AND ((a.starred_at IS NOT NULL AND {compare}) OR a.starred_at IS NULL)"

@@ -526,39 +526,67 @@ function flattenInline(nodes: readonly Inline[]): string {
  */
 export function mentionHandles(source: string): string[] {
   const found: string[] = [];
-  collectBlocks(parseMarkdown(source), found);
+  collectBlocks(parseMarkdown(source), found, "mention");
   return [...new Set(found)];
 }
 
-function collectBlocks(blocks: readonly Block[], into: string[]): void {
+/**
+ * Mirrors `linger-core::limits::MAX_LINKS_PER_MESSAGE`. A message with a dozen
+ * URLs in it is a link dump, and a dozen one-line cards under it is a wall.
+ */
+const MAX_LINK_CARDS = 4;
+
+/**
+ * Every web address a body links to, in order, each one once, at most four.
+ *
+ * The same walk as `mentionHandles` and for the same reason: what gets a card
+ * is exactly what draws as a link, so `` `https://x` `` in a code span gets
+ * neither. `mailto:` is a link but not a page, so it has nothing to preview.
+ *
+ * The server extracts the same set when it records what a message links to
+ * (`linger-server::links::extract`); both normalise through a URL parser, so
+ * the string the card is keyed by is the same on both sides.
+ */
+export function linkTargets(source: string): string[] {
+  const found: string[] = [];
+  collectBlocks(parseMarkdown(source), found, "link");
+  return [...new Set(found.filter((href) => /^https?:/i.test(href)))].slice(0, MAX_LINK_CARDS);
+}
+
+type Want = "mention" | "link";
+
+function collectBlocks(blocks: readonly Block[], into: string[], want: Want): void {
   for (const block of blocks) {
     switch (block.kind) {
       case "paragraph":
-        collectInline(block.children, into);
+        collectInline(block.children, into, want);
         break;
       case "quote":
-        collectBlocks(block.children, into);
+        collectBlocks(block.children, into, want);
         break;
       case "code":
         break;
       case "list":
-        for (const item of block.items) collectInline(item, into);
+        for (const item of block.items) collectInline(item, into, want);
         break;
     }
   }
 }
 
-function collectInline(nodes: readonly Inline[], into: string[]): void {
+function collectInline(nodes: readonly Inline[], into: string[], want: Want): void {
   for (const node of nodes) {
     switch (node.kind) {
       case "mention":
-        into.push(node.handle);
+        if (want === "mention") into.push(node.handle);
         break;
       case "link":
+        if (want === "link") into.push(node.href);
+        collectInline(node.children, into, want);
+        break;
       case "strong":
       case "em":
       case "strike":
-        collectInline(node.children, into);
+        collectInline(node.children, into, want);
         break;
       case "text":
       case "code":

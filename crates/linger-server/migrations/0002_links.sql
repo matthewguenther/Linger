@@ -1,4 +1,4 @@
--- Link cards and the media grid's link shelf (SPEC §4.4/§5.6, T-504).
+-- Link cards, and the links the media grid lists (SPEC §4.4/§5.6, T-504).
 --
 -- Two tables, because the two facts have different lifetimes. `message_links`
 -- is what a message said and dies with it; `link_previews` is what the web

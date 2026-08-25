@@ -29,6 +29,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useSyncExternalStore } from "react";
 
 import type { ClientFrame } from "../generated/ClientFrame";
+import type { AttachmentId } from "../generated/AttachmentId";
 import type { CreateMessageRequest } from "../generated/CreateMessageRequest";
 import type { EditMessageRequest } from "../generated/EditMessageRequest";
 import type { Message } from "../generated/Message";
@@ -831,11 +832,14 @@ export async function sendMessage(
   roomId: RoomId,
   body: string,
   replyTo: MessageId | null = null,
+  attachmentIds: AttachmentId[] = [],
 ): Promise<void> {
   const request: CreateMessageRequest = {
     body,
     reply_to: replyTo,
-    attachment_ids: null,
+    // The files went up first and are already stored, checked and re-encoded;
+    // this is the moment they become part of the conversation (PROTOCOL §6).
+    attachment_ids: attachmentIds.length === 0 ? null : attachmentIds,
   };
   const path = `/rooms/${encodeURIComponent(roomId)}/messages`;
   const message = await api.post<Message>(path, request);

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type Block,
   type Inline,
+  linkTargets,
   mentionHandles,
   parseMarkdown,
   plainText,
@@ -286,5 +287,30 @@ describe("mentions", () => {
 
   it("flattens back to the characters that were typed", () => {
     expect(plainText("hey @callie look")).toBe("hey @callie look");
+  });
+});
+
+describe("linkTargets", () => {
+  it("finds what will draw as a link, normalised the way the server stores it", () => {
+    expect(linkTargets("look at https://example.com and https://example.com/a")).toEqual([
+      "https://example.com/",
+      "https://example.com/a",
+    ]);
+    expect(linkTargets("[label](https://example.com/b)")).toEqual(["https://example.com/b"]);
+  });
+
+  it("agrees with what is drawn: a code span is not a link", () => {
+    expect(linkTargets("`https://example.com`")).toEqual([]);
+    expect(linkTargets("no addresses here")).toEqual([]);
+  });
+
+  it("has nothing to preview for an email address", () => {
+    expect(linkTargets("[write](mailto:someone@example.com)")).toEqual([]);
+  });
+
+  it("says the same link once, and stops at four", () => {
+    expect(linkTargets("https://a.example https://a.example")).toEqual(["https://a.example/"]);
+    const many = [0, 1, 2, 3, 4, 5].map((n) => `https://s${n}.example`).join(" ");
+    expect(linkTargets(many)).toHaveLength(4);
   });
 });
