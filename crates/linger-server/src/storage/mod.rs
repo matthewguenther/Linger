@@ -54,13 +54,72 @@ pub enum ObjectBody {
 /// (ARCHITECTURE §7): what this file will be called, and whether a browser is
 /// allowed to display it rather than download it.
 ///
-/// The route works these out — it is the half that knows the filename and the
-/// allowlist — and the store is told, because a backend that answers with a
-/// redirect cannot set a header on a response it never sends. S3 signs them
-/// into the URL instead; local ignores them and the route sets them itself.
+/// They travel with the bytes rather than being a property of one route,
+/// because a backend that answers with a redirect cannot set a header on a
+/// response it never sends. The local backend's route sets them itself; the S3
+/// backend both stores them on the object and signs them into every presigned
+/// URL, so the bucket sends the right thing however the object is reached.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServeAs {
     pub content_type: String,
     pub disposition: String,
+}
+
+impl ServeAs {
+    /// How an object of this type, under this name, may be served.
+    ///
+    /// Only the image, video and audio types on the `linger-core::media` inline
+    /// list keep their own content type. Everything else is
+    /// `application/octet-stream` with `Content-Disposition: attachment` —
+    /// deliberately refusing to repeat the uploader's claim about what the file
+    /// is, because a browser told nothing useful cannot be talked into running
+    /// it, and one told to download it never renders it at all.
+    #[must_use]
+    pub fn for_object(mime: &str, filename: &str) -> Self {
+        let inline = linger_core::media::is_inline_mime(mime);
+        Self {
+            content_type: if inline {
+                linger_core::media::canonical_mime(mime).to_string()
+            } else {
+                "application/octet-stream".to_string()
+            },
+            disposition: content_disposition(inline, filename),
+        }
+    }
+
+    /// A generated video poster frame: this server's own JPEG, not the upload.
+    #[must_use]
+    pub fn poster(filename: &str) -> Self {
+        Self::for_object("image/jpeg", &format!("{filename}.jpg"))
+    }
+}
+
+/// `Content-Disposition`, with the filename twice: a plain ASCII version every
+/// browser understands, and the real one percent-encoded for the rest of the
+/// alphabet (RFC 6266).
+fn content_disposition(inline: bool, filename: &str) -> String {
+    let kind = if inline { "inline" } else { "attachment" };
+    let ascii: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let encoded: String = filename
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_') {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect();
+    format!("{kind}; filename=\"{ascii}\"; filename*=UTF-8\'\'{encoded}")
 }
 
 #[async_trait]
@@ -88,10 +147,20 @@ pub trait ObjectStore: Send + Sync {
     ) -> anyhow::Result<Staged>;
 
     /// Move a staged file into place under its permanent key.
-    async fn put_object(&self, key: &str, from: &std::path::Path) -> anyhow::Result<()>;
+    ///
+    /// `serve` travels with the object so a backend that can store headers
+    /// alongside the bytes does: an object that carries its own
+    /// `Content-Disposition` is safe even when it is reached by a URL this
+    /// server did not sign.
+    async fn put_object(
+        &self,
+        key: &str,
+        from: &std::path::Path,
+        serve: &ServeAs,
+    ) -> anyhow::Result<()>;
 
     /// Store a small object the server produced itself (a video poster frame).
-    async fn put_bytes(&self, key: &str, bytes: &[u8]) -> anyhow::Result<()>;
+    async fn put_bytes(&self, key: &str, bytes: &[u8], serve: &ServeAs) -> anyhow::Result<()>;
 
     async fn read_object(&self, key: &str, serve: &ServeAs) -> anyhow::Result<Option<ObjectBody>>;
 
@@ -146,6 +215,40 @@ mod tests {
         // The milestone check's 400 MB video.
         assert_eq!(part_plan(400 * 1024 * 1024).0, 50);
         assert_eq!(part_plan(500 * 1024 * 1024).0, 63);
+    }
+
+    #[test]
+    fn only_media_keeps_its_own_content_type() {
+        let image = ServeAs::for_object("image/png", "holiday.png");
+        assert_eq!(image.content_type, "image/png");
+        assert!(image.disposition.starts_with("inline;"));
+
+        // A PDF is a perfectly ordinary file and still never renders in place.
+        let doc = ServeAs::for_object("application/pdf", "lease.pdf");
+        assert_eq!(doc.content_type, "application/octet-stream");
+        assert!(doc.disposition.starts_with("attachment;"));
+
+        // Nothing off the allowlist can be stored, but if a row ever said one
+        // of these, serving it must still be inert.
+        let hostile = ServeAs::for_object("text/html", "page.html");
+        assert_eq!(hostile.content_type, "application/octet-stream");
+        assert!(hostile.disposition.starts_with("attachment;"));
+    }
+
+    #[test]
+    fn a_download_header_cannot_be_talked_into_a_second_line() {
+        let header = content_disposition(false, "report \"final\".pdf");
+        assert!(header.starts_with("attachment; "));
+        assert!(!header.contains('\n') && !header.contains('\r'));
+        assert_eq!(header.matches("filename=\"").count(), 1);
+        assert!(header.contains("filename=\"report _final_.pdf\""));
+    }
+
+    #[test]
+    fn non_ascii_names_survive_in_the_encoded_form() {
+        let header = content_disposition(true, "na\u{ef}ve.png");
+        assert!(header.starts_with("inline; "));
+        assert!(header.contains("filename*=UTF-8\'\'na%C3%AFve.png"));
     }
 
     #[test]

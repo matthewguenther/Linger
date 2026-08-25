@@ -30,7 +30,7 @@ use crate::auth::AuthedUser;
 use crate::db::now_ms;
 use crate::error::ApiError;
 use crate::state::AppState;
-use crate::storage::{object_key, part_plan, poster_key};
+use crate::storage::{object_key, part_plan, poster_key, ServeAs};
 use crate::{repo, validate};
 
 /// Parts of an upload that never completed are swept once they are this old.
@@ -202,16 +202,24 @@ async fn finish(
             let key = poster_key(record.id);
             state
                 .storage
-                .put_bytes(&key, bytes)
+                .put_bytes(&key, bytes, &ServeAs::poster(&processed.filename))
                 .await
                 .map_err(ApiError::from)?;
             Some(key)
         }
         None => None,
     };
+    // How this file is allowed to be served is decided once, here, from what
+    // the server made of the bytes — never from what the uploader declared —
+    // and stored with the object so it is the same answer wherever it is read
+    // back from (ARCHITECTURE §7).
     state
         .storage
-        .put_object(&record.object_key, &staged.path)
+        .put_object(
+            &record.object_key,
+            &staged.path,
+            &ServeAs::for_object(&processed.mime, &processed.filename),
+        )
         .await
         .map_err(ApiError::from)?;
     let _ = state.storage.discard(UploadId(record.id.0)).await;

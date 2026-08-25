@@ -188,6 +188,35 @@ async fn bucket_has(key: &str) -> bool {
         .is_success()
 }
 
+/// GET a key straight out of the bucket, with nothing signed into the URL
+/// beyond the signature itself.
+///
+/// This is what a CDN in front of the bucket sees, and what anybody who ever
+/// reached the object by some other route would get: only the headers stored
+/// *on* the object (T-503).
+async fn bucket_get(key: &str) -> reqwest::Response {
+    use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
+
+    let bucket = Bucket::new(
+        std::env::var("LINGER_TEST_S3_ENDPOINT")
+            .unwrap()
+            .parse()
+            .unwrap(),
+        UrlStyle::Path,
+        std::env::var("LINGER_TEST_S3_BUCKET").unwrap_or_else(|_| "linger-test".to_string()),
+        std::env::var("LINGER_TEST_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+    )
+    .unwrap();
+    let credentials = Credentials::new(
+        std::env::var("LINGER_TEST_S3_ACCESS_KEY_ID").unwrap(),
+        std::env::var("LINGER_TEST_S3_SECRET_ACCESS_KEY").unwrap(),
+    );
+    let url = bucket
+        .get_object(Some(&credentials), key)
+        .sign(std::time::Duration::from_secs(60));
+    client().get(url).send().await.unwrap()
+}
+
 /// The object key inside a served URL (`/objects/ab/cd/…`).
 fn key_of(url: &str) -> String {
     url.rsplit_once("/objects/")
@@ -286,6 +315,48 @@ async fn anything_not_an_image_still_comes_back_as_a_download() {
         "application/octet-stream"
     );
     assert!(header(&resp, reqwest::header::CONTENT_DISPOSITION).starts_with("attachment;"));
+}
+
+#[tokio::test]
+async fn an_object_carries_its_own_headers_in_the_bucket() {
+    let server = s3_server!("an_object_carries_its_own_headers_in_the_bucket");
+    let host = bootstrap_host(&server).await;
+
+    // The presigned URL this server hands out signs the content type and the
+    // disposition into the request. These assertions are about the object
+    // itself: reached with none of that, it still describes itself correctly,
+    // so a bucket behind a CDN — or one somebody made public — cannot be
+    // talked into serving a stored file as a page.
+    let notes = upload(
+        &server,
+        &host.access_token,
+        "notes.txt",
+        "text/plain",
+        b"plain enough".to_vec(),
+    )
+    .await;
+    let resp = bucket_get(&key_of(&notes.url)).await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        header(&resp, reqwest::header::CONTENT_TYPE),
+        "application/octet-stream"
+    );
+    assert!(
+        header(&resp, reqwest::header::CONTENT_DISPOSITION).starts_with("attachment;"),
+        "a stored file that is not media downloads however it is reached"
+    );
+
+    let image = upload(
+        &server,
+        &host.access_token,
+        "photo.png",
+        "image/png",
+        png(16, 16),
+    )
+    .await;
+    let resp = bucket_get(&key_of(&image.url)).await;
+    assert_eq!(header(&resp, reqwest::header::CONTENT_TYPE), "image/png");
+    assert!(header(&resp, reqwest::header::CONTENT_DISPOSITION).starts_with("inline;"));
 }
 
 #[tokio::test]

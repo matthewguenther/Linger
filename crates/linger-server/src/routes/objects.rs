@@ -11,17 +11,24 @@
 //! **Why serving is not authenticated.** An object key contains a UUIDv7 with
 //! 74 random bits, so the URL is the secret — the same arrangement every chat
 //! app uses, and the only one that lets an `<img>` tag work at all. What keeps
-//! a hostile upload harmless is not a login check but the headers below:
-//! anything that is not an ordinary image, video or audio file is served as a
-//! download, with sniffing turned off, so it cannot become a page. T-503
-//! finishes the job by moving these responses to their own origin, where they
-//! are not same-site with anybody's session.
+//! a hostile upload harmless is not a login check but where it is served from
+//! and how: `/objects` answers only on the media host (`cdn.<domain>`, see
+//! `super::media_origin_gate`), so nothing served here is ever same-origin with
+//! the app, and anything that is not an ordinary image, video or audio file is
+//! handed over as a download with sniffing turned off and a CSP that permits
+//! nothing at all.
 //!
 //! On the S3 backend this route answers with a redirect and the *bucket* sends
-//! the response, so those headers are signed into the presigned URL instead
+//! the response, so the two headers that decide whether a file can render are
+//! both stored on the object and signed into the presigned URL
 //! ([`crate::storage::ServeAs`]). S3 has no `response-` override for
-//! `X-Content-Type-Options`, so `nosniff` is the one header that does not make
-//! the trip — T-503's media origin is where it comes back.
+//! `X-Content-Type-Options` or `Content-Security-Policy`, so those two do not
+//! make that trip; what stands in for them there is that the content type is
+//! never the uploader's claim — it is one of the thirteen media types this
+//! server sniffed for itself, or `application/octet-stream` with
+//! `Content-Disposition: attachment`, which no browser renders whatever it
+//! decides the bytes are. Active content (SVG, HTML, scripts) cannot be stored
+//! in the first place (`linger_core::media`).
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -29,7 +36,6 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::Router;
-use linger_core::media;
 use linger_core::{AttachmentId, UploadId};
 use serde::Deserialize;
 use sqlx::Row;
@@ -127,31 +133,15 @@ async fn get_object(
 
     let is_poster = row.get::<Option<String>, _>("poster_key").as_deref() == Some(key.as_str());
     let filename: String = row.get("filename");
-    let (filename, mime) = if is_poster {
-        // A generated poster frame is this server's own JPEG, not the upload.
-        (format!("{filename}.jpg"), "image/jpeg".to_string())
+    let serve = if is_poster {
+        ServeAs::poster(&filename)
     } else {
-        (filename, row.get::<String, _>("mime"))
+        ServeAs::for_object(&row.get::<String, _>("mime"), &filename)
     };
 
-    let inline = media::is_inline_mime(&mime);
-    let served_type = if inline {
-        mime.clone()
-    } else {
-        // Refuse to repeat the uploader's claim about what this is. A browser
-        // that is told nothing useful, and told not to guess, cannot be talked
-        // into running it.
-        "application/octet-stream".to_string()
-    };
-    let disposition = content_disposition(inline, &filename);
-
-    // Worked out here and handed down because a store that answers with a
-    // redirect has no response of its own to put them on: S3 signs these two
-    // into the URL, and the bucket sends them back.
-    let serve = ServeAs {
-        content_type: served_type.clone(),
-        disposition: disposition.clone(),
-    };
+    // Handed down as well as sent, because a store that answers with a redirect
+    // has no response of its own to put them on: S3 signs these two into the
+    // URL, and the bucket sends them back.
     let Some(object) = state
         .storage
         .read_object(&key, &serve)
@@ -178,10 +168,22 @@ async fn get_object(
     };
 
     let mut headers = HeaderMap::new();
-    insert(&mut headers, header::CONTENT_TYPE, &served_type);
+    insert(&mut headers, header::CONTENT_TYPE, &serve.content_type);
     insert(&mut headers, header::CONTENT_LENGTH, &length.to_string());
     insert(&mut headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-    insert(&mut headers, header::CONTENT_DISPOSITION, &disposition);
+    insert(
+        &mut headers,
+        header::CONTENT_DISPOSITION,
+        &serve.disposition,
+    );
+    // Belt and braces on top of the type and the disposition: if a browser ever
+    // did render one of these, it would render it with no scripts, no network
+    // and no origin of its own to reach anything from.
+    insert(
+        &mut headers,
+        header::CONTENT_SECURITY_POLICY,
+        "default-src 'none'; sandbox",
+    );
     // Objects are immutable: the key contains the id, and re-encoding happens
     // once, before the key is ever handed out.
     insert(
@@ -189,9 +191,8 @@ async fn get_object(
         header::CACHE_CONTROL,
         "public, max-age=31536000, immutable",
     );
-    // The client is a webview on a different origin, and T-503 moves these
-    // responses to a different host again, so say plainly that loading them
-    // from elsewhere is allowed.
+    // The client is a webview on one origin and this is another host again, so
+    // say plainly that loading these from elsewhere is allowed.
     insert(&mut headers, "cross-origin-resource-policy", "cross-origin");
 
     Ok((headers, body).into_response())
@@ -200,54 +201,5 @@ async fn get_object(
 fn insert(headers: &mut HeaderMap, name: impl axum::http::header::IntoHeaderName, value: &str) {
     if let Ok(value) = HeaderValue::from_str(value) {
         headers.insert(name, value);
-    }
-}
-
-/// `Content-Disposition`, with the filename twice: a plain ASCII version every
-/// browser understands, and the real one percent-encoded for the rest of the
-/// alphabet (RFC 6266).
-fn content_disposition(inline: bool, filename: &str) -> String {
-    let kind = if inline { "inline" } else { "attachment" };
-    let ascii: String = filename
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let encoded: String = filename
-        .bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_') {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect();
-    format!("{kind}; filename=\"{ascii}\"; filename*=UTF-8''{encoded}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_download_header_cannot_be_talked_into_a_second_line() {
-        let header = content_disposition(false, "report \"final\".pdf");
-        assert!(header.starts_with("attachment; "));
-        assert!(!header.contains('\n') && !header.contains('\r'));
-        assert_eq!(header.matches("filename=\"").count(), 1);
-        assert!(header.contains("filename=\"report _final_.pdf\""));
-    }
-
-    #[test]
-    fn non_ascii_names_survive_in_the_encoded_form() {
-        let header = content_disposition(true, "naïve.png");
-        assert!(header.starts_with("inline; "));
-        assert!(header.contains("filename*=UTF-8''na%C3%AFve.png"));
     }
 }

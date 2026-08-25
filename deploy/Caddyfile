@@ -1,14 +1,30 @@
-# Replace linger.example.com with your domain (both blocks).
+# Replace linger.example.com with your domain (both blocks). Two DNS records,
+# both pointing at this machine: the domain itself, and `cdn.` in front of it.
 # Caddy fetches and renews TLS certificates automatically — no certbot, ever.
 
 linger.example.com {
 	reverse_proxy linger:8420
 }
 
-# Uploads are served from a separate origin so hostile files can't touch app
-# sessions (ARCHITECTURE §7). M5 activates this; the DNS record for it can be
-# created now (point cdn.linger.example.com at the same machine).
+# Uploaded files are served from their own host, so a hostile file is never
+# same-origin with the app (ARCHITECTURE §7). The server enforces the split as
+# well as advertising it: `/objects/...` answers on this name and nowhere else,
+# and every other route answers everywhere else.
 #
-# cdn.linger.example.com {
-# 	reverse_proxy linger:8420
-# }
+# The headers are belt and braces on top of what the server already sends —
+# nothing served here may run a script, reach the network, or be guessed at.
+cdn.linger.example.com {
+	header {
+		X-Content-Type-Options nosniff
+		Content-Security-Policy "default-src 'none'; sandbox"
+		Cross-Origin-Resource-Policy cross-origin
+	}
+	reverse_proxy linger:8420
+}
+
+# On LINGER_STORAGE=s3 this block answers with a redirect and the bucket sends
+# the file, so these headers land on the redirect rather than on the bytes.
+# What protects the bytes there is stored on the object itself: every upload
+# goes into the bucket carrying the Content-Type and Content-Disposition it is
+# allowed to be served with, and nothing that could run in a browser is
+# storable in the first place.

@@ -26,12 +26,31 @@ impl TestServer {
 }
 
 /// Boot a fully wired server on an ephemeral port, storing uploads on disk.
+///
+/// No domain, so it has one origin and hands out root-relative URLs — the same
+/// shape as a server on a LAN address.
 pub async fn spawn_server() -> TestServer {
     let dir = tempfile::tempdir().expect("tempdir");
     let config = Config {
         data_dir: dir.path().to_path_buf(),
         bind: "127.0.0.1:0".parse().unwrap(),
         domain: None,
+        media_domain: None,
+        storage: Storage::Local,
+        s3: None,
+    };
+    spawn_with(dir, config).await
+}
+
+/// The same server, but named — so uploads are served from their own host and
+/// the origin split is switched on (T-503).
+pub async fn spawn_named_server(domain: &str, media_domain: &str) -> TestServer {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = Config {
+        data_dir: dir.path().to_path_buf(),
+        bind: "127.0.0.1:0".parse().unwrap(),
+        domain: Some(domain.to_string()),
+        media_domain: Some(media_domain.to_string()),
         storage: Storage::Local,
         s3: None,
     };
@@ -70,6 +89,7 @@ pub async fn spawn_s3_server() -> Option<TestServer> {
         data_dir: dir.path().to_path_buf(),
         bind: "127.0.0.1:0".parse().unwrap(),
         domain: None,
+        media_domain: None,
         storage: Storage::S3,
         s3: Some(s3),
     };

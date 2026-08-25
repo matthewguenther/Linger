@@ -276,7 +276,7 @@ impl ObjectStore for LocalStore {
         })
     }
 
-    async fn put_object(&self, key: &str, from: &Path) -> anyhow::Result<()> {
+    async fn put_object(&self, key: &str, from: &Path, _serve: &ServeAs) -> anyhow::Result<()> {
         let dest = self
             .object_path(key)
             .ok_or_else(|| anyhow::anyhow!("refusing to write object key {key:?}"))?;
@@ -292,7 +292,7 @@ impl ObjectStore for LocalStore {
         Ok(())
     }
 
-    async fn put_bytes(&self, key: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    async fn put_bytes(&self, key: &str, bytes: &[u8], _serve: &ServeAs) -> anyhow::Result<()> {
         let dest = self
             .object_path(key)
             .ok_or_else(|| anyhow::anyhow!("refusing to write object key {key:?}"))?;
@@ -338,6 +338,7 @@ mod tests {
             data_dir: dir.to_path_buf(),
             bind: "127.0.0.1:0".parse().unwrap(),
             domain: None,
+            media_domain: None,
             storage: Storage::Local,
             s3: None,
         }))
