@@ -55,7 +55,7 @@ export default function Roster({
   rooms: Room[];
   layout: RosterLayout;
 }) {
-  const gateway = useGateway();
+  const gateway = useGateway(api.baseUrl);
   const now = useNow();
   // The panel has two modes: who is around, and who you want to hear from.
   // The rules are a list of people too, and a settings screen for one setting

@@ -140,7 +140,7 @@ export default function Stream({
   onDensityChange,
   roster,
 }: StreamProps) {
-  const gateway = useGateway();
+  const gateway = useGateway(api.baseUrl);
   const stream = gateway.streams[room.id];
   const me = gateway.me;
   const loaded = stream !== undefined;
@@ -157,8 +157,8 @@ export default function Stream({
   // alone so it happens once per visit rather than once per message that
   // arrives while you are standing there.
   useEffect(() => {
-    enterRoom(room.id);
-  }, [room.id]);
+    enterRoom(api.baseUrl, room.id);
+  }, [api.baseUrl, room.id]);
 
   const people = useMemo(() => new Map(users.map((person) => [person.id, person])), [users]);
   // Presence per author, for the card a name opens. Built once here rather
@@ -511,7 +511,7 @@ export default function Stream({
 
       {roster}
 
-      <Typing roomId={room.id} people={people} />
+      <Typing api={api} roomId={room.id} people={people} />
 
       <Composer
         api={api}
@@ -1089,7 +1089,7 @@ function Composer({
           maxLength={MAX_MESSAGE_CHARS}
           onChange={(event) => {
             setDraft(event.target.value);
-            if (event.target.value !== "") startedTyping(room.id);
+            if (event.target.value !== "") startedTyping(api, room.id);
           }}
           onKeyDown={onKeyDown}
           placeholder={replyTo ? "say something back" : `say something in #${room.slug}`}
@@ -1132,8 +1132,16 @@ function useAutoGrow(box: RefObject<HTMLTextAreaElement | null>, value: string):
  * coming. Two seconds is under the six the signal lives for, so the line
  * disappears within a beat of the person stopping.
  */
-function Typing({ roomId, people }: { roomId: string; people: Map<string, User> }) {
-  const gateway = useGateway();
+function Typing({
+  api,
+  roomId,
+  people,
+}: {
+  api: AuthedApi;
+  roomId: string;
+  people: Map<string, User>;
+}) {
+  const gateway = useGateway(api.baseUrl);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 2000);

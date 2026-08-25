@@ -431,7 +431,7 @@ const USE_CHOICES: Array<{ label: string; uses: number | null }> = [
  */
 function InvitesSection({ api }: { api: AuthedApi }) {
   const now = useNow();
-  const gateway = useGateway();
+  const gateway = useGateway(api.baseUrl);
   const [invites, setInvites] = useState<Invite[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

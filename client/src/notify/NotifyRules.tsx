@@ -22,7 +22,7 @@ import { setNotifyRule, useGateway } from "../lib/gateway";
 import "./notify.css";
 
 export default function NotifyRules({ api, rooms }: { api: AuthedApi; rooms: Room[] }) {
-  const gateway = useGateway();
+  const gateway = useGateway(api.baseUrl);
   const me = gateway.me;
   const [open, setOpen] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);

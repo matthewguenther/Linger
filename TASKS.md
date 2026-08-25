@@ -119,7 +119,11 @@ task fails its acceptance criteria twice.
   and a member sees none of those controls.
   **T-411 landed 2026-08-23**: a member can change their display name, password and
   density from inside the app, and the first-run copy no longer assumes they already
-  know how it works. The milestone check still waits on T-412 (the server list).
+  know how it works.
+  **T-412 landed 2026-08-25**: the rail has a server list, you can be signed into
+  several servers at once, and each one has its own connection, keyring entry,
+  people and rooms. **M4.5's milestone check passes** — the remaining tasks,
+  T-413, T-414 and T-415, never gated it.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
@@ -1479,6 +1483,8 @@ above.
       listener drops everything when `connected` is not the api it was attached for.
       Recorded rather than fixed: it is `lib/gateway.ts` and the sign-in path (T-301,
       T-302), not this task, and a fix chased on one unreproducible sighting is a guess.
+      **Fixed in T-412**, where it reproduced on demand with two servers signed in.
+      The guess above was right. See T-412's notes for what the fix was.
 
 - ✅ **T-411 · The member's sweep: settings, empty states, first five minutes** — effort: **medium**
   The other half, for somebody who is not the host. There is no settings surface in
@@ -1528,7 +1534,7 @@ above.
     window" walk is the remaining human check — this session could not drive
     two GUI windows.
 
-- ⬜ **T-412 · The server list (SPEC §3, V1 item 17)** — effort: **high**
+- ✅ **T-412 · The server list (SPEC §3, V1 item 17)** — effort: **high**
   SPEC §3's layout has a `SERVERS` rail — `● home / ○ work / + add` — and SPEC §6
   lists "multi-server list in the client" as V1 item 17. **None of it exists.** The
   client holds exactly one server today: one `baseUrl` in `session.ts`, one keyring
@@ -1550,6 +1556,55 @@ above.
     task at all until now, which is why it is written down here rather than left to
     be discovered again at M7. If the budget is tight, T-410 and T-411 are what make
     the app usable; this one makes it match the spec.
+  - *Landed 2026-08-25.* Everything below is keyed by the server's base URL, top to
+    bottom, and nothing is shared between two servers.
+  - *The keyring holds one entry per server, plus a small index listing them.*
+    Keyrings cannot be enumerated, which is the only reason the index exists.
+    Signing out deletes that server's entry and drops it from the index; the
+    others are untouched. A sign-in from a build before this one is migrated on
+    first read and the old single entry is deleted, so upgrading does not sign
+    anybody out.
+  - *The Tauri core holds a `HashMap` of connections, not one slot.* Every event
+    it sends up is wrapped in a small envelope naming the server it came from, so
+    the WebView routes on that rather than on "the connection".
+  - *The gateway store is one snapshot per server.* `useGateway(baseUrl)` is the
+    hook; `useServers()` is the whole map, and the rail is its only caller.
+  - *Presence splits in two.* Focus and the last keystroke are facts about the
+    window and stay global; what was last *said* to a server is per server. You are
+    in at most one room anywhere, so entering a room on one server leaves the room
+    on every other one — that is what makes switching servers in the rail take your
+    presence with it.
+  - *`+ add` is the T-301 paste box, unchanged, in the stream column.* It is the
+    same component, minus the wordmark.
+  - **This run fixed the "live socket that delivered no frames" bug** recorded under
+    T-410 as *"recorded rather than fixed"*. It reproduced immediately with two
+    servers signed in: home said `ready`, drew its rooms and its roster, and then
+    never applied another frame — including messages posted by `curl`. The cause was
+    what T-410 guessed at. `connect` and `disconnect` are both async and both touch
+    the same module state, so React's StrictMode double-invoke (create, destroy,
+    create, none of them awaited) could interleave them, and a listener teardown
+    that landed after the next connect left the WebView deaf for the rest of the run.
+    Two changes: connects and disconnects for one server now run one at a time
+    through a small queue, and the two frame listeners are attached once and never
+    taken down — they cost nothing when nobody is connected, because an event for a
+    server with no link is dropped. `Console` also stopped closing everybody's
+    connections on unmount; each `ServerLink` owns exactly one and closes its own.
+    `gateway.test.ts` covers it: the last call is what you end up with, which is the
+    assertion that fails without the queue.
+  - *Verified on 2026-08-25 against two real servers on one box.* Signed into both
+    at once in one window, both dots live; switched between them and the rooms,
+    stream, roster and presence followed; a message on the background server turned
+    its name heavier with no number anywhere; killed one server and the other kept
+    delivering, then the dead one came back on its own and its dot filled in again;
+    signed out of one and the other never noticed. The three real-keyring tests
+    (`cargo test --lib -- --ignored`) pass against KWallet, migration included.
+  - **What is not covered.** A server that is down at launch is dropped from the
+    rail for that run with a notice, rather than sitting there with a dead dot and
+    coming back on its own — its keyring entry survives, so it returns on the next
+    launch. Fixing it means holding a session we cannot name the user of yet, and
+    nothing in the accept list needs it. Notifications also still say
+    "Callie in #garage" with no server name, which is fine with one server and
+    slightly ambiguous with two.
 
 - ⬜ **T-413 · Removing a member** — effort: **medium**
   The host can remove somebody from the server, and let them back in. There is no

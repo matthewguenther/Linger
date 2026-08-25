@@ -68,7 +68,7 @@ export default function StatusEditor({
     try {
       const status = statusOf(next, saved);
       await saveStatus(api, status);
-      setAway(status.away_message);
+      setAway(api.baseUrl, status.away_message);
       onDone();
     } catch (problem) {
       // The server's own words when it has any: PROTOCOL §1 promises the
