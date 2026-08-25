@@ -430,10 +430,29 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
     }
     case "user.update": {
       const user = frame.d;
+      // `upsert` appends when the id is unknown, which is what makes this frame
+      // do double duty: it is "their name changed" and "here is somebody you
+      // did not have" — a member the host just let back in (PROTOCOL §8).
       return {
         ...current,
         me: current.me?.id === user.id ? user : current.me,
         users: upsert(current.users, user, (u) => u.id === user.id),
+      };
+    }
+    case "user.remove": {
+      // The host removed them (T-413). The roster is built by mapping over
+      // `users`, so dropping them here is the whole of the card going away.
+      // Their presence goes too: an entry for somebody nobody can draw is a
+      // row of state that outlives the person it describes.
+      const { user_id } = frame.d;
+      if (!current.users.some((u) => u.id === user_id)) return current;
+      const offlineAt = { ...current.offlineAt };
+      delete offlineAt[user_id];
+      return {
+        ...current,
+        users: current.users.filter((u) => u.id !== user_id),
+        presence: current.presence.filter((p) => p.user_id !== user_id),
+        offlineAt,
       };
     }
     case "room.create":

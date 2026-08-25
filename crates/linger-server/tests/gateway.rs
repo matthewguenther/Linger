@@ -323,3 +323,58 @@ async fn resume_of_unknown_session_and_bad_identify_are_rejected() {
     let (invalid, _) = wait_for(&mut ws, "invalid_session").await;
     assert_eq!(invalid["d"]["reason"], "unauthenticated");
 }
+
+/// T-413. A removed member has to *leave the room*, and the socket is the part
+/// of that nothing else does: the token is checked once at identify, so an
+/// already-open connection keeps receiving every message on the server forever.
+#[tokio::test]
+async fn removing_a_member_hangs_up_on_them_and_tells_everybody_else() {
+    let (server, host, _room) = common::server_with_room("garage").await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
+
+    let (mut watcher, _) = connect_ready(&server, &host.access_token).await;
+    let (mut theirs, _) = connect_ready(&server, &member.access_token).await;
+
+    let resp = reqwest::Client::new()
+        .post(server.url(&format!("/users/{}/remove", member.user.id)))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 204);
+
+    // Everybody still here is told, so the card leaves the roster with no reload.
+    let (frame, _) = wait_for(&mut watcher, "user.remove").await;
+    assert_eq!(frame["d"]["user_id"], member.user.id.to_string());
+
+    // The removed member is told their token is no good...
+    let (frame, _) = wait_for(&mut theirs, "invalid_session").await;
+    assert_eq!(frame["d"]["reason"], "unauthenticated");
+
+    // ...and the socket actually ends, rather than sitting open and quiet.
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match theirs.next().await {
+                None | Some(Err(_)) => return true,
+                Some(Ok(WsMessage::Close(_))) => return true,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    assert_eq!(closed, Ok(true), "the removed member's socket must close");
+
+    // And identifying again does not get them back in.
+    let (mut again, _) = connect_async(server.gateway_url())
+        .await
+        .expect("ws connect");
+    let hello = recv_json(&mut again).await;
+    assert_eq!(hello["op"], "hello");
+    send_json(
+        &mut again,
+        json!({ "op": "identify", "d": { "token": member.access_token, "client": "test/0" } }),
+    )
+    .await;
+    let (frame, _) = wait_for(&mut again, "invalid_session").await;
+    assert_eq!(frame["d"]["reason"], "unknown user");
+}

@@ -178,11 +178,12 @@ GET  /me/notify-rules     → NotifyRule[]
 PUT  /me/notify-rules     { target_user_id, room_id | null }   → 204
 DELETE /me/notify-rules   { target_user_id, room_id | null }   → 204
 
-POST /users/:id/remove    → 204                     # host-only, M4.5 / T-413
-POST /users/:id/restore   → 204                     # host-only, M4.5 / T-413
+GET  /users/removed       → User[]                  # host-only
+POST /users/:id/remove    → 204                     # host-only
+POST /users/:id/restore   → 204                     # host-only
 ```
 
-### Removing a member (M4.5, not built yet)
+### Removing a member
 
 `remove` sets `deactivated_at`; `restore` clears it. Neither carries a body. The host
 cannot remove themselves — that answers `FORBIDDEN`. There is no ban and no ban list:
@@ -190,11 +191,35 @@ usernames are unique and immutable, the account row survives, and registration i
 invite-only, so the host is already the only way back in. Nothing durable enough to ban
 by (an address, a device id) is stored anywhere in Linger, and nothing is going to be.
 
-Deactivation has to be enforced in three places that do not check it today, or a removed
-member stays in the room: refresh-token rotation, the live gateway session, and — if the
-15-minute access-token window is judged too long — the bearer extractor. `GET /users`
-already filters deactivated accounts. Removing somebody also revokes the invites they
-created. Their messages are untouched; removing a person is not deleting what they wrote.
+Deactivation is enforced in four places, because setting the column alone leaves a
+removed member sitting in the room:
+
+- **The bearer extractor** reads it on every authenticated request, so a removed
+  member's existing access token stops working immediately. That is one primary-key read
+  per request, and it is the deliberate answer to the alternative — letting the token
+  lapse on its own, which would leave up to fifteen minutes in which somebody the host
+  just removed can still post.
+- **Refresh rotation** refuses a deactivated user, so no new access tokens are minted
+  for the remaining 30 days of the refresh window.
+- **The gateway** closes every live session that user has open, with
+  `invalid_session { reason: "unauthenticated" }`, and the socket ends. The token is
+  checked once at identify and never again, so an open socket would otherwise keep
+  receiving fan-out forever.
+- **`GET /users`** and the roster query filter deactivated accounts, so they leave the
+  roster on their own.
+
+Removal also revokes every refresh family the user owns and every invite they created,
+in the same transaction as the column. Their messages are untouched; removing a person
+is not deleting what they wrote.
+
+`restore` is not an undo. It clears the column and nothing else: the revoked invites stay
+revoked and the revoked sign-ins stay revoked, so the person signs in again with their
+password. `GET /users/removed` is how the host finds somebody to restore — a removed
+member is absent from every other surface by design.
+
+Both endpoints announce themselves on the gateway: `remove` fans out `user.remove`, and
+`restore` fans out `user.update`, which is "here is this person, whether or not you had
+them" (§8).
 
 `PATCH /me` semantics: absent fields are unchanged; `style` and `status` replace the
 whole object when present. `entrance_sound: ""` clears the sound (bundled keys are
@@ -366,7 +391,8 @@ Beyond that, the client must re-identify and refetch.
 | `room.occupancy` | `{ room_id, user_ids }` |
 | `room.enter` | `{ room_id, user_id, entrance_sound }` — triggers the sound |
 | `room.leave` | `{ room_id, user_id }` |
-| `user.update` | `User` — display name, style, or status changed |
+| `user.update` | `User` — the current state of this person, **whether or not the client already had them**. A display name, style or status change, and equally somebody who was not on the roster a moment ago: the client's fold appends when the id is unknown |
+| `user.remove` | `{ user_id }` — this person is off the server. The mirror of `user.update`, and it names an id rather than carrying a `User` because there is no state left to describe: `User` has no `deactivated_at` field and is not going to grow one to carry a tombstone |
 | `room.create` / `room.update` | `Room` |
 | `typing` | `{ room_id, user_id }` |
 | `knock` | `{ from_user_id }` (V2) |

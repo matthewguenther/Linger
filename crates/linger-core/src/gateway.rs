@@ -122,9 +122,20 @@ pub enum ServerEvent {
         room_id: RoomId,
         user_id: UserId,
     },
-    /// Display name, style, or status changed.
+    /// The current state of this person, whether or not the client already had
+    /// them. It carries a whole `User`, and the client's fold appends when the
+    /// id is unknown — so this is also how somebody who was not on the roster a
+    /// moment ago arrives on it (a member restored after removal, T-413).
     #[serde(rename = "user.update")]
     UserUpdate(User),
+    /// This person is off the server (T-413). The mirror of `user.update`, and
+    /// it names an id rather than carrying a `User`, because there is no state
+    /// left to describe: the wire `User` has no `deactivated_at` field and is
+    /// not going to grow one to carry a tombstone.
+    #[serde(rename = "user.remove")]
+    UserRemove {
+        user_id: UserId,
+    },
     #[serde(rename = "room.create")]
     RoomCreate(Room),
     #[serde(rename = "room.update")]
