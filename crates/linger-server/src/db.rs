@@ -22,19 +22,24 @@ pub struct Db {
     pub read: SqlitePool,
 }
 
+/// The pragmas every connection to this database gets, whichever process opens
+/// it. Callers add `create_if_missing` and any longer busy timeout themselves.
+fn connect_options(db_path: &Path) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
+        .filename(db_path)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .foreign_keys(true)
+        .busy_timeout(Duration::from_secs(5))
+}
+
 /// Open (creating if missing) the server database and run pending migrations.
 pub async fn init(db_path: &Path) -> anyhow::Result<Db> {
     if let Some(parent) = db_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
 
-    let base = SqliteConnectOptions::new()
-        .filename(db_path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5));
+    let base = connect_options(db_path).create_if_missing(true);
 
     let write = SqlitePoolOptions::new()
         .max_connections(1)
@@ -60,6 +65,32 @@ pub fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Open the single WAL writer against a database that must already exist, for a
+/// one-shot command line rather than the server (T-414's `reset-password`).
+///
+/// Three deliberate differences from [`init`]. It refuses to create the file: a
+/// typo in `LINGER_DATA_DIR` should say so, not quietly make an empty server and
+/// then report that nobody by that name lives there. Its busy timeout is long,
+/// because the honest failure mode is running this while the server is still up
+/// — WAL allows one writer, and waiting is a kinder answer than `SQLITE_BUSY`.
+/// And it does not run migrations: a second process migrating a live server's
+/// database is exactly what the single-writer discipline exists to prevent.
+pub async fn open_writer(db_path: &Path) -> anyhow::Result<SqlitePool> {
+    if !db_path.exists() {
+        anyhow::bail!(
+            "There is no Linger database at {}. Set LINGER_DATA_DIR to the server's data directory.",
+            db_path.display()
+        );
+    }
+    let options = connect_options(db_path)
+        .create_if_missing(false)
+        .busy_timeout(Duration::from_secs(30));
+    Ok(SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await?)
 }
 
 #[cfg(test)]

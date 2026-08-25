@@ -1,9 +1,110 @@
-//! The server's entry point: read env config, open the database, serve.
+//! The server's entry point: read env config, open the database, serve — or run
+//! the one maintenance subcommand and exit.
 
+use std::io::BufRead;
+
+use linger_server::{db, reset};
 use tracing_subscriber::EnvFilter;
+
+const USAGE: &str = "\
+linger-server — one binary, one data directory.
+
+  linger-server
+      Serve. Configured by the LINGER_* environment variables.
+
+  linger-server reset-password <username>
+      Set a new password for that account, and print it.
+
+  linger-server reset-password <username> --stdin
+      Same, but read the new password from stdin instead of making one up.
+
+Stop the server before resetting a password — one SQLite file has one writer:
+
+  docker compose stop linger
+  docker compose run --rm linger reset-password <username>
+  docker compose start linger
+";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        None => serve().await,
+        Some("reset-password") => reset_password(&args[1..]).await,
+        Some("help" | "--help" | "-h") => {
+            print!("{USAGE}");
+            Ok(())
+        }
+        Some(other) => {
+            eprint!("{USAGE}");
+            anyhow::bail!("Don't know what to do with {other:?}.");
+        }
+    }
+}
+
+/// `reset-password <username> [--stdin]`.
+///
+/// Hand-parsed on purpose: the workspace has no argument-parsing dependency and
+/// one subcommand does not justify adding one.
+async fn reset_password(args: &[String]) -> anyhow::Result<()> {
+    let mut username: Option<&str> = None;
+    let mut from_stdin = false;
+    for arg in args {
+        match arg.as_str() {
+            "--stdin" => from_stdin = true,
+            other if other.starts_with('-') => {
+                eprint!("{USAGE}");
+                anyhow::bail!("Don't know the option {other:?}.");
+            }
+            other if username.is_none() => username = Some(other),
+            other => {
+                eprint!("{USAGE}");
+                anyhow::bail!(
+                    "Didn't expect {other:?}. The new password is never passed on the \
+                     command line — it would be left in your shell history and readable \
+                     in `ps`. Leave it off and one gets made for you, or pass --stdin \
+                     and pipe it in."
+                );
+            }
+        }
+    }
+    let Some(username) = username else {
+        eprint!("{USAGE}");
+        anyhow::bail!("Which account? Give it a username.");
+    };
+
+    let config = linger_server::config::Config::from_env()?;
+    let db = db::open_writer(&config.db_path()).await?;
+
+    let password = if from_stdin {
+        let mut typed = String::new();
+        std::io::stdin().lock().read_line(&mut typed)?;
+        // Only the line ending goes: a password is allowed to end in a space,
+        // and quietly trimming one would lock somebody out a second time.
+        typed.trim_end_matches(['\n', '\r']).to_string()
+    } else {
+        reset::generate_password()
+    };
+
+    let done = reset::reset_password(&db, username, &password).await?;
+    db.close().await;
+
+    let who = &done.username;
+    println!("\n  Password reset for {who} ({}).", done.display_name);
+    if !from_stdin {
+        println!("\n  New password:  {password}");
+    }
+    println!("\n  Everything signed in as {who} has been signed out. Sign in with this");
+    println!("  password, then change it in the app under your own name.");
+    if done.removed {
+        println!("\n  Note: {who} is currently removed from this server, so the new password");
+        println!("  won't get them in until the host lets them back in.");
+    }
+    println!();
+    Ok(())
+}
+
+async fn serve() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -13,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
     let config = linger_server::config::Config::from_env()?;
     tracing::info!(data_dir = %config.data_dir.display(), bind = %config.bind, "starting linger-server");
 
-    let db = linger_server::db::init(&config.db_path()).await?;
+    let db = db::init(&config.db_path()).await?;
     tokio::fs::create_dir_all(config.objects_dir()).await?;
 
     let bind = config.bind;

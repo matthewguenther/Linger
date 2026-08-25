@@ -459,6 +459,13 @@ bootstrap credentials.
 `sqlite3 linger.db ".backup"` and a cron one-liner in the README. Do not build a backup
 feature.
 
+**Locked out:** no reset email, no reset link — the setup token only exists while the
+server has no users, so the only remaining proof of ownership is access to the box.
+`linger-server reset-password <username>` sets a new password and revokes that user's
+refresh families. The password is generated and printed, or read from stdin; never
+taken from argv, which leaks into shell history and `ps`. Stop the server first — one
+SQLite file has one writer.
+
 ---
 
 ## 10. Build milestones
