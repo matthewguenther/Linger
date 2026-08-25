@@ -309,7 +309,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     there.
   - Still a human check, as with T-501/T-502: **a real 400 MB video, over a real
     network, from a server with real DNS for both names.**
-- ⬜ **T-504 · The media UI + link cards** — effort: **medium**
+- ⏳ **T-504 · The media UI + link cards** — effort: **medium** — claimed by Matt, 2026-08-25
   SPEC §4.4: grid, filter by person/type/date, stars (starred never expire),
   each item links to its message/moment. Restrained link embeds (favicon, title,
   domain — one line): server-side metadata fetch **with SSRF guard** (deny
