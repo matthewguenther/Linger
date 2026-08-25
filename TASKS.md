@@ -142,7 +142,15 @@ task fails its acceptance criteria twice.
   so somebody who joins while you are connected appears in your roster right
   away instead of after a restart — and their first message has their name on
   it rather than "someone". **M4.5 is complete.**
-- ⬜ **M5 … M8** — queued below. M5 starts when M4.5's check passes.
+- 🚧 **M5 — uploads, media pipeline, the media grid** — in progress.
+  **T-501 landed 2026-08-25**: a file goes up in resumable 8 MB pieces straight
+  to storage without touching the JSON API, every image is re-encoded on arrival
+  so EXIF (and any GPS in it) is gone, a file that lies about its type is caught
+  by its bytes, videos get a poster frame and a duration, and a finished upload
+  can be posted on a message — with or without anything typed above it. What is
+  left of the milestone is T-502…T-506, and the milestone check itself (400 MB,
+  killed connection, appears in the grid) waits on T-504's grid.
+- ⬜ **M6 … M8** — queued below.
 - ⏬ **Backburner (after M8)** — entrance sounds (T-901, T-902, T-903) and
   activity detection (T-911…T-917). Sounds: Matt, 2026-08-21. Activity: Matt,
   2026-08-23 — still V1, not needed for a usable product, and large enough that
@@ -1198,7 +1206,7 @@ sound.
     `activityMark` is one function if T-911 wants more.
   - *The status image is not rendered.* `image_key` needs the media store M5
     builds. **T-506 owns it now** — T-405 took the rest of the status and left
-    the image behind, because there is nowhere to put a file until T-501 lands.
+    the image behind, because there was nowhere to put a file until T-501 landed.
     Everything else on a status is there: the line in their own styling, and
     the three labeled fields.
   - **T-405 should not rebuild the card.** The status renders here already; what
@@ -1366,11 +1374,11 @@ sound.
 
   - ***The status image is not built, and could not be.*** SPEC §4.6 allows one
     image, ≤512 KB at 400×200. `image_key` names an object in the media store,
-    and there is no media store until **M5 builds the upload pipeline (T-501)**;
-    `/uploads` is not even mounted. Pulling it in would be reaching into a later
+    and there was no media store until **T-501 built the upload pipeline**;
+    `/uploads` was not even mounted then. Pulling it in would have been reaching into a later
     milestone. Everything else on a status is done. `statusOf` carries
     `image_key` through every save untouched — `PATCH /me` replaces the whole
-    status object, so dropping it would delete an image the moment T-501 lets
+    status object, so dropping it would delete an image now that T-501 lets
     somebody set one. The editor says so in a line of copy. **It is written up
     as T-506, in M5, right after the upload pipeline that unblocks it.**
   - *T-911's poller now has a third frame to keep the activity id on.* T-402
@@ -1884,7 +1892,7 @@ above.
 
 *Milestone check: a 400 MB video uploads, resumes after a killed connection, appears in the media grid.*
 
-- ⬜ **T-501 · Upload pipeline (local backend)** — effort: **high**
+- ✅ **T-501 · Upload pipeline (local backend)** — effort: **high** — landed 2026-08-25
   ARCHITECTURE §8 + PROTOCOL §6. Slot creation validates size/quota/MIME
   allowlist; token-authenticated direct-PUT URLs (bytes never traverse app
   routes — separate upload listener path); multipart >8MB with per-part URLs
@@ -1893,6 +1901,68 @@ above.
   blurhash, video poster via ffmpeg. Reject oversize at slot *and* at complete.
   *Accept:* the milestone check, scripted: kill mid-upload, resume, complete;
   EXIF-GPS test image comes out clean; fake-MIME file is caught.
+
+  All three accept criteria are `crates/linger-server/tests/uploads.rs`
+  (15 tests): `a_killed_upload_resumes_and_completes` sends a body that dies
+  mid-part, proves complete refuses, resends and completes;
+  `exif_never_survives_an_upload` builds a real JPEG with a hand-written EXIF
+  APP1 + GPS IFD and asserts nothing of it is in the stored bytes;
+  `a_file_that_lies_about_its_type_is_refused` sends zip bytes declared as PNG.
+
+  **Decisions and surprises, for whoever picks up T-502…T-506:**
+
+  - **An upload id is an attachment id.** Same UUID, two newtypes, no `uploads`
+    table and no migration. Nothing about an in-flight upload needs storing that
+    the attachment row does not already hold, and the part layout is a pure
+    function of the declared size (`storage::part_plan`), so a resumed upload
+    recomputes the plan rather than looking it up.
+  - **Failing at complete is two different things**, and getting this wrong is
+    what the first version did. Parts missing = the ordinary dropped connection:
+    the slot stays pending, the client sends what is missing, complete again.
+    Anything else (wrong size, a file that isn't the type it claimed) = final,
+    parts discarded. Without that split, one flaky part burned the whole upload.
+  - **A message with a file on it may have an empty body.** PROTOCOL §4 said
+    1–8000 chars, which would have made "share a photo without a caption"
+    impossible. PROTOCOL §4 is updated in the same commit; `validate::caption`
+    is the version that allows empty and `validate::message_body` still doesn't.
+  - **`ObjectStore` exists with one implementation** (`storage::LocalStore`), so
+    T-502 has a target: slot, assemble-into-a-local-file, put/read/delete,
+    discard. `assemble` returning a local path is deliberate — S3 will download
+    the completed object there, because sniffing and re-encoding need the bytes.
+  - **The listener is `PUT /upload/{id}/{part}` and serving is
+    `GET /objects/{key}`**, both outside `/api/v1`, neither authenticated. Part
+    URLs carry an HMAC over (upload id, part, expiry); the key is
+    `data/upload_hmac.key` and must survive restarts or resume breaks. Serving
+    is unauthenticated on purpose — the key holds a UUIDv7, the URL is the
+    secret, and that is the only arrangement an `<img>` tag can use. What makes
+    it safe is the headers, and **T-503 is what finishes it** by moving these
+    responses off the app origin.
+  - **WebP comes back as PNG.** The `image` crate reads WebP and cannot write
+    it. Rather than skip re-encoding (and keep EXIF), a WebP is re-encoded to
+    PNG and its filename extension corrected. GIFs are re-encoded frame by frame
+    so animation survives. AVIF is not on the allowlist: decoding it needs a
+    native dav1d build, which is not worth a system dependency yet.
+  - **`server_config['pool_bytes']` already works** — `repo::attachments::
+    pool_limit` reads it and falls back to the 50 GB default. T-505 needs the
+    endpoint that sets it and the used figure on `GET /server`;
+    `repo::attachments::pool_used` is the used figure, and it counts pending
+    uploads so a full server cannot hand out fifty more slots.
+  - **Abandoned uploads are swept on the way in**, not by a background task:
+    slot creation deletes pending rows older than 48h and their part files. It
+    is the only moment the answer matters (pending bytes count against the
+    pool) and slot creation is 20/hour/person, so it is nowhere near hot.
+  - **ffmpeg/ffprobe are optional and shelled out to.** No poster and no
+    duration without them; nothing fails. `deploy/Dockerfile` installs ffmpeg
+    now, so T-701's note about adding it is done. The video test skips when
+    ffmpeg is absent, so **CI is currently not exercising the poster path** —
+    add ffmpeg to the CI runner in T-701 and it starts running.
+  - The scripted resume test moves 16 MB over three parts, not the milestone's
+    400 MB over fifty. Same loop, fifty times; `storage::tests` pins the part
+    arithmetic for 400 MB and 500 MB. **A real 400 MB video over a real network
+    is still a human check** and belongs at the end of M5, with T-504's grid.
+  - `LINGER_STORAGE=s3` now refuses to start rather than booting a server whose
+    uploads cannot work. T-502 removes that.
+
 - ⬜ **T-502 · S3 storage adapter** — effort: **medium** — same trait, presigned
   URLs; test against MinIO in CI (service container).
 - ⬜ **T-503 · Separate media origin** — effort: **medium**
@@ -1980,7 +2050,8 @@ current vendor docs, not memory (AGENTS.md).*
   Needs certs/Apple developer account (Matt). Harden CSP for release while here
   (drop dev relaxations from `tauri.conf.json`).
 - ⬜ **T-703 · Server image publish** — effort: **low**
-  ghcr.io workflow for `deploy/Dockerfile` (+ ffmpeg once T-902/T-501 need it),
+  ghcr.io workflow for `deploy/Dockerfile` (ffmpeg is already in it, T-501; the
+  CI *runner* still needs it, or the video-poster test keeps skipping),
   version tags, compose points at it.
 
 ## M8 — export

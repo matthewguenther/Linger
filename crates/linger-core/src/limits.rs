@@ -9,6 +9,10 @@ pub const DEFAULT_POOL_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 pub const MULTIPART_THRESHOLD_BYTES: u64 = 8 * 1024 * 1024;
 /// Non-starred, non-pinned files expire after this many days by default.
 pub const DEFAULT_FILE_EXPIRY_DAYS: u32 = 365;
+/// How many finished uploads one message may carry.
+pub const MAX_ATTACHMENTS_PER_MESSAGE: usize = 10;
+/// Filenames are stored and echoed in a download header, so they are bounded.
+pub const MAX_FILENAME_CHARS: usize = 200;
 
 /// Custom entrance sounds: max 2 seconds, max 200 KB, reject (never truncate).
 pub const MAX_ENTRANCE_SOUND_BYTES: u64 = 200 * 1024;

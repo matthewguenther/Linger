@@ -60,6 +60,33 @@ impl ApiError {
         )
     }
 
+    /// The file is bigger than a single file may be (SPEC §4.10).
+    pub fn file_too_large(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            ErrorCode::FileTooLarge,
+            message,
+        )
+    }
+
+    /// Not a kind of file this server stores, or not the kind it claimed to be.
+    pub fn unsupported_media(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ErrorCode::UnsupportedMedia,
+            message,
+        )
+    }
+
+    /// The server's storage pool is full (SPEC §4.10).
+    pub fn quota_exceeded(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            ErrorCode::QuotaExceeded,
+            message,
+        )
+    }
+
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::Conflict, message)
     }

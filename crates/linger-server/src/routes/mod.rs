@@ -1,6 +1,11 @@
 //! Route assembly. Everything REST lives under `/api/v1`; the gateway upgrades
-//! at `/api/v1/gateway` (PROTOCOL preamble). Still to mount: `/uploads` and
-//! `/media` (M5), `/export` (M8).
+//! at `/api/v1/gateway` (PROTOCOL preamble).
+//!
+//! Two paths sit deliberately *outside* `/api/v1`: `/upload/...` takes the bytes
+//! of an upload and `/objects/...` serves them back. Bytes never travel through
+//! the JSON API (ARCHITECTURE §8) — see [`objects`].
+//!
+//! Still to mount: `/media` (T-504), `/export` (M8).
 //!
 //! Unknown paths get the PROTOCOL §1 envelope, not axum's plain-text 404, so
 //! the client can always switch on `error.code`.
@@ -9,9 +14,11 @@ mod auth;
 mod health;
 mod invites;
 mod messages;
+mod objects;
 mod rooms;
 mod server;
 mod setup;
+mod uploads;
 mod users;
 
 use axum::http::{header, HeaderValue, Method};
@@ -57,6 +64,10 @@ fn cors() -> CorsLayer {
             Method::DELETE,
         ])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        // The client reads the etag off each uploaded part and hands it back at
+        // complete; a cross-origin caller cannot see a header unless it is
+        // named here.
+        .expose_headers([header::ETAG])
         // Auth is a bearer token the client holds deliberately. There are no
         // cookies, so there is no ambient authority for a browser to attach.
         .allow_credentials(false)
@@ -72,11 +83,13 @@ pub fn router(state: AppState) -> Router {
         .merge(server::router())
         .merge(rooms::router())
         .merge(messages::router())
+        .merge(uploads::router())
         .route("/gateway", any(crate::gateway::ws_route))
         .fallback(api_not_found);
 
     Router::new()
         .nest("/api/v1", api)
+        .merge(objects::router())
         .layer(cors())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

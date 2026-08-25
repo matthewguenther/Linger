@@ -13,10 +13,18 @@ linger-activity = { workspace = true }
 
 anyhow = { workspace = true }
 argon2 = { workspace = true }
+async-trait = "0.1"
 axum = { workspace = true }
+# Blurhash: the smear of colour shown while an image loads (PROTOCOL §6).
+blurhash = "0.2"
 dashmap = { workspace = true }
 futures-util = { workspace = true }
 hex = { workspace = true }
+# Uploaded images are decoded and re-encoded, which is what strips EXIF and
+# neutralises polyglots in one step (SPEC §4.10, ARCHITECTURE §7).
+image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+# Magic-byte sniffing: what a file actually is, as opposed to what it claimed.
+infer = "0.22"
 jsonwebtoken = { workspace = true }
 rand = { workspace = true }
 ring = { workspace = true }
@@ -24,14 +32,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true }
+tempfile = "3"
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "process"] }
+tokio-util = { version = "0.7", features = ["io"] }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
-tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 tokio-tungstenite = "0.29"

@@ -134,8 +134,18 @@ DELETE /messages/:id/reactions/:key                              → 204
 pagination is a range scan. Results are always newest-first.
 
 `body` is 1–8000 chars after trimming (`linger-core::limits::MAX_MESSAGE_CHARS`);
-empty or oversize bodies are `VALIDATION_FAILED`. `reply_to` must reference a
-message in the same room. Pin/unpin is any member; there is no pin hierarchy.
+empty or oversize bodies are `VALIDATION_FAILED` — **except** that a message
+carrying at least one attachment may have an empty body. Handing somebody a
+photo without typing a caption over it is the ordinary way to share a photo.
+
+`attachment_ids` are finished uploads (§6). Each must belong to the author, be
+in the `complete` state, and not already be on another message; at most
+`linger-core::limits::MAX_ATTACHMENTS_PER_MESSAGE` per message. Reusing
+somebody else's attachment id is `FORBIDDEN`, and reusing one that is already
+posted is `CONFLICT`.
+
+`reply_to` must reference a message in the same room. Pin/unpin is any member;
+there is no pin hierarchy.
 
 ```ts
 type Message = {
@@ -299,9 +309,41 @@ DELETE /uploads/:id                                         → 204
 Client PUTs bytes **directly to the returned URL**, never through the app server.
 Files over 8 MB use multipart with per-part URLs, which is what makes uploads resumable.
 
-Server rejects at slot creation: `size_bytes > 500 MB`, server pool over quota, or a mime
-not on the allowlist. Server re-validates real size and sniffs actual MIME at complete —
-never trust the declared values.
+Server rejects at slot creation: `size_bytes > 500 MB` (`FILE_TOO_LARGE`), server pool
+over quota (`QUOTA_EXCEEDED`), or a mime not on the allowlist in `linger-core::media`
+(`UNSUPPORTED_MEDIA`). Server re-validates real size and sniffs actual MIME at complete —
+never trust the declared values. A file whose bytes disagree with its declared type is
+`UNSUPPORTED_MEDIA`; a file that is not the size it said it would be is
+`VALIDATION_FAILED`.
+
+`upload_id` and `attachment_id` are the same identifier. An upload is an attachment that
+has not arrived yet, and there is nothing to remember about one that the attachment does
+not already hold.
+
+**Parts.** `part_size_bytes` is 8 MB. At or under that the upload is a single PUT to
+`url` and `parts` is absent; above it, `parts` lists one signed URL per part, numbered
+from 1, and `url` is the first of them. The layout is a pure function of `size_bytes`, so
+a client that resumes recomputes exactly the plan it was given. Each successful PUT
+answers with an `ETag` (which CORS exposes), and those etags may be handed back at
+complete; the server checks them against what actually landed.
+
+**Resuming.** Re-PUTting a part replaces it. Completing with parts missing is
+`VALIDATION_FAILED` and **leaves the slot alive**: send the missing parts and complete
+again. Any other refusal at complete is final — the parts are discarded and the slot
+cannot be retried, because resending the same bytes under the same declaration cannot
+make them acceptable.
+
+`DELETE /uploads/:id` throws an upload away, finished or not, along with its bytes. It is
+`CONFLICT` once the attachment is on a message; delete the message instead.
+
+**Serving.** `Attachment.url` (and `poster_url`) point at the object store. On a server
+with `LINGER_DOMAIN` set they are absolute; on one without, they are root-relative and
+the client resolves them against the server it is talking to. The URL is the secret: an
+object key contains a UUIDv7, and the request is not authenticated, which is what lets an
+`<img>` tag work. Only image, video and audio types on the `linger-core::media` inline
+list are served with their own content type; everything else is served as
+`application/octet-stream` with `Content-Disposition: attachment`, and every response
+carries `X-Content-Type-Options: nosniff` (ARCHITECTURE §7).
 
 ```ts
 type Attachment = {
@@ -313,6 +355,10 @@ type Attachment = {
   uploader_id: string; created_at: number;
 }
 ```
+
+`mime`, `filename` and `size_bytes` on a finished attachment describe what the server
+**stored**, not what the client declared. Images are re-encoded on upload, which strips
+EXIF and can change the format (a WebP comes back as a PNG, with its extension corrected).
 
 **Media**
 
