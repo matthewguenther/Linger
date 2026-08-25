@@ -124,6 +124,11 @@ task fails its acceptance criteria twice.
   several servers at once, and each one has its own connection, keyring entry,
   people and rooms. **M4.5's milestone check passes** — the remaining tasks,
   T-413, T-414 and T-415, never gated it.
+  **T-414 landed 2026-08-25**: `linger-server reset-password <username>` is a
+  subcommand on the server binary, so a host who forgets their password has a way
+  back in that does not need a reset email Linger cannot send. It prints a new
+  password (or takes one on stdin), signs that account out everywhere, and the
+  README has a "Locked out" section next to Backup.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
@@ -1651,7 +1656,7 @@ above.
     wire type, that type lives in `linger-core` like every other one (AGENTS
     rule 7).
 
-- ⬜ **T-414 · `reset-password`, for the host who is locked out** — effort: **low**
+- ✅ **T-414 · `reset-password`, for the host who is locked out** — effort: **low**
   Today there is no way back in. There is no password reset, and the setup token
   only exists while the server has zero users. A host who forgets their password
   leaves a server their friends can still talk on and that nobody can ever add a
@@ -1684,6 +1689,48 @@ above.
     subcommand. **It does not work** — passwords are argon2id hashes and the
     `sqlite3` shell cannot produce one. The `sqlite3` lines in the README stay
     where they are, for backup, which they do well.
+  - **Landed 2026-08-25.** `linger-server reset-password <username>` generates a
+    password and prints it; `--stdin` reads one instead. No new dependency: the
+    workspace still has no argument parser, and one subcommand is a `match` on
+    `std::env::args()`. `main.rs` dispatches before it does anything else, so
+    `serve()` is now a function rather than the body of `main`.
+  - **The password is never an argument, and the command says why.** A third
+    positional word is a hard error whose message explains that it would be left
+    in shell history and readable in `ps`, rather than silently being treated as
+    a username typo. Generated passwords are four groups of five characters from
+    a 32-character alphabet with the look-alikes removed (100 bits, and typeable
+    off a terminal onto a phone).
+  - **Opening the database is its own function.** `db::open_writer` is the single
+    WAL writer with `create_if_missing(false)` and a 30-second busy timeout, and
+    it does not run migrations. A typo in `LINGER_DATA_DIR` now says there is no
+    database there instead of making an empty one and reporting that nobody by
+    that name lives on it; running against a live server waits instead of
+    erroring, though the README still says to stop the server first.
+  - **A removed member can still be reset.** The lookup deliberately ignores
+    `deactivated_at`, because refusing would report a real account as
+    nonexistent, which is a different and untrue thing to say. The command
+    prints a note that they will not get in until the host lets them back in.
+    (Reads a column T-413 also uses; needs none of T-413's code, so this branch
+    is off `main`.)
+  - **The refresh families go with it**, the same rule as changing your own
+    password: the reason to reset one is usually that somebody else may have had
+    it, and a surviving refresh token keeps minting access tokens for thirty
+    days.
+  - **The documented command is `docker compose run --rm linger reset-password
+    matt`** — not the `linger linger-server reset-password matt` written above.
+    The image's `ENTRYPOINT` is already `linger-server`, so naming it again would
+    pass it to itself as a subcommand. `-T` is needed on the `--stdin` form.
+  - **Tests drive the real binary** (`tests/reset_password.rs`, six of them),
+    because the argument parsing, the printed password and the exit code *are*
+    the feature: reset, then sign in over HTTP with the printed password, and
+    watch the old password and the old refresh token both stop working. Also
+    covered: a shouted username, a piped password never being echoed back, a
+    wrong username exiting non-zero, a password as an argument being refused, and
+    a missing database.
+  - **Not verified on a real server.** Everything in the accept list is covered
+    by the tests above, against a real SQLite file and real HTTP. The
+    `docker compose` form of the command has not been run against a live
+    deployment.
 
 - ⬜ **T-415 · A new friend shows up without anybody restarting** — effort: **medium**
   Found during T-410 on 2026-08-21, on a real server. **Somebody who joins after you

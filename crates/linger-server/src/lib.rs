@@ -11,6 +11,7 @@ pub mod error;
 pub mod gateway;
 pub mod ratelimit;
 pub mod repo;
+pub mod reset;
 pub mod routes;
 pub mod setup;
 pub mod state;

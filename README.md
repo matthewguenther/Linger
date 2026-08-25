@@ -178,6 +178,36 @@ for signing back in.
 sqlite3 data/linger.db ".backup data/backups/linger-$(date +%F).db"
 ```
 
+**Locked out?** There is no reset email and no reset link. Linger has no address to
+send one to, and the setup link only exists while a server has nobody on it — so the
+proof that the server is yours is that you can get to the machine it runs on. The way
+back in is a command on the box:
+
+```bash
+docker compose stop linger                            # one database, one writer
+docker compose run --rm linger reset-password matt
+docker compose start linger
+```
+
+It prints a new password for that account. Sign in with it, then change it in the app
+under your own name. Everything that account was signed in on gets signed out, because
+the usual reason to reset a password is that somebody else might have had it.
+
+To choose the password yourself, pipe it in — never type it as an extra argument, where
+it would sit in your shell history and be readable by anyone running `ps`:
+
+```bash
+echo 'the one I wanted' | docker compose run --rm -T linger reset-password matt --stdin
+```
+
+Stop the server first. A second program writing to the same SQLite file is the one thing
+the database is careful about; if you forget, the command waits for the server rather
+than failing, but stopping it is the honest version.
+
+What this does not do: it does not make anybody the host, it does not touch anything else
+on the server, and a username that is not on this server is an error rather than a new
+account.
+
 ## 🛠️ Development
 
 ```
