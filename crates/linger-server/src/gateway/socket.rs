@@ -11,7 +11,7 @@ use futures_util::{SinkExt, StreamExt};
 use linger_core::gateway::{ClientFrame, ReadyData, ServerEvent, ServerFrame};
 use linger_core::limits::{HEARTBEAT_INTERVAL_MS, RATE_TYPING_PER_ROOM};
 use linger_core::UserId;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::{spawn_session, Ctl, SessionHandle};
 use crate::db::now_ms;
@@ -55,8 +55,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     )
     .await;
 
+    // The session task's way of hanging up on this socket: it fires when the
+    // person on the other end is removed from the server (T-413). Handed over
+    // in the `Attach` below, so whichever session this socket ends up on is the
+    // one holding it.
+    let (close_tx, mut close_rx) = oneshot::channel::<()>();
+
     // First frame decides the path: identify (new session) or resume.
-    let user_id = match handshake(&state, &sink, &mut ws_rx).await {
+    let user_id = match handshake(&state, &sink, &mut ws_rx, close_tx).await {
         Some(user_id) => user_id,
         None => {
             drop(sink);
@@ -72,9 +78,15 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         .execute(&state.db.write)
         .await;
 
-    // Reader loop until close, error, or liveness timeout.
+    // Reader loop until close, error, liveness timeout, or the session hanging
+    // up on us. `biased` so a close that lands at the same moment as a frame
+    // wins: the last thing a removed member should get is one more message.
     loop {
-        let received = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()).await;
+        let received = tokio::select! {
+            biased;
+            _ = &mut close_rx => break,
+            received = tokio::time::timeout(LIVENESS_TIMEOUT, ws_rx.next()) => received,
+        };
         let frame = match received {
             Err(_) | Ok(None) | Ok(Some(Err(_))) => break,
             Ok(Some(Ok(Message::Close(_)))) => break,
@@ -119,6 +131,7 @@ async fn handshake(
     state: &AppState,
     sink: &mpsc::Sender<String>,
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
+    closer: oneshot::Sender<()>,
 ) -> Option<UserId> {
     let first = tokio::time::timeout(HANDSHAKE_TIMEOUT, ws_rx.next())
         .await
@@ -180,6 +193,7 @@ async fn handshake(
 
             ctl.send(Ctl::Attach {
                 sink: sink.clone(),
+                closer,
                 resume_from: 0,
                 is_resume: false,
             })
@@ -220,6 +234,7 @@ async fn handshake(
             };
             ctl.send(Ctl::Attach {
                 sink: sink.clone(),
+                closer,
                 resume_from: s,
                 is_resume: true,
             })

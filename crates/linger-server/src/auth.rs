@@ -224,6 +224,20 @@ pub async fn rotate_refresh(db: &SqlitePool, token: &str) -> anyhow::Result<Refr
     }
 
     let user_id = UserId::from_slice(&user_bytes)?;
+
+    // Removal revokes every family this user owns, so a removed member's token
+    // is normally already dead by the branch above. This is the belt: rotation
+    // is the door that would otherwise keep handing out fresh 15-minute access
+    // tokens for the whole 30-day refresh window (T-413).
+    let live: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM users WHERE id = ? AND deactivated_at IS NULL")
+            .bind(&user_bytes)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if live.is_none() {
+        return Ok(RefreshOutcome::Rejected);
+    }
+
     let new_token = new_opaque_token();
 
     sqlx::query("UPDATE refresh_tokens SET revoked_at = ? WHERE id = ?")
@@ -280,6 +294,15 @@ pub async fn revoke_all_for_user(db: &SqlitePool, user_id: UserId) -> anyhow::Re
 // ---------------------------------------------------------------------------
 
 /// Any authenticated member. `Authorization: Bearer <jwt>` only.
+///
+/// **Removed members are refused here, not just at the next refresh** (T-413).
+/// That costs one primary-key read on the read pool per authenticated request,
+/// which is the same read `HostUser` already pays for `is_host`. The other
+/// answer — let the access token lapse on its own — buys that read back at the
+/// price of up to fifteen minutes in which somebody the host just removed can
+/// still post, and those fifteen minutes are the exact thing the host was
+/// trying to stop. On a server of eight friends the read is not the expensive
+/// half of anything.
 #[derive(Debug, Clone, Copy)]
 pub struct AuthedUser {
     pub id: UserId,
@@ -296,6 +319,14 @@ impl FromRequestParts<AppState> for AuthedUser {
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or_else(ApiError::unauthenticated)?;
         let id = state.jwt.verify(token)?;
+        let live: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM users WHERE id = ? AND deactivated_at IS NULL")
+                .bind(id.to_vec())
+                .fetch_optional(&state.db.read)
+                .await?;
+        if live.is_none() {
+            return Err(ApiError::unauthenticated());
+        }
         Ok(Self { id })
     }
 }

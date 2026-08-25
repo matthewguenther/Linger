@@ -25,7 +25,8 @@
 import { useMemo, useState } from "react";
 
 import type { Room } from "../generated/Room";
-import type { AuthedApi } from "../lib/api";
+import type { User } from "../generated/User";
+import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
 import { useGateway } from "../lib/gateway";
 import { nameStyle, personStyle } from "../lib/names";
@@ -121,8 +122,13 @@ export default function Roster({
           {entries.map((entry) => (
             <PersonCard
               key={entry.user.id}
+              api={api}
               entry={entry}
               now={now}
+              // Host-only, and absent rather than greyed out for everybody
+              // else — the same rule the host panel follows (T-410). The lock
+              // is the endpoint, which answers FORBIDDEN either way.
+              canRemove={(me?.is_host ?? false) && !entry.isMe}
               open={open === entry.user.id}
               onToggle={() =>
                 setOpen((held) => (held === entry.user.id ? null : entry.user.id))
@@ -148,20 +154,27 @@ export default function Roster({
  * have no way in.
  */
 function PersonCard({
+  api,
   entry,
   now,
+  canRemove,
   open,
   onToggle,
   onEdit,
 }: {
+  api: AuthedApi;
   entry: RosterEntry;
   now: number;
+  canRemove: boolean;
   open: boolean;
   onToggle: () => void;
   onEdit: () => void;
 }) {
   const { user, state } = entry;
-  const openable = hasStatus(entry) || entry.isMe;
+  // A host can open anybody, whether or not they wrote a status: the way to
+  // remove somebody is under here, and a card that will not open would hide it
+  // for exactly the quiet people it is most likely to be needed for.
+  const openable = hasStatus(entry) || entry.isMe || canRemove;
   const head = (
     <>
       {/* The dot is decoration; the word beside it is what a screen reader
@@ -202,10 +215,89 @@ function PersonCard({
                 edit
               </button>
             </p>
+          ) : canRemove ? (
+            <Removal api={api} user={user} />
           ) : null}
         </>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * The host's one destructive control, on the card of the person it is about
+ * (T-413).
+ *
+ * "Remove from the server", never kick and never ban — SPEC §1's vocabulary,
+ * and there is no ban to offer: it would need something durable to ban by, and
+ * Linger stores no addresses and no device ids. Two steps, because the card is
+ * a thing you open to read and a single click here would be a person gone.
+ *
+ * Nothing is reset on success: the server fans out `user.remove`, the store
+ * drops them from `users`, and this card is unmounted with them.
+ */
+function Removal({ api, user }: { api: AuthedApi; user: User }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const remove = async (): Promise<void> => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await api.removeUser(user.id);
+    } catch (error) {
+      setProblem(error instanceof ApiError ? error.message : "Couldn't remove them.");
+      setBusy(false);
+      setAsking(false);
+    }
+  };
+
+  return (
+    <div className="person-host">
+      {asking ? (
+        <>
+          {/* Said before the click rather than apologised for after it. The
+              part people get wrong is the reversibility, so lead with that. */}
+          <p className="person-host-note meta">
+            They lose their sign-in and any invite links they made. What they wrote stays. You can
+            let them back in from the host panel.
+          </p>
+          <p className="person-mine">
+            <button
+              type="button"
+              className="person-edit person-danger meta"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              {busy ? "removing…" : "yes, remove"}
+            </button>
+            <button
+              type="button"
+              className="person-edit meta"
+              disabled={busy}
+              onClick={() => setAsking(false)}
+            >
+              keep them
+            </button>
+          </p>
+        </>
+      ) : (
+        <p className="person-mine">
+          <button
+            type="button"
+            className="person-edit meta"
+            onClick={() => {
+              setProblem(null);
+              setAsking(true);
+            }}
+          >
+            remove from the server
+          </button>
+        </p>
+      )}
+      {problem === null ? null : <p className="person-host-note">{problem}</p>}
+    </div>
   );
 }
 

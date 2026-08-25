@@ -29,6 +29,7 @@ import type { UpdateMeRequest } from "../generated/UpdateMeRequest";
 import type { UpdateRoomRequest } from "../generated/UpdateRoomRequest";
 import type { UpdateServerRequest } from "../generated/UpdateServerRequest";
 import type { User } from "../generated/User";
+import type { UserId } from "../generated/UserId";
 
 /** Everything REST lives under this prefix (PROTOCOL §1). */
 const API_PREFIX = "/api/v1";
@@ -351,6 +352,35 @@ export class AuthedApi {
    *  and everything in it is still there. */
   archiveRoom(id: RoomId): Promise<Room> {
     return this.post<Room>(`/rooms/${encodeURIComponent(id)}/archive`);
+  }
+
+  /**
+   * Everybody the host has removed (T-413). A separate call rather than a flag
+   * on `GET /users`, because the roster is a list of people who are here and a
+   * removed member is not one of them.
+   */
+  removedUsers(signal?: AbortSignal): Promise<User[]> {
+    return this.get<User[]>("/users/removed", signal);
+  }
+
+  /** Take somebody off the server. The word is "remove", never kick or ban
+   *  (SPEC §1) — and there is no ban, because there is nothing to ban by. */
+  removeUser(id: UserId): Promise<void> {
+    return this.#withAuth((accessToken) =>
+      requestVoid(this.baseUrl, "POST", `/users/${encodeURIComponent(id)}/remove`, {
+        accessToken,
+      }),
+    );
+  }
+
+  /** Let them back in. Not an undo: their old sign-ins and the invites they
+   *  made stay dead, so they come back through the front door. */
+  restoreUser(id: UserId): Promise<void> {
+    return this.#withAuth((accessToken) =>
+      requestVoid(this.baseUrl, "POST", `/users/${encodeURIComponent(id)}/restore`, {
+        accessToken,
+      }),
+    );
   }
 
   invites(signal?: AbortSignal): Promise<Invite[]> {

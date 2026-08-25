@@ -21,6 +21,7 @@ import type { Invite } from "../generated/Invite";
 import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
 import type { ServerInfo } from "../generated/ServerInfo";
+import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
 import { useGateway } from "../lib/gateway";
@@ -28,11 +29,12 @@ import { colorVar, PALETTE_KEYS } from "../lib/palette";
 import { deadWords, expiryWords, inviteUrl, moveRoom, useWords } from "./host";
 import "./host.css";
 
-export type HostSection = "rooms" | "invites" | "server";
+export type HostSection = "rooms" | "invites" | "people" | "server";
 
 const SECTIONS: Array<{ key: HostSection; label: string }> = [
   { key: "rooms", label: "rooms" },
   { key: "invites", label: "invites" },
+  { key: "people", label: "people" },
   { key: "server", label: "server" },
 ];
 
@@ -86,6 +88,7 @@ export default function HostPanel({
       <div className="host-body">
         {section === "rooms" ? <RoomsSection api={api} rooms={rooms} /> : null}
         {section === "invites" ? <InvitesSection api={api} /> : null}
+        {section === "people" ? <PeopleSection api={api} /> : null}
         {section === "server" ? (
           <ServerSection api={api} server={server} onSaved={onServerChange} />
         ) : null}
@@ -602,6 +605,104 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+/**
+ * The other half of removing somebody (T-413): the list of everyone you have.
+ *
+ * Removing happens on the person's own card in the roster, where you are
+ * already looking at them. This section is only the way back — and it has to
+ * exist, because a removed member is gone from every surface in the app by
+ * design, so without a list here "let them back in" would be a feature with no
+ * door.
+ */
+function PeopleSection({ api }: { api: AuthedApi }) {
+  const gateway = useGateway(api.baseUrl);
+  const [removed, setRemoved] = useState<User[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(
+    async (signal?: AbortSignal): Promise<void> => {
+      try {
+        setRemoved(await api.removedUsers(signal));
+      } catch (error) {
+        if (signal?.aborted) return;
+        setProblem(problemText(error, "Couldn't read who has been removed."));
+      }
+    },
+    [api],
+  );
+
+  // Who is *here* is the one thing that tells us this list has gone stale:
+  // both removing and restoring somebody change it, and removing happens in
+  // the roster, which is on screen next to this panel. The ids rather than the
+  // array, so a display-name save is not a refetch.
+  const here = gateway.users
+    .map((person) => person.id)
+    .sort()
+    .join(" ");
+
+  useEffect(() => {
+    const abort = new AbortController();
+    void load(abort.signal);
+    return () => abort.abort();
+  }, [load, here]);
+
+  const restore = async (person: User): Promise<void> => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await api.restoreUser(person.id);
+      await load();
+    } catch (error) {
+      setProblem(problemText(error, "Couldn't let them back in."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="host-section">
+      <h3 className="panel-label host-label">removed</h3>
+      {removed === null ? (
+        <p className="placeholder">reading…</p>
+      ) : removed.length === 0 ? (
+        <p className="placeholder">
+          Nobody has been removed. The way to remove somebody is on their card in who’s around.
+        </p>
+      ) : (
+        <ul className="host-list">
+          {removed.map((person) => (
+            <li className="host-person" key={person.id}>
+              <span className="host-person-name">{person.display_name}</span>
+              <span className="host-person-username meta">@{person.username}</span>
+              <button
+                type="button"
+                className="host-mini meta"
+                disabled={busy}
+                onClick={() => void restore(person)}
+              >
+                let them back in
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="host-note meta">
+        Letting somebody back in is not an undo. Their old sign-ins stay dead and the invite links
+        they had made stay revoked, so they sign in again with their password — the username is the
+        one they always had, and everything they wrote is still where they left it.
+      </p>
+
+      {problem === null ? null : <p className="host-problem">{problem}</p>}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

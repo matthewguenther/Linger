@@ -129,6 +129,12 @@ task fails its acceptance criteria twice.
   back in that does not need a reset email Linger cannot send. It prints a new
   password (or takes one on stdin), signs that account out everywhere, and the
   README has a "Locked out" section next to Backup.
+  **T-413 landed 2026-08-25**: the host can remove somebody from a member's own
+  card and let them back in from the host panel's new `people` section. Removal
+  is immediate on all four doors — the access token, the refresh family, the
+  live socket and the roster — and it also killed the invites they had made.
+  It settled the gateway pair T-415 was waiting on, which leaves T-415 at one
+  line of server code plus its test.
   **T-415 was added the same day as T-410**, from something T-410 hit on
   a real server: a person who joins while you are connected never appears until you
   restart the app.
@@ -1611,7 +1617,7 @@ above.
     "Callie in #garage" with no server name, which is fine with one server and
     slightly ambiguous with two.
 
-- ⬜ **T-413 · Removing a member** — effort: **medium**
+- ✅ **T-413 · Removing a member** — effort: **medium**
   The host can remove somebody from the server, and let them back in. There is no
   separate ban — see *Decided — the host's side* below for why one would buy
   nothing here. The UI word is **"Remove from the server"**: not kick, not ban
@@ -1655,6 +1661,55 @@ above.
   - *Note:* this is the one task in M4.5 that changes the server. If it grows a
     wire type, that type lives in `linger-core` like every other one (AGENTS
     rule 7).
+  - **Landed 2026-08-25.** No new wire *type*: the two endpoints have no body
+    and answer 204, exactly as written above. One new gateway op, which is the
+    part that could not be avoided — see the decision below.
+  - **The bearer extractor got the check.** `AuthedUser` now reads
+    `deactivated_at` on every authenticated request. The write-up above says
+    either answer is defensible and only leaving it undecided is not, so: the
+    fifteen minutes a removed member would otherwise keep is the exact window
+    the host was trying to close, and the cost is one primary-key read on the
+    read pool, which `HostUser` already pays for `is_host` on every host
+    request. On a server of eight friends that read is not the expensive half
+    of anything. Written down in `auth.rs` and in PROTOCOL §5.
+  - **All four doors, and the fourth needed real plumbing.** The column, the
+    refresh families and the invites go in one transaction. Rotation grew a
+    deactivation check as the belt to the revocation's braces. The gateway
+    close is the one that was not a SQL line: the session task now takes a
+    `oneshot` "closer" alongside the sink on every attach, and `Ctl::Close`
+    sends `invalid_session` and then fires it. Without that the socket's reader
+    loop is parked on the next client frame, which a removed member is never
+    going to send, so the connection would have sat open and quiet until the
+    75-second liveness timeout — and then reconnected.
+  - **The close reason is `"unauthenticated"`, which is load-bearing.** It is
+    the one reason the Tauri core already answers by asking for a fresh token,
+    and asking is what gets the refusal that signs them out. A reason nobody
+    handles would have left the removed client reconnecting into a locked door
+    on a backoff, forever.
+  - **Announcing it: `user.remove { user_id }`, and `restore` uses
+    `user.update`.** This is the pair T-415 asks for, decided together and
+    written into PROTOCOL §8. `user.update` now means "here is the current
+    state of this person, whether or not you had them" — the client's fold
+    already appends on an unknown id, so restore needs no new op. Removal
+    genuinely cannot reuse it: the wire `User` has no `deactivated_at` and
+    should not grow one to carry a tombstone. **T-415 is now one line of
+    server code**: publish `UserUpdate` from `POST /auth/register`.
+  - **Where the control went, and where it did not.** Removing is on the
+    person's card in the roster, host-only and absent for everybody else. The
+    card is now openable for the host even when somebody has written no status,
+    or the control would be hidden for exactly the quiet people it is most
+    likely to be needed for. It is deliberately *not* on the popover over a
+    name in the stream: that card closes on scroll, and a destructive control
+    inside something that moves is a misclick waiting to happen. Restore lives
+    in a fourth host-panel section, `people`, which lists the removed — a
+    removed member is gone from every other surface by design, so without that
+    list "let them back in" would be a feature with no door.
+  - **Not verified on a real server.** Everything above is covered by
+    integration tests, including the socket actually closing rather than going
+    quiet, and the frontend fold. The two-client run in the accept list — remove
+    the second account and watch it leave the first client's roster — has not
+    been done; it needs two clients on a live server, which this session did not
+    have.
 
 - ✅ **T-414 · `reset-password`, for the host who is locked out** — effort: **low**
   Today there is no way back in. There is no password reset, and the setup token
@@ -1775,13 +1830,15 @@ above.
   Either way it is one line in `linger-core::gateway`'s docs or enum, so **this is the
   rare M4.5 task that is allowed to touch `linger-core`** — unlike T-410/T-411/T-412.
 
-  **Do this with T-413 in front of you, or right after it.** T-413 needs the exact
-  mirror — a removed member has to *leave* the roster live — and that one genuinely
-  cannot reuse `user.update`, because the wire `User` has no `deactivated_at` field and
-  should not grow one just to carry a tombstone. So T-413 needs its own way to say
-  "this person is gone". Decide the pair together so the answer to "somebody arrived"
-  and the answer to "somebody left" have the same shape, rather than two different
-  inventions a week apart.
+  **The pair was decided in T-413 (2026-08-25), and this half is now one line.**
+  T-413 took the first of the two options above: PROTOCOL §8 now says `user.update` is
+  "the current state of this person, whether or not you had them", and removal got its
+  own op, `user.remove { user_id }`, because the wire `User` has no `deactivated_at`
+  field and should not grow one to carry a tombstone. `restore` already publishes
+  `user.update` for somebody the client does not have and the fold appends them, so the
+  machinery is not just present, it is in use. **All that is left here is publishing
+  `UserUpdate` from `POST /auth/register` after the row is written** — plus the test
+  below, which is the part that is actually worth the effort.
 
   - *Accept:* a gateway integration test — client A identifies, client B registers over
     REST, and A receives a frame carrying B and nothing else changes. Then on a real

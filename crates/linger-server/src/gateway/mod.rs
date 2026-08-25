@@ -20,7 +20,7 @@ use linger_core::gateway::{ServerEvent, ServerFrame};
 use linger_core::limits::{RESUME_BUFFER_FRAMES, RESUME_WINDOW_MS};
 use linger_core::wire::{ActivityInfo, PresenceEntry, PresenceState};
 use linger_core::{RoomId, UserId};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub use socket::ws_route;
 
@@ -44,12 +44,19 @@ struct SessionHandle {
 enum Ctl {
     Attach {
         sink: mpsc::Sender<String>,
+        /// Fired to make the attached socket's reader loop give up. The socket
+        /// is the only thing that can end itself otherwise, and it spends its
+        /// life parked on the next client frame, which a removed member is
+        /// never going to send.
+        closer: oneshot::Sender<()>,
         /// Last sequence number the client saw; replay starts after it.
         resume_from: u64,
         /// Resume attaches get a `resumed` frame before the replay.
         is_resume: bool,
     },
     Detach,
+    /// This session's user is off the server (T-413). Say so, hang up, stop.
+    Close,
 }
 
 impl Default for Gateway {
@@ -80,6 +87,26 @@ impl Gateway {
     pub fn publish(&self, event: ServerEvent) {
         // No receivers just means nobody is connected; that is fine.
         let _ = self.bus.send(Arc::new(event));
+    }
+
+    /// Hang up on every session this person has open (T-413).
+    ///
+    /// Removal is only real once the socket is gone. The token check at
+    /// identify happens once, at the start, so an already-open socket keeps
+    /// receiving every message on the server until somebody closes it — and
+    /// waiting for the 15-minute access token to lapse is not closing it.
+    pub async fn close_sessions_for(&self, user_id: UserId) {
+        // Collected first: holding a `DashMap` iterator across an await is how
+        // a map like this deadlocks against the session task removing itself.
+        let open: Vec<mpsc::Sender<Ctl>> = self
+            .sessions
+            .iter()
+            .filter(|e| e.value().user_id == user_id)
+            .map(|e| e.value().ctl.clone())
+            .collect();
+        for ctl in open {
+            let _ = ctl.send(Ctl::Close).await;
+        }
     }
 
     /// Presence snapshot for `ready`.
@@ -248,6 +275,9 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
         let mut seq: u64 = 0;
         let mut ring: VecDeque<(u64, String)> = VecDeque::with_capacity(RESUME_BUFFER_FRAMES);
         let mut sink: Option<mpsc::Sender<String>> = None;
+        // Held alongside the sink and replaced with it: it belongs to whichever
+        // socket is attached right now, not to the session.
+        let mut closer: Option<oneshot::Sender<()>> = None;
         // Starts "detached": if the handshake never attaches, the sweep reaps us.
         let mut detached_at: Option<Instant> = Some(Instant::now());
         let mut sweep = tokio::time::interval(Duration::from_secs(5));
@@ -271,6 +301,7 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
                             // socket; detach and let resume recover it.
                             if tx.try_send(json).is_err() {
                                 sink = None;
+                                closer = None;
                                 detached_at = Some(Instant::now());
                             }
                         }
@@ -282,7 +313,7 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 ctl = ctl_rx.recv() => match ctl {
-                    Some(Ctl::Attach { sink: new_sink, resume_from, is_resume }) => {
+                    Some(Ctl::Attach { sink: new_sink, closer: new_closer, resume_from, is_resume }) => {
                         let replay: Vec<String> = ring
                             .iter()
                             .filter(|(s, _)| *s > resume_from)
@@ -305,12 +336,36 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
                         }
                         if ok {
                             sink = Some(new_sink);
+                            closer = Some(new_closer);
                             detached_at = None;
                         }
                     }
                     Some(Ctl::Detach) => {
                         sink = None;
+                        closer = None;
                         detached_at = Some(Instant::now());
+                    }
+                    Some(Ctl::Close) => {
+                        // "unauthenticated" rather than a word of its own: it is
+                        // what this token now is, and it is the one reason the
+                        // client already answers by asking for a fresh token —
+                        // which the server refuses, which signs them out. A
+                        // reason nobody handles would leave them reconnecting
+                        // into a locked door forever.
+                        if let Some(tx) = &sink {
+                            let frame = ServerFrame::control(ServerEvent::InvalidSession {
+                                reason: "unauthenticated".into(),
+                            });
+                            if let Ok(json) = serde_json::to_string(&frame) {
+                                let _ = tx.send(json).await;
+                            }
+                        }
+                        // Queued behind that frame, so it goes out before the
+                        // socket's writer runs dry and stops.
+                        if let Some(closer) = closer.take() {
+                            let _ = closer.send(());
+                        }
+                        break;
                     }
                     None => break,
                 },
