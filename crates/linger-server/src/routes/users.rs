@@ -2,13 +2,13 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, patch};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use linger_core::gateway::ServerEvent;
 use linger_core::wire::{ChangePasswordRequest, Fill, NotifyRule, UpdateMeRequest, User};
 use linger_core::UserId;
 
-use crate::auth::{self, AuthedUser};
+use crate::auth::{self, AuthedUser, HostUser};
 use crate::db::now_ms;
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -17,7 +17,13 @@ use crate::{repo, validate};
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/users", get(list_users))
+        // Static before dynamic on purpose: this reads as `/users/{id}` at a
+        // glance, and only the router's static-segment precedence keeps
+        // `removed` from being parsed as somebody's id.
+        .route("/users/removed", get(list_removed))
         .route("/users/{id}", get(get_user))
+        .route("/users/{id}/remove", post(remove_user))
+        .route("/users/{id}/restore", post(restore_user))
         .route("/me", get(me).patch(patch_me))
         .route("/me/password", patch(change_password))
         .route(
@@ -41,6 +47,103 @@ async fn get_user(
     Path(id): Path<UserId>,
 ) -> Result<Json<User>, ApiError> {
     repo::users::expect(&state.db.read, id).await.map(Json)
+}
+
+/// The host's list of everybody they have removed. Restore is useless if the
+/// people you could restore are not written down anywhere (T-413).
+async fn list_removed(
+    State(state): State<AppState>,
+    _host: HostUser,
+) -> Result<Json<Vec<User>>, ApiError> {
+    repo::users::removed(&state.db.read).await.map(Json)
+}
+
+/// Take somebody off the server (PROTOCOL §5, T-413).
+///
+/// Setting the column is about a quarter of it. A removed member has to *stop
+/// being in the room*, and there are three other doors: their refresh families
+/// keep minting access tokens for 30 days, their live gateway socket keeps
+/// receiving fan-out forever, and the invites they made are a way back in. All
+/// four are shut here, the first three in one transaction.
+///
+/// Their messages are untouched. Removing a person is not deleting what they
+/// wrote (SPEC principle 3).
+async fn remove_user(
+    State(state): State<AppState>,
+    host: HostUser,
+    Path(id): Path<UserId>,
+) -> Result<StatusCode, ApiError> {
+    // `is_host` is a boolean nobody can hand on (TASKS, *Decided — the host's
+    // side*), so a host who removed themselves would leave a server no one
+    // could ever add a room to again.
+    if id == host.id {
+        return Err(ApiError::forbidden(
+            "You can't remove yourself from your own server.",
+        ));
+    }
+    expect_account(&state, id).await?;
+
+    let now = now_ms();
+    let mut tx = state.db.write.begin().await.map_err(ApiError::from)?;
+    sqlx::query("UPDATE users SET deactivated_at = ? WHERE id = ? AND deactivated_at IS NULL")
+        .bind(now)
+        .bind(id.to_vec())
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+    )
+    .bind(now)
+    .bind(id.to_vec())
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE invites SET revoked_at = ? WHERE created_by = ? AND revoked_at IS NULL")
+        .bind(now)
+        .bind(id.to_vec())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await.map_err(ApiError::from)?;
+
+    // Written first, then enforced: a socket closed before the column is
+    // committed could reconnect into an account that is still live.
+    state.gateway.close_sessions_for(id).await;
+    state
+        .gateway
+        .publish(ServerEvent::UserRemove { user_id: id });
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Let somebody back in. The reverse of [`remove_user`], and deliberately not
+/// its exact undo: the invites they had made stay revoked, and their sign-ins
+/// stay dead, so they come back through the front door with their password.
+async fn restore_user(
+    State(state): State<AppState>,
+    _host: HostUser,
+    Path(id): Path<UserId>,
+) -> Result<StatusCode, ApiError> {
+    expect_account(&state, id).await?;
+    sqlx::query("UPDATE users SET deactivated_at = NULL WHERE id = ?")
+        .bind(id.to_vec())
+        .execute(&state.db.write)
+        .await?;
+
+    // `user.update` is "here is this person, whether or not you had them"
+    // (PROTOCOL §8), so every connected client grows the card back on its own.
+    let user = repo::users::expect(&state.db.read, id).await?;
+    state.gateway.publish(ServerEvent::UserUpdate(user));
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// An account row, removed or not. `repo::users` only ever sees active members,
+/// which is right everywhere except the two endpoints that act on removed ones.
+async fn expect_account(state: &AppState, id: UserId) -> Result<(), ApiError> {
+    let found: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM users WHERE id = ?")
+        .bind(id.to_vec())
+        .fetch_optional(&state.db.read)
+        .await?;
+    found
+        .map(|_| ())
+        .ok_or_else(|| ApiError::not_found("No such person on this server."))
 }
 
 async fn me(State(state): State<AppState>, auth: AuthedUser) -> Result<Json<User>, ApiError> {

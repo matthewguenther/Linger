@@ -159,11 +159,19 @@ the server. It works once, and a restart replaces it.
 
 Everything else you need to run the place is inside the app. As the host you get two
 extra controls on the rail — `+ room` next to the room list, and `manage` next to the
-server's name — and they open one panel with three sections: rooms, invites, and the
-server's own name and accent. Nobody else sees those controls at all. Making a room,
+server's name — and they open one panel with four sections: rooms, invites, people, and
+the server's own name and accent. Nobody else sees those controls at all. Making a room,
 renaming or archiving one, reordering the rail, handing out invite links and revoking
 them, and renaming the server are all done there. None of it needs `curl` and none of
 it is a config file.
+
+**Removing somebody** is on their card in `who's around`, and only you can see it. It
+takes effect at once: they lose their sign-in, their open connection is closed, and any
+invite links they had made stop working. What they wrote stays where it is — removing a
+person is not deleting what they said. There is no ban, because a ban needs something
+durable to ban by and Linger stores no addresses and no device ids. The `people` section
+of the host panel lists everybody you have removed and lets them back in; that is not an
+undo, so they sign in again with the password they always had.
 
 Inviting people works like the setup link. The invites screen makes the link and copies
 it for you — it is your server's address with the code hung off it,
@@ -264,9 +272,9 @@ Things that surprise people the first time:
   everyone. The room leave has to go before the away frame, because the server sets
   `around` on any room leave.
 - **The host's controls are absent for everybody else, not greyed out**
-  (`client/src/host/`). One panel over the stream column with three sections — rooms,
-  invites, the server itself — reached from two small controls on the rail that only a
-  host is shown. A disabled button would be a permission matrix drawn in CSS, and this
+  (`client/src/host/`). One panel over the stream column with four sections — rooms,
+  invites, people, the server itself — reached from two small controls on the rail that
+  only a host is shown. A disabled button would be a permission matrix drawn in CSS, and this
   product does not have one; the server refuses the request either way, which is the
   actual lock. The panel keeps no copy of the room list: every save goes to the server,
   the server fans the change out, and the panel re-renders off the same store the rail

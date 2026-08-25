@@ -257,6 +257,40 @@ describe("the gateway store, with two servers", () => {
     expect(serverState(HOME).rooms).toEqual([]);
   });
 
+  it("takes a removed member off the roster and leaves the other server alone", async () => {
+    // T-413. The card has to go without a reload, and it has to go on this
+    // server only — a user id means nothing next to the server it came from.
+    await connect(fakeApi(HOME));
+    await connect(fakeApi(WORK));
+    const matt = person("u-matt", "Matt");
+    const callie = person("u-callie", "Callie");
+
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+    arrive(WORK, ready({ user: matt, users: [matt, callie] }));
+    arrive(HOME, {
+      s: 2,
+      op: "presence.update",
+      d: {
+        user_id: callie.id,
+        state: "around",
+        room_id: null,
+        activity: null,
+        away_message: null,
+      },
+    });
+
+    arrive(HOME, { s: 3, op: "user.remove", d: { user_id: callie.id } });
+
+    expect(serverState(HOME).users.map((person) => person.id)).toEqual([matt.id]);
+    expect(serverState(HOME).presence).toEqual([]);
+    expect(serverState(WORK).users.map((person) => person.id)).toEqual([matt.id, callie.id]);
+
+    // And letting them back in is the same frame a rename arrives on: the fold
+    // appends when the id is unknown, so the card grows back on its own.
+    arrive(HOME, { s: 4, op: "user.update", d: callie });
+    expect(serverState(HOME).users.map((person) => person.id)).toEqual([matt.id, callie.id]);
+  });
+
   it("drops frames for a server nobody is following", async () => {
     await connect(fakeApi(HOME));
     const matt = person("u-matt", "Matt");

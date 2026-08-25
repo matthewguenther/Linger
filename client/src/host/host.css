@@ -315,3 +315,24 @@
   border-left: 2px solid var(--hairline-strong);
   padding-left: 8px;
 }
+
+/* The removed-people list (T-413). One row per person: who they were, and the
+   one button that undoes it. */
+.host-person {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.host-person-name {
+  font-weight: 500;
+}
+
+.host-person-username {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

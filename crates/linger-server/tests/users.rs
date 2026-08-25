@@ -272,3 +272,208 @@ async fn notify_rules_upsert_and_delete_including_all_rooms() {
         .unwrap();
     assert_eq!(rules.len(), 1);
 }
+
+/// T-413. Setting `deactivated_at` is about a quarter of removing somebody; the
+/// rest is the three doors that do not read that column on their own. This
+/// walks every one of them, plus the two things removal must *not* touch.
+#[tokio::test]
+async fn removing_a_member_shuts_every_door_and_restore_reopens_them() {
+    let (server, host, room) = common::server_with_room("garage").await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
+    let client = reqwest::Client::new();
+
+    // Something of theirs to leave behind, and an invite of theirs to kill.
+    let message: serde_json::Value = client
+        .post(server.url(&format!("/rooms/{}/messages", room.id)))
+        .bearer_auth(&member.access_token)
+        .json(&serde_json::json!({ "body": "anyone around?" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let their_invite: linger_core::wire::Invite = client
+        .post(server.url("/invites"))
+        .bearer_auth(&member.access_token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Host-only, and the host cannot remove themselves.
+    let by_member = client
+        .post(server.url(&format!("/users/{}/remove", host.user.id)))
+        .bearer_auth(&member.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(by_member.status(), 403, "only the host removes people");
+    let self_removal = client
+        .post(server.url(&format!("/users/{}/remove", host.user.id)))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        self_removal.status(),
+        403,
+        "the host cannot remove the host"
+    );
+
+    let removed = client
+        .post(server.url(&format!("/users/{}/remove", member.user.id)))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), 204);
+
+    // Off the roster.
+    let users: Vec<User> = client
+        .get(server.url("/users"))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        users.iter().all(|u| u.id != member.user.id),
+        "a removed member is gone from GET /users"
+    );
+
+    // Their access token stops working now, not in fifteen minutes.
+    let with_old_token = client
+        .get(server.url("/me"))
+        .bearer_auth(&member.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(with_old_token.status(), 401);
+
+    // And they cannot mint a new one.
+    let refresh = client
+        .post(server.url("/auth/refresh"))
+        .json(&serde_json::json!({ "refresh_token": member.refresh_token }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refresh.status(), 401);
+
+    // Nor sign in again with a password that is still correct.
+    let login = client
+        .post(server.url("/auth/login"))
+        .json(&serde_json::json!({
+            "username": "callie", "password": "a perfectly fine password"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 401);
+
+    // Their own invite link is not a way back in.
+    let preview: serde_json::Value = client
+        .get(server.url(&format!("/auth/invite/{}", their_invite.code)))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["valid"], false);
+
+    // What they wrote stays (SPEC principle 3).
+    let page: Vec<serde_json::Value> = client
+        .get(server.url(&format!("/rooms/{}/messages", room.id)))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        page.iter().any(|m| m["id"] == message["id"]),
+        "removing a person is not deleting what they wrote"
+    );
+
+    // The host can find them again, which is what makes restore reachable.
+    let gone: Vec<User> = client
+        .get(server.url("/users/removed"))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0].id, member.user.id);
+
+    // Back in, and able to sign in with the password they always had.
+    let restore = client
+        .post(server.url(&format!("/users/{}/restore", member.user.id)))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(restore.status(), 204);
+
+    let users: Vec<User> = client
+        .get(server.url("/users"))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(users.iter().any(|u| u.id == member.user.id));
+
+    let login = client
+        .post(server.url("/auth/login"))
+        .json(&serde_json::json!({
+            "username": "callie", "password": "a perfectly fine password"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 200, "restore is a way back in");
+
+    // Restore is not an undo: the invite they had made stays revoked.
+    let preview: serde_json::Value = client
+        .get(server.url(&format!("/auth/invite/{}", their_invite.code)))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["valid"], false);
+}
+
+#[tokio::test]
+async fn remove_and_restore_answer_not_found_for_a_stranger() {
+    let server = common::spawn_server().await;
+    let host = common::bootstrap_host(&server).await;
+    let client = reqwest::Client::new();
+    let nobody = linger_core::UserId::new();
+
+    for path in [
+        format!("/users/{nobody}/remove"),
+        format!("/users/{nobody}/restore"),
+    ] {
+        let resp = client
+            .post(server.url(&path))
+            .bearer_auth(&host.access_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404, "{path}");
+    }
+}

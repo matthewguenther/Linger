@@ -17,8 +17,13 @@ const USER_SELECT: &str = "
     FROM users u
     LEFT JOIN user_style s      ON s.user_id = u.id
     LEFT JOIN user_status g     ON g.user_id = u.id
-    LEFT JOIN entrance_sounds e ON e.user_id = u.id
-    WHERE u.deactivated_at IS NULL";
+    LEFT JOIN entrance_sounds e ON e.user_id = u.id";
+
+/// Removed members are absent from everything a member can ask for (T-413), so
+/// every query here says which side of that line it wants rather than
+/// inheriting a default.
+const ACTIVE: &str = " WHERE u.deactivated_at IS NULL";
+const REMOVED: &str = " WHERE u.deactivated_at IS NOT NULL";
 
 fn row_to_user(row: &SqliteRow) -> Result<User, ApiError> {
     let id = UserId::from_slice(&row.get::<Vec<u8>, _>("id")).map_err(anyhow::Error::from)?;
@@ -79,14 +84,23 @@ fn row_to_user(row: &SqliteRow) -> Result<User, ApiError> {
 
 /// Every active member, stable order (by username).
 pub async fn all(db: &SqlitePool) -> Result<Vec<User>, ApiError> {
-    let rows = sqlx::query(&format!("{USER_SELECT} ORDER BY u.username"))
+    let rows = sqlx::query(&format!("{USER_SELECT}{ACTIVE} ORDER BY u.username"))
+        .fetch_all(db)
+        .await?;
+    rows.iter().map(row_to_user).collect()
+}
+
+/// Everybody the host has removed, so that restoring one is a thing they can
+/// find (T-413). Host-only at the route; a member never asks this.
+pub async fn removed(db: &SqlitePool) -> Result<Vec<User>, ApiError> {
+    let rows = sqlx::query(&format!("{USER_SELECT}{REMOVED} ORDER BY u.username"))
         .fetch_all(db)
         .await?;
     rows.iter().map(row_to_user).collect()
 }
 
 pub async fn by_id(db: &SqlitePool, id: UserId) -> Result<Option<User>, ApiError> {
-    let row = sqlx::query(&format!("{USER_SELECT} AND u.id = ?"))
+    let row = sqlx::query(&format!("{USER_SELECT}{ACTIVE} AND u.id = ?"))
         .bind(id.to_vec())
         .fetch_optional(db)
         .await?;
