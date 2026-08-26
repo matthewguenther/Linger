@@ -278,6 +278,25 @@ a server on S3 still needs a data directory, just not much room in it. If the en
 the keys are missing, the server says so and stops rather than starting up unable to
 accept a single file.
 
+**How much, and for how long.** A server holds 50 GB of files in total and keeps each
+one for a year. Both are yours to change, in the compose file with everything else:
+
+```yaml
+LINGER_POOL_BYTES: 250GB        # or a plain number of bytes
+LINGER_FILE_EXPIRY_DAYS: 365    # or `off`, to keep every file for good
+```
+
+The pool is the ceiling for the whole server, and uploads in flight count against it, so
+nobody can start fifty files that will not fit. When it is full, the next person to
+attach something is told before they send a single byte rather than after.
+
+Expiry is what keeps a shared server from filling up with a year of screenshots nobody
+will look at again. There are two ways to say "keep this": star the file in the media
+collection, or pin the message it is on. Neither ever expires. Files on messages somebody
+deleted are removed straight away — they were unreachable and still taking up room. The
+sweep runs when the server starts and every few hours after that, and the status bar at
+the bottom of the app shows what is used against what there is.
+
 **Backup** is the whole point of self-hosting your friendships — it's two paths:
 `data/linger.db` and `data/objects/`. (On a server using S3, `data/objects/` is empty
 and the bucket is the other half.) A cron one-liner:

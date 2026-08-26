@@ -266,6 +266,18 @@ pub struct ServerInfo {
     pub member_count: u32,
     #[ts(type = "number")]
     pub created_at: i64,
+    /// Bytes of uploads this server is holding — everything stored plus
+    /// everything mid-upload, because a slot already spoken for is not space
+    /// anybody else can have. The status bar draws it (SPEC §5.6).
+    #[ts(type = "number")]
+    pub storage_used_bytes: u64,
+    /// The ceiling those bytes are measured against (`LINGER_POOL_BYTES`).
+    #[ts(type = "number")]
+    pub storage_limit_bytes: u64,
+    /// How many days a file stands before the server sweeps it, or `null` when
+    /// this host turned expiry off. Starred and pinned files never expire, so
+    /// this is the answer for everything else (SPEC §4.10).
+    pub file_expiry_days: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

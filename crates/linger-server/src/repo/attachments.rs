@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 
-use linger_core::limits::DEFAULT_POOL_BYTES;
 use linger_core::wire::{Attachment, Message};
 use linger_core::{AttachmentId, MessageId, UserId};
 use sqlx::sqlite::SqliteRow;
@@ -140,17 +139,4 @@ pub async fn pool_used(db: &SqlitePool) -> Result<u64, ApiError> {
     .fetch_one(db)
     .await?;
     Ok(used.max(0) as u64)
-}
-
-/// The server's storage ceiling. Host-configurable per SPEC §4.10; the endpoint
-/// that lets a host change it arrives with T-505, so for now this reads the
-/// stored value if one is there and falls back to the 50 GB default.
-pub async fn pool_limit(db: &SqlitePool) -> Result<u64, ApiError> {
-    let stored: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM server_config WHERE key = 'pool_bytes'")
-            .fetch_optional(db)
-            .await?;
-    Ok(stored
-        .and_then(|(value,)| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_POOL_BYTES))
 }

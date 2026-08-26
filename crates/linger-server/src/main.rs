@@ -3,7 +3,7 @@
 
 use std::io::BufRead;
 
-use linger_server::{db, reset};
+use linger_server::{db, expiry, reset};
 use tracing_subscriber::EnvFilter;
 
 const USAGE: &str = "\
@@ -141,6 +141,13 @@ async fn serve() -> anyhow::Result<()> {
         println!("  │  (the link works once, then never again)");
         println!("  └─────────────────────────────────────────────────\n");
     }
+
+    // The one background job the server runs (ARCHITECTURE §1): files age out
+    // at LINGER_FILE_EXPIRY_DAYS unless they are starred or on a pinned
+    // message. It sweeps once now and then every few hours, and it lives here
+    // rather than in `AppState` so that building the state — which every
+    // integration test does — never starts a task nobody asked for.
+    let _sweeper = expiry::spawn(state.clone());
 
     let app = linger_server::app(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;

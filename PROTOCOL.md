@@ -98,7 +98,8 @@ consumes the token. Once any user exists, both endpoints return `NOT_FOUND`.
 ## 3. The server and rooms
 
 ```
-GET  /server             → { name, accent_key, icon_key, member_count, created_at }
+GET  /server             → { name, accent_key, icon_key, member_count, created_at,
+                             storage_used_bytes, storage_limit_bytes, file_expiry_days }
 PATCH /server            (host only) { name?, accent_key?, icon_key? }   # accent_key from PALETTE
 
 GET  /rooms              → Room[]
@@ -114,6 +115,17 @@ type Room = {
   last_message_id: string | null;   // client compares to read marker
 }
 ```
+
+**The three storage figures** are read-only and every member sees them; the status bar
+draws the first two (SPEC §5.6). `storage_used_bytes` counts stored objects *and*
+uploads still in flight, because a slot already handed out is not space anybody else can
+have. `storage_limit_bytes` is the pool ceiling. `file_expiry_days` is how long a file
+stands before the server sweeps it, or `null` on a server that keeps files for good;
+starred files and files on pinned messages never expire whatever it says (SPEC §4.10).
+
+They are not on `PATCH /server`. Both knobs are environment variables set in the
+deployment (`LINGER_POOL_BYTES`, `LINGER_FILE_EXPIRY_DAYS`), not rows a host edits from
+inside the app — see `docs/decisions.md`.
 
 ---
 

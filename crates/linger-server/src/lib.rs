@@ -8,6 +8,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod expiry;
 pub mod gateway;
 pub mod links;
 pub mod media;

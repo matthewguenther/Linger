@@ -9,6 +9,7 @@ use linger_core::wire::{ColorKey, ServerInfo, UpdateServerRequest};
 
 use crate::auth::{AuthedUser, HostUser};
 use crate::error::ApiError;
+use crate::repo;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -37,6 +38,14 @@ async fn build_info(state: &AppState) -> Result<ServerInfo, ApiError> {
             .get("created_at")
             .and_then(|v| v.parse().ok())
             .unwrap_or_default(),
+        // The status bar's third figure (SPEC §5.6). Everybody sees it, not
+        // just the host: whether there is room for a 400 MB video is a question
+        // anybody about to share one has. The two knobs behind it are the
+        // host's and they are environment variables (docs/decisions.md), so
+        // there is nothing here to edit — only a figure to read.
+        storage_used_bytes: repo::attachments::pool_used(&state.db.read).await?,
+        storage_limit_bytes: state.config.pool_bytes,
+        file_expiry_days: state.config.file_expiry_days,
     })
 }
 
