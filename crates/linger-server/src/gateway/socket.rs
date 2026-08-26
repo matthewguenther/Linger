@@ -155,7 +155,7 @@ async fn handshake(
                 .await;
                 return None;
             };
-            let Ok(user) = repo::users::expect(&state.db.read, user_id).await else {
+            let Ok(user) = repo::users::expect(&state.db.read, &state.config, user_id).await else {
                 send_control(
                     sink,
                     ServerEvent::InvalidSession {
@@ -179,7 +179,7 @@ async fn handshake(
             // Snapshot after the session subscribed to the bus: anything that
             // lands in between is both in the snapshot and replayed as
             // idempotent state, never lost.
-            let users = repo::users::all(&state.db.read).await.ok()?;
+            let users = repo::users::all(&state.db.read, &state.config).await.ok()?;
             let rooms = repo::rooms::all(&state.db.read).await.ok()?;
             let ready = ReadyData {
                 session_id,

@@ -294,8 +294,10 @@ Expiry is what keeps a shared server from filling up with a year of screenshots 
 will look at again. There are two ways to say "keep this": star the file in the media
 collection, or pin the message it is on. Neither ever expires. Files on messages somebody
 deleted are removed straight away — they were unreachable and still taking up room. The
-sweep runs when the server starts and every few hours after that, and the status bar at
-the bottom of the app shows what is used against what there is.
+picture on somebody's status never expires either, whatever its age: a status quietly
+losing its image after a year is not something anyone would connect to a file expiry they
+never set. The sweep runs when the server starts and every few hours after that, and the
+status bar at the bottom of the app shows what is used against what there is.
 
 **Backup** is the whole point of self-hosting your friendships — it's two paths:
 `data/linger.db` and `data/objects/`. (On a server using S3, `data/objects/` is empty

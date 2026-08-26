@@ -446,44 +446,63 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     `scripts/check.sh` pass. This is the same React half T-504 deferred, and it
     belongs with the milestone check those tasks also deferred — **a real 400 MB
     video, over a real network, from a server with real DNS**.
-- ⬜ **T-506 · The status image** — effort: **low** *(the rest of T-405, once
-  there is somewhere to put a file)*
-  SPEC §4.6's last bullet: one image on a status, **≤512 KB, displayed at
-  400×200**. T-405 built every other part of the status and stopped here,
-  because `image_key` names an object in the media store and there was no media
-  store — `/uploads` was not even mounted. `linger-core::limits` already holds
-  `MAX_STATUS_IMAGE_BYTES`.
+- ✅ **T-506 · The status image** — effort: **low** — landed 2026-08-26
+  SPEC §4.6's last bullet: one image on a status, ≤512 KB, drawn at 400×200 in
+  the roster card and the name popover at once. The editor picks a file,
+  uploads it through the T-501 pipeline, and the server checks the id against
+  what is actually stored before it will keep it.
+  `crates/linger-server/tests/status_image.rs` (9 tests) uploads real images
+  over real HTTP and drives the whole of it.
 
-  Do this **after T-501**, which is what makes an upload possible, and after
-  **T-503** if it has landed, so the image is served from the media origin like
-  everything else. It is small: most of the work is already done in both
-  directions.
+  **Decisions and surprises, for whoever picks up M6:**
 
-  - **Client.** A file picker in `client/src/status/StatusEditor.tsx`, and an
-    `<img>` in `client/src/status/StatusCard.tsx` — one component, so the
-    roster card and the name popover both get it at once. Refuse an oversize
-    file before uploading it rather than after, the way the editor already
-    counts characters down.
-  - **Client, the trap.** `statusOf` in `client/src/status/status.ts` already
-    carries `image_key` through untouched on every save, because `PATCH /me`
-    replaces the whole status object. **Keep that.** The moment the editor can
-    set a key, a save that dropped the field would delete somebody's image.
-    `status.test.ts` has a test pinning this — do not delete it either.
-  - **Server.** `validate::status` checks lengths and nothing else: it will
-    accept any string as an `image_key` today. It has to become a real check —
-    the key names an object that exists, belongs to this user, is an image, and
-    is within `MAX_STATUS_IMAGE_BYTES`. Without that, `image_key` is a
-    user-controlled string that ends up in a URL.
-  - **Also.** Replacing an image should not leave the old object orphaned.
-    (The other half of this is done: T-505's sweeper skips any object named by
-    a `user_status.image_key`, whatever its age, and
-    `a_status_image_is_never_swept` pins it.)
-  - *Accept:* set an image, see it at 400×200 in both the roster card and the
-    popover, on a second client; a 600 KB file is refused with a sentence a
-    person can read; a key naming somebody else's object is refused by the
-    server; the image survives a year-old status.
-  - **Take the line of copy out of the editor when this lands.** It currently
-    says "Status images arrive with file uploads."
+  - **The wire names the image by attachment id, not by storage key.** The
+    field was `image_key: string`, and the client cannot produce one: PROTOCOL
+    §6 says object URLs are opaque and the media origin is not on the wire
+    anywhere, so there was nothing for a client to build a key out of. So
+    `UserStatus` now carries `image_id` (the client's, an `AttachmentId`) and
+    `image_url` (the server's, built from the key it stores). The database
+    column is unchanged and still holds the object key — the sweeper joins on
+    it — and `storage::key_owner` is `object_key` read backwards, which is the
+    whole of the conversion.
+  - **`image_url` is server-owned the way `away_since` already was.** Send
+    anything you like for it; `PATCH /me` ignores it. That pattern was already
+    in this exact type, which is what made a read-only field inside a request
+    type not a smell.
+  - **The four checks live in `validate::status_image`**, which is the first
+    thing in `validate.rs` that touches the database — everything else there is
+    a pure function over a string. It returns the object key rather than a
+    yes, so the id a client sent is never what reaches a URL: the answer is
+    built from the row the server found. Somebody else's file is `FORBIDDEN`,
+    not `NOT_FOUND` — they are telling us about a file that exists.
+  - **Replacing an image deletes the old one, and that had to be the client's
+    job as well as the server's.** The server drops the file a status stops
+    pointing at, unless it is also on a message (then it belongs to the
+    message). But an image picked in the editor and then replaced or abandoned
+    was never saved to anything, so the server never hears about it — the
+    editor takes those back with `DELETE /uploads/:id` on replace, on remove,
+    and on cancel. Without that half, opening the editor and picking three
+    pictures leaves two against the pool forever, since the sweeper skips
+    status images.
+  - **`repo::users` needed `&Config`** to build `image_url`, which is ten call
+    sites. `repo::attachments::by_id` already took one, so the shape was
+    already in the repo layer.
+  - **400×200 is the box, not the size.** The roster panel is 240px wide and
+    the popover 260px, so the width gives way and the 2:1 aspect ratio does
+    not, with `object-fit: cover` so nothing is ever stretched.
+  - **The client refuses before it uploads** (`imageProblem` in `status.ts`):
+    not an image, or over 512 KB, and it says both numbers. The server refuses
+    the same two things afterwards, and there is one case where only the server
+    can: it re-encodes every image it takes, so a file that was just under the
+    cap can land just over it. The editor shows the server's sentence when that
+    happens.
+  - **Not verified by a human yet:** nobody has picked a picture in a running
+    app. Types, unit tests, the integration tests and the whole of
+    `scripts/check.sh` pass. This is the same React half T-504 and T-505
+    deferred, and it belongs with the milestone check all three deferred — **a
+    real 400 MB video, over a real network, from a server with real DNS** —
+    plus the acceptance line this task adds: *see the image at 400×200 in both
+    the roster card and the popover, on a second client.*
 
 ## M6 — styling: names, palette, themes, fonts
 

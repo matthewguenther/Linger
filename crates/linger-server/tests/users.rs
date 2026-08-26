@@ -27,7 +27,8 @@ async fn patch_me_round_trips_style_and_status() {
             "status": {
                 "line": "mounting the drive",
                 "reading": null, "listening": "Bill Evans", "working_on": "the media grid",
-                "image_key": null, "away_message": null, "away_since": null
+                "image_id": null, "image_url": null,
+                "away_message": null, "away_since": null
             },
             "entrance_sound": "screen-door"
         }))

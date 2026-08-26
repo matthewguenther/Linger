@@ -282,11 +282,28 @@ type UserStatus = {
   reading: string | null;             // <= 80
   listening: string | null;           // <= 80
   working_on: string | null;          // <= 80
-  image_key: string | null;
+  image_id: string | null;            // an upload of yours: an image <= 512 KB
+  image_url: string | null;           // server-owned; where to draw it from
   away_message: string | null;        // supersedes `line` when set
   away_since: number | null;
 }
 ```
+
+**The status image** (SPEC §4.6) is named by attachment id, not by URL and not by
+storage key. On the way in the server checks that the id names a finished upload of
+*this* member's, that it is an image, and that it is within
+`linger-core::limits::MAX_STATUS_IMAGE_BYTES`; anything else is `VALIDATION_FAILED`, or
+`FORBIDDEN` when the file exists and belongs to somebody else. On the way out it fills in
+`image_url`, which is on the media origin like any other object URL (§6) and is
+read-only — send whatever you like for it and the server ignores it, the same as
+`away_since`.
+
+Because `status` replaces the whole object, a save that omits `image_id` **removes** the
+image. Send back the one you were given unless the person changed it.
+
+Replacing or clearing an image deletes the file it stopped pointing at, unless that file
+is also on a message — then it belongs to the message and stays. A status image is the
+one thing the expiry sweeper never takes, whatever its age (SPEC §4.10).
 
 ### Palette validation (server-side, mandatory)
 

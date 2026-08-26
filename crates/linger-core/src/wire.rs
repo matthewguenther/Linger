@@ -141,7 +141,21 @@ pub struct UserStatus {
     pub reading: Option<String>,
     pub listening: Option<String>,
     pub working_on: Option<String>,
-    pub image_key: Option<String>,
+    /// The image on this status (SPEC §4.6): the id of a finished upload of
+    /// this person's, an image, within `MAX_STATUS_IMAGE_BYTES`.
+    ///
+    /// An id and not a storage key. The server resolves it to the object key it
+    /// stores, so the string a client sends never reaches a URL, and object
+    /// URLs stay opaque to the client the way PROTOCOL §6 says they are.
+    pub image_id: Option<AttachmentId>,
+    /// Where that image is served from, ready to put in an `<img>`.
+    ///
+    /// Server-owned like `away_since`: built on the way out and ignored on the
+    /// way in. A client cannot work it out for itself — uploads are served from
+    /// a host of their own (ARCHITECTURE §7) and nothing else on the wire names
+    /// that host.
+    #[serde(default)]
+    pub image_url: Option<String>,
     pub away_message: Option<String>,
     #[ts(type = "number | null")]
     pub away_since: Option<i64>,

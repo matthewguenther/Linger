@@ -50,7 +50,8 @@ export default function StatusCard({
   const fields = fieldsOf(user);
   const line = awayShown ? null : status.line;
   const hasLine = line !== null && line !== "";
-  if (!hasLine && fields.length === 0) return null;
+  const image = status.image_url;
+  if (!hasLine && fields.length === 0 && image === null) return null;
 
   return (
     <div className="person-status">
@@ -70,12 +71,22 @@ export default function StatusCard({
         </dl>
       )}
       {/*
-        The status image (SPEC §4.6: one image, 512 KB, 400×200) is not drawn
-        and cannot be set. `image_key` names an object in the media store, and
-        there is no media store until M5 builds the upload pipeline. **T-506**
-        adds it here, once T-501 has landed. The field is carried through every
-        save so nothing is lost in the meantime; the editor says as much.
+        SPEC §4.6's one image, at its 400×200. The panel it is drawn in is
+        narrower than that, so 400×200 is the box it is drawn *to* — the width
+        gives way and the 2:1 shape does not, which is what keeps the roster
+        card and the popover showing the same picture.
+
+        `loading="lazy"` because a roster of thirty people is thirty of these,
+        and only the card you opened is on screen.
       */}
+      {image === null ? null : (
+        <img
+          className="status-image"
+          src={image}
+          alt={`${user.display_name}'s status image`}
+          loading="lazy"
+        />
+      )}
     </div>
   );
 }

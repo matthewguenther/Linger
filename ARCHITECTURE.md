@@ -147,7 +147,7 @@ CREATE TABLE user_status (
   reading         TEXT,
   listening       TEXT,
   working_on      TEXT,
-  image_key       TEXT,
+  image_key       TEXT,                        -- object key, not the id the wire uses
   away_message    TEXT,                        -- supersedes `line` when set
   away_since      INTEGER,
   updated_at      INTEGER NOT NULL
