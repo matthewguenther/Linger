@@ -446,7 +446,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     `scripts/check.sh` pass. This is the same React half T-504 deferred, and it
     belongs with the milestone check those tasks also deferred — **a real 400 MB
     video, over a real network, from a server with real DNS**.
-- ⬜ **T-506 · The status image** — effort: **low** *(the rest of T-405, once
+- ⏳ **T-506 · The status image** — effort: **low** — claimed by Matt, 2026-08-26 *(the rest of T-405, once
   there is somewhere to put a file)*
   SPEC §4.6's last bullet: one image on a status, **≤512 KB, displayed at
   400×200**. T-405 built every other part of the status and stopped here,
