@@ -14,24 +14,39 @@
  * 2. `setAway` puts it on the wire, which leaves the room first and then says
  *    `away` — the server sets `around` on any room leave, so the other order
  *    would wipe what we just set.
+ *
+ * The image (T-506) goes up the moment it is picked, because an upload is a
+ * separate thing from a save: the status names a file that already exists. That
+ * leaves one loose end, and it is handled here — a file uploaded and then
+ * replaced, removed, or abandoned by closing the form was never named by
+ * anything, so it is taken back off the server rather than left against the
+ * pool. An image that *was* saved and is then replaced is the server's to clean
+ * up, and it does.
  */
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { saveStatus } from "../lib/gateway";
+import { uploadFile } from "../lib/upload";
 import { setAway } from "../lib/watchPresence";
 import {
   draftOf,
   FIELDS,
+  imageProblem,
   isDirty,
   MAX_FIELD_CHARS,
+  MAX_IMAGE_BYTES,
   MAX_LINE_CHARS,
   overLimit,
   type StatusDraft,
+  type StatusImage,
   statusOf,
 } from "./status";
 import "./status.css";
+
+/** The fields that are boxes of text. The image is not one of them. */
+type TextKey = "line" | "reading" | "listening" | "workingOn" | "awayMessage";
 
 /** Only worth saying when you are near it, the same way the composer does. */
 function remaining(value: string, max: number, warnAt: number): string | null {
@@ -51,11 +66,58 @@ export default function StatusEditor({
   const saved = me.status ?? null;
   const [draft, setDraft] = useState<StatusDraft>(() => draftOf(saved));
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement | null>(null);
+  /** Ids uploaded in this sitting and not saved to anything yet. */
+  const unsaved = useRef<Set<string>>(new Set());
 
-  const set = (key: keyof StatusDraft, value: string): void => {
+  const set = (key: TextKey, value: string): void => {
     setDraft((held) => ({ ...held, [key]: value }));
     setError(null);
+  };
+
+  /**
+   * Point the draft at a different image, taking back the one it was holding if
+   * that one only ever existed for this form.
+   */
+  const setImage = (next: StatusImage | null): void => {
+    setDraft((held) => {
+      const going = held.image?.id;
+      if (going !== undefined && unsaved.current.delete(going)) {
+        void api.cancelUpload(going).catch(() => undefined);
+      }
+      return { ...held, image: next };
+    });
+  };
+
+  const attach = (file: File | undefined): void => {
+    if (file === undefined) return;
+    const refusal = imageProblem(file);
+    if (refusal !== null) {
+      setError(refusal);
+      return;
+    }
+    setError(null);
+    setUploading(true);
+    uploadFile(api, file)
+      .then((attachment) => {
+        const id = String(attachment.id);
+        unsaved.current.add(id);
+        setImage({ id, url: attachment.url });
+      })
+      .catch((problem: unknown) =>
+        setError(
+          problem instanceof ApiError ? problem.message : "That image didn't go up.",
+        ),
+      )
+      .finally(() => setUploading(false));
+  };
+
+  /** Leaving without saving leaves nothing behind either. */
+  const abandon = (): void => {
+    setImage(null);
+    onDone();
   };
 
   const tooLong = overLimit(draft);
@@ -68,6 +130,9 @@ export default function StatusEditor({
     try {
       const status = statusOf(next, saved);
       await saveStatus(api, status);
+      // Saved: the image is named by a status now, and taking it back would be
+      // deleting somebody's picture. The one it replaced is the server's job.
+      unsaved.current.clear();
       setAway(api.baseUrl, status.away_message);
       onDone();
     } catch (problem) {
@@ -145,22 +210,62 @@ export default function StatusEditor({
         onChange={(value) => set("awayMessage", value)}
       />
 
-      {/* SPEC §4.6 allows one image on a status. It needs somewhere to put
-          the file, and that is the media store M5 builds — T-506, right after
-          the upload pipeline that unblocks it. Saying so is better than an
-          upload button that cannot work. Delete this line when T-506 lands. */}
-      <p className="editor-note meta">
-        Status images arrive with file uploads. Nothing you set here is affected.
-      </p>
+      {/* SPEC §4.6's one image. The picker is hidden and driven by the button,
+          the way the composer's `+ file` is, so the control is a control and
+          not a browser widget in the middle of a Console form. */}
+      <div className="editor-field">
+        <span className="panel-label">image</span>
+        {draft.image === null ? null : (
+          <img className="editor-image" src={draft.image.url} alt="the image on your status" />
+        )}
+        <div className="editor-image-row">
+          <button
+            type="button"
+            className="editor-pick"
+            disabled={busy || uploading}
+            onClick={() => picker.current?.click()}
+          >
+            {draft.image === null ? "+ image" : "replace"}
+          </button>
+          {draft.image === null ? null : (
+            <button
+              type="button"
+              className="editor-cancel meta"
+              disabled={busy || uploading}
+              onClick={() => setImage(null)}
+            >
+              remove
+            </button>
+          )}
+          {uploading ? <span className="editor-count meta">uploading…</span> : null}
+        </div>
+        <span className="editor-hint meta">
+          One image, up to {MAX_IMAGE_BYTES / 1024} KB, shown at 400×200.
+        </span>
+        <input
+          ref={picker}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => {
+            attach(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+      </div>
 
       {tooLong === null ? null : <p className="editor-problem">{tooLong}</p>}
       {error === null ? null : <p className="editor-problem">{error}</p>}
 
       <div className="editor-actions">
-        <button type="button" className="editor-cancel meta" disabled={busy} onClick={onDone}>
+        <button type="button" className="editor-cancel meta" disabled={busy} onClick={abandon}>
           cancel
         </button>
-        <button type="submit" className="editor-save" disabled={busy || !dirty || tooLong !== null}>
+        <button
+          type="submit"
+          className="editor-save"
+          disabled={busy || uploading || !dirty || tooLong !== null}
+        >
           {busy ? "saving…" : "save"}
         </button>
       </div>

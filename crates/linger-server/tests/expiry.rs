@@ -306,7 +306,9 @@ async fn a_status_image_is_never_swept() {
     let (server, token, _room) = fixture(|_| {}).await;
     let image = upload(&server, &token, "me.txt", filler(900)).await;
 
-    // T-506 is what will let the editor set this; the column is already here.
+    // Set straight on the column rather than through `PATCH /me`, so this
+    // stays a test of the sweeper alone. The endpoint's own version of it is
+    // `a_status_image_survives_a_year` in `status_image.rs` (T-506).
     let key = sqlx::query_scalar::<_, String>("SELECT object_key FROM attachments WHERE id = ?")
         .bind(image.id.to_vec())
         .fetch_one(&server.state.db.read)
