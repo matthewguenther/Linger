@@ -494,10 +494,19 @@
   opacity: 1;
 }
 
+.status-left,
 .status-right {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* The figures sit apart from the connection state without a divider: this is
+   a status line, not a table. */
+.status-left {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .status-warn {

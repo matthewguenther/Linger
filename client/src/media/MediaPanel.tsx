@@ -33,6 +33,7 @@ import {
   dayEnd,
   dayStart,
   durationText,
+  expiryText,
   fileSize,
   itemDescription,
   itemLabel,
@@ -60,6 +61,7 @@ export default function MediaPanel({
   onOpen,
   onClose,
   roster,
+  expiryDays,
 }: {
   api: AuthedApi;
   /** Everyone the gateway has told us about, for the person filter and names. */
@@ -70,6 +72,11 @@ export default function MediaPanel({
   onClose: () => void;
   /** On a narrow window the roster lives in this column (SPEC §3). */
   roster?: ReactNode;
+  /**
+   * How long this server keeps a file, or `null` when it keeps them for good.
+   * Undefined until `GET /server` has answered.
+   */
+  expiryDays?: number | null;
 }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [items, setItems] = useState<MediaItem[] | null>(null);
@@ -153,7 +160,15 @@ export default function MediaPanel({
     <main className="stream media">
       <header className="stream-header media-head">
         <h2 className="panel-label">media</h2>
-        <p className="media-blurb meta">everything anyone has shared here</p>
+        <p className="media-blurb meta">
+          everything anyone has shared here
+          {/* A star is the only thing that stops a file ageing out, so what a
+              star is *for* belongs next to the control, not in a settings
+              screen nobody opens. */}
+          {expiryDays === undefined || expiryDays === null
+            ? null
+            : ` · files go after ${expiryText(expiryDays)}; starred ones stay`}
+        </p>
         <button type="button" className="host-close meta" onClick={onClose}>
           close
         </button>

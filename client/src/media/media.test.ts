@@ -10,12 +10,15 @@ import {
   dayEnd,
   dayStart,
   durationText,
+  expiryText,
   fileSize,
   inlineBox,
   itemDescription,
   itemLabel,
   MAX_INLINE_HEIGHT,
   renderAs,
+  storageDetail,
+  storageLine,
 } from "./media";
 
 function item(over: Partial<MediaItem>): MediaItem {
@@ -148,5 +151,30 @@ describe("labels", () => {
     expect(itemDescription(starred, "Sam")).toContain("shared by Sam");
     expect(itemDescription(starred, "Sam")).toContain("starred");
     expect(itemDescription(item({}), "Sam")).not.toContain("starred");
+  });
+});
+
+describe("the storage figure", () => {
+  it("shows both halves, because a percentage answers nothing", () => {
+    const gb = 1024 * 1024 * 1024;
+    expect(storageLine(8.2 * gb, 50 * gb)).toBe("8.2 GB / 50 GB");
+    expect(storageLine(0, 50 * gb)).toBe("0 B / 50 GB");
+  });
+
+  it("says what happens to old files, in words", () => {
+    const gb = 1024 * 1024 * 1024;
+    expect(storageDetail(gb, 50 * gb, 365)).toContain("after a year");
+    expect(storageDetail(gb, 50 * gb, 365)).toContain("starred");
+    expect(storageDetail(gb, 50 * gb, null)).toContain("kept for good");
+    expect(storageDetail(gb, 50 * gb, null)).not.toContain("removed");
+  });
+
+  it("rounds a window only when rounding it is exact", () => {
+    expect(expiryText(365)).toBe("a year");
+    expect(expiryText(730)).toBe("2 years");
+    expect(expiryText(30)).toBe("a month");
+    expect(expiryText(90)).toBe("3 months");
+    expect(expiryText(1)).toBe("a day");
+    expect(expiryText(45)).toBe("45 days");
   });
 });
