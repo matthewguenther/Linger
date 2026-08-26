@@ -2,6 +2,7 @@
 //! against the production router with a temp SQLite file. No mocks.
 #![allow(dead_code)] // each test binary uses a different subset of helpers
 
+use linger_core::limits::{DEFAULT_FILE_EXPIRY_DAYS, DEFAULT_POOL_BYTES};
 use linger_core::wire::{AuthResponse, Invite};
 use linger_server::config::{Config, S3Config, Storage};
 use linger_server::{db, AppState};
@@ -30,15 +31,26 @@ impl TestServer {
 /// No domain, so it has one origin and hands out root-relative URLs — the same
 /// shape as a server on a LAN address.
 pub async fn spawn_server() -> TestServer {
+    spawn_tuned(|_| {}).await
+}
+
+/// The same server with the storage knobs turned to something a test can
+/// reach: a tiny pool, or an expiry measured in days that have already passed.
+/// Both are environment variables on a real server (docs/decisions.md), and a
+/// test must not set process environment other tests are also reading.
+pub async fn spawn_tuned(tune: impl FnOnce(&mut Config)) -> TestServer {
     let dir = tempfile::tempdir().expect("tempdir");
-    let config = Config {
+    let mut config = Config {
         data_dir: dir.path().to_path_buf(),
         bind: "127.0.0.1:0".parse().unwrap(),
         domain: None,
         media_domain: None,
         storage: Storage::Local,
         s3: None,
+        pool_bytes: DEFAULT_POOL_BYTES,
+        file_expiry_days: Some(DEFAULT_FILE_EXPIRY_DAYS),
     };
+    tune(&mut config);
     spawn_with(dir, config).await
 }
 
@@ -53,6 +65,8 @@ pub async fn spawn_named_server(domain: &str, media_domain: &str) -> TestServer 
         media_domain: Some(media_domain.to_string()),
         storage: Storage::Local,
         s3: None,
+        pool_bytes: DEFAULT_POOL_BYTES,
+        file_expiry_days: Some(DEFAULT_FILE_EXPIRY_DAYS),
     };
     spawn_with(dir, config).await
 }
@@ -92,6 +106,8 @@ pub async fn spawn_s3_server() -> Option<TestServer> {
         media_domain: None,
         storage: Storage::S3,
         s3: Some(s3),
+        pool_bytes: DEFAULT_POOL_BYTES,
+        file_expiry_days: Some(DEFAULT_FILE_EXPIRY_DAYS),
     };
     Some(spawn_with(dir, config).await)
 }

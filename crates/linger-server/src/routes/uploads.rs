@@ -82,8 +82,7 @@ async fn create(
     sweep_stale_uploads(&state).await?;
 
     let used = repo::attachments::pool_used(&state.db.read).await?;
-    let limit = repo::attachments::pool_limit(&state.db.read).await?;
-    if used.saturating_add(req.size_bytes) > limit {
+    if used.saturating_add(req.size_bytes) > state.config.pool_bytes {
         return Err(ApiError::quota_exceeded(
             "This server's storage is full. The host can free some up or raise the limit.",
         ));

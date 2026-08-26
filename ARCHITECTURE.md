@@ -538,6 +538,29 @@ else — wrong size, a file that is not the type it claimed, an image that will 
 `ffmpeg` grabs the poster frame. A server without them stores media perfectly well and
 simply has no poster. The published image installs them.
 
+**The sweeper** (`expiry.rs`) is the server's one background task — spawned by `main`,
+not by `AppState`, so building the state in a test never starts a loop nobody asked for.
+It runs at startup and every six hours, in batches, and takes three kinds of object:
+
+- files past `LINGER_FILE_EXPIRY_DAYS` (default 365) that are neither starred nor on a
+  pinned message — the rule in SPEC §4.10. `LINGER_FILE_EXPIRY_DAYS=off` turns it off.
+- files on a **deleted** message, at once. A delete is a tombstone with an empty body,
+  and neither the stream nor the media collection will ever draw what it carried again,
+  so the bytes are unreachable and still counted against the pool. A star does not hold
+  one of these: a star stops a file ageing out, and this is not ageing out.
+- **finished uploads that never became a message**, once they are past the same window.
+  The 48-hour sweep in `routes::uploads` only takes uploads that never *completed*.
+
+A status image is never taken, at any age: it is not on a message, so the third rule
+would otherwise claim it. Deletion is bytes first, row second — the other order can lose
+an object with nothing left pointing at it, and a crash between the two leaves a row the
+next pass finishes.
+
+**The pool and the expiry window are environment variables** (`LINGER_POOL_BYTES`,
+`LINGER_FILE_EXPIRY_DAYS`), read once at startup like every other deployment setting, not
+rows a host edits from inside the app (`docs/decisions.md`). `GET /server` reports the
+used figure, the ceiling and the window, and the status bar draws the first two.
+
 ---
 
 ## 9. Deployment

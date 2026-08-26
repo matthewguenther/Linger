@@ -4,6 +4,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use linger_core::limits::{DEFAULT_FILE_EXPIRY_DAYS, DEFAULT_POOL_BYTES, MAX_FILE_BYTES};
+
 /// Where uploaded objects live (ARCHITECTURE §8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Storage {
@@ -70,6 +72,13 @@ pub struct Config {
     pub storage: Storage,
     /// Set iff `storage` is [`Storage::S3`].
     pub s3: Option<S3Config>,
+    /// `LINGER_POOL_BYTES` — the storage ceiling for the whole server, default
+    /// 50 GB (SPEC §4.10). Accepts a plain byte count or a size like `250GB`.
+    pub pool_bytes: u64,
+    /// `LINGER_FILE_EXPIRY_DAYS` — how long a file stands before the sweeper
+    /// takes it, default 365 (SPEC §4.10). `off` (or `0`) means never, and a
+    /// starred or pinned file never expires whatever this says.
+    pub file_expiry_days: Option<u32>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,6 +93,21 @@ pub enum ConfigError {
     S3PathStyle(String),
     #[error("LINGER_MEDIA_DOMAIN is a bare hostname, not a URL: got {0:?}")]
     MediaDomainNotAHost(String),
+    #[error(
+        "LINGER_POOL_BYTES is {0:?}. It wants a size: a plain number of bytes, or one \
+         with a unit on it like 250GB, 500MB or 2TB."
+    )]
+    PoolBytes(String),
+    #[error(
+        "LINGER_FILE_EXPIRY_DAYS is {0:?}. It wants a whole number of days, or `off` \
+         to keep every file forever."
+    )]
+    FileExpiryDays(String),
+    #[error(
+        "LINGER_POOL_BYTES is {0:?}, which is smaller than the 500 MB one file may be. \
+         A server that cannot hold a single upload refuses every one of them."
+    )]
+    PoolTooSmall(String),
     #[error(
         "LINGER_MEDIA_DOMAIN is {0:?}, which is also LINGER_DOMAIN. Uploaded files are \
          served from their own host so a hostile file cannot touch the app (ARCHITECTURE \
@@ -125,6 +149,8 @@ impl Config {
             media_domain,
             storage,
             s3,
+            pool_bytes: pool_bytes(std::env::var("LINGER_POOL_BYTES").ok())?,
+            file_expiry_days: file_expiry_days(std::env::var("LINGER_FILE_EXPIRY_DAYS").ok())?,
         })
     }
 
@@ -230,6 +256,68 @@ impl Config {
     }
 }
 
+/// Read `LINGER_POOL_BYTES`: a plain byte count, or a number with a unit on it.
+///
+/// The unit is the concession. The default written out is `53687091200`, and a
+/// host who wants a quarter of that has to be able to type `250GB` and be
+/// right — asking somebody to multiply by 1024 three times to change one
+/// number in a compose file is how the number ends up wrong.
+///
+/// Kept a free function so it can be tested without touching the process
+/// environment, which every other test in the workspace is also using.
+fn pool_bytes(configured: Option<String>) -> Result<u64, ConfigError> {
+    let Some(raw) = configured.filter(|value| !value.trim().is_empty()) else {
+        return Ok(DEFAULT_POOL_BYTES);
+    };
+    let text = raw.trim();
+    let upper = text.to_ascii_uppercase();
+    // Longest suffix first: `GB` has to win over `B`.
+    let (digits, scale) = [
+        ("TB", 1u64 << 40),
+        ("GB", 1 << 30),
+        ("MB", 1 << 20),
+        ("KB", 1 << 10),
+    ]
+    .into_iter()
+    .find_map(|(suffix, scale)| upper.strip_suffix(suffix).map(|rest| (rest, scale)))
+    .or_else(|| upper.strip_suffix('B').map(|rest| (rest, 1)))
+    .unwrap_or((upper.as_str(), 1));
+
+    let count: u64 = digits
+        .trim()
+        .parse()
+        .map_err(|_| ConfigError::PoolBytes(text.to_string()))?;
+    let bytes = count
+        .checked_mul(scale)
+        .ok_or_else(|| ConfigError::PoolBytes(text.to_string()))?;
+    // A pool that cannot hold one file is a server that refuses every upload
+    // with "storage is full", which reads as a broken server rather than a
+    // misconfigured one.
+    if bytes < MAX_FILE_BYTES {
+        return Err(ConfigError::PoolTooSmall(text.to_string()));
+    }
+    Ok(bytes)
+}
+
+/// Read `LINGER_FILE_EXPIRY_DAYS`: a whole number of days, or off.
+///
+/// `off` and `0` are the same answer and both are spelled out, because a host
+/// turning expiry off should not have to guess which one this build wants.
+fn file_expiry_days(configured: Option<String>) -> Result<Option<u32>, ConfigError> {
+    let Some(raw) = configured.filter(|value| !value.trim().is_empty()) else {
+        return Ok(Some(DEFAULT_FILE_EXPIRY_DAYS));
+    };
+    let text = raw.trim();
+    if text.eq_ignore_ascii_case("off") || text.eq_ignore_ascii_case("never") {
+        return Ok(None);
+    }
+    match text.parse::<u32>() {
+        Ok(0) => Ok(None),
+        Ok(days) => Ok(Some(days)),
+        Err(_) => Err(ConfigError::FileExpiryDays(text.to_string())),
+    }
+}
+
 /// Work out the media origin's hostname: what was asked for, or `cdn.` in
 /// front of the app's domain.
 ///
@@ -271,6 +359,8 @@ mod tests {
             media_domain: media_domain(domain, media.map(str::to_string)).unwrap(),
             storage: Storage::Local,
             s3: None,
+            pool_bytes: DEFAULT_POOL_BYTES,
+            file_expiry_days: Some(DEFAULT_FILE_EXPIRY_DAYS),
         }
     }
 
@@ -317,5 +407,70 @@ mod tests {
                 "{wrong} should not be accepted"
             );
         }
+    }
+
+    #[test]
+    fn a_pool_size_can_be_written_the_way_a_person_would_write_it() {
+        assert_eq!(pool_bytes(None).unwrap(), DEFAULT_POOL_BYTES);
+        assert_eq!(
+            pool_bytes(Some("  ".to_string())).unwrap(),
+            DEFAULT_POOL_BYTES
+        );
+        assert_eq!(pool_bytes(Some("2TB".to_string())).unwrap(), 2 * (1 << 40));
+        assert_eq!(
+            pool_bytes(Some("250gb".to_string())).unwrap(),
+            250 * (1 << 30)
+        );
+        assert_eq!(
+            pool_bytes(Some("800 MB".to_string())).unwrap(),
+            800 * (1 << 20)
+        );
+        assert_eq!(
+            pool_bytes(Some("53687091200".to_string())).unwrap(),
+            DEFAULT_POOL_BYTES
+        );
+    }
+
+    #[test]
+    fn a_pool_size_that_is_not_a_size_is_a_startup_error() {
+        // The last one overflows the multiply rather than the parse, which is
+        // the case a `checked_mul` is there for.
+        for wrong in ["fifty gigs", "50 GiB", "-1", "99999999TB"] {
+            assert!(
+                matches!(
+                    pool_bytes(Some(wrong.to_string())),
+                    Err(ConfigError::PoolBytes(_))
+                ),
+                "{wrong:?} should not be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pool_too_small_for_one_file_is_refused() {
+        assert!(matches!(
+            pool_bytes(Some("100MB".to_string())),
+            Err(ConfigError::PoolTooSmall(_))
+        ));
+    }
+
+    #[test]
+    fn expiry_defaults_to_a_year_and_can_be_turned_off() {
+        assert_eq!(
+            file_expiry_days(None).unwrap(),
+            Some(DEFAULT_FILE_EXPIRY_DAYS)
+        );
+        assert_eq!(file_expiry_days(Some("30".to_string())).unwrap(), Some(30));
+        for off in ["off", "OFF", "never", "0"] {
+            assert_eq!(
+                file_expiry_days(Some(off.to_string())).unwrap(),
+                None,
+                "{off}"
+            );
+        }
+        assert!(matches!(
+            file_expiry_days(Some("a year".to_string())),
+            Err(ConfigError::FileExpiryDays(_))
+        ));
     }
 }

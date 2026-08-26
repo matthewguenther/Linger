@@ -7,7 +7,9 @@
 
 mod common;
 
-use common::{bootstrap_host, join_member, server_with_room, spawn_server, TestServer};
+use common::{
+    bootstrap_host, join_member, server_with_room, spawn_server, spawn_tuned, TestServer,
+};
 use linger_core::wire::{Attachment, CompletedPart, Message, UploadSlot};
 use reqwest::StatusCode;
 
@@ -542,12 +544,10 @@ async fn a_kind_of_file_this_server_does_not_take() {
 
 #[tokio::test]
 async fn a_full_server_says_so_before_the_bytes_arrive() {
-    let server = spawn_server().await;
+    // The pool is an environment variable on a real server; the harness sets
+    // the same field without touching the process environment.
+    let server = spawn_tuned(|config| config.pool_bytes = 4096).await;
     let host = bootstrap_host(&server).await;
-    sqlx::query("INSERT INTO server_config (key, value) VALUES ('pool_bytes', '4096')")
-        .execute(&server.state.db.write)
-        .await
-        .unwrap();
 
     let _fits = upload(
         &server,

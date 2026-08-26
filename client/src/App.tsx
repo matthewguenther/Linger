@@ -37,6 +37,8 @@ import type { User } from "./generated/User";
 import HostPanel, { type HostSection } from "./host/HostPanel";
 import type { MessageId } from "./generated/MessageId";
 import MediaPanel from "./media/MediaPanel";
+import { storageDetail, storageLine } from "./media/media";
+import { useNow } from "./lib/clock";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
 import SettingsPanel from "./settings/SettingsPanel";
 import { noRoomsBody, noRoomsRail } from "./settings/copy";
@@ -64,6 +66,12 @@ import { forgetNotifications, resetNotifications, setViewing } from "./notify/no
 import Roster from "./roster/Roster";
 import Stream from "./stream/Stream";
 import "./app.css";
+
+/**
+ * How often each server is re-asked for its name and its storage figure. Slow
+ * on purpose: nothing here is urgent, and it is one small GET per server.
+ */
+const INFO_REFRESH_MS = 120_000;
 
 export default function App() {
   const sessions = useSessions();
@@ -138,6 +146,16 @@ function ServerLink({
     void loadNotifyRules(api).catch(() => undefined);
   }, [api]);
 
+  // A server that has gone must not leave its name and its storage figure in
+  // the frame. Separate from the fetch below, which re-runs on the clock and
+  // must not blank the rail every time it does.
+  useEffect(() => () => onInfo(baseUrl, null), [baseUrl, onInfo]);
+
+  // Fetched, not pushed: the name changes about once ever, and the storage
+  // figure is a rounded number that moves when somebody shares something big.
+  // Neither is worth a gateway frame, and both go stale enough to notice if
+  // this only ran at sign-in — so the slow clock re-asks.
+  const asOf = useNow(INFO_REFRESH_MS);
   useEffect(() => {
     const abort = new AbortController();
     // A failure isn't worth a screen of its own: the rail falls back to the
@@ -146,11 +164,8 @@ function ServerLink({
       .serverInfo(abort.signal)
       .then((info) => onInfo(baseUrl, info))
       .catch(() => undefined);
-    return () => {
-      abort.abort();
-      onInfo(baseUrl, null);
-    };
-  }, [api, baseUrl, onInfo]);
+    return () => abort.abort();
+  }, [api, baseUrl, onInfo, asOf]);
 
   return null;
 }
@@ -477,6 +492,7 @@ function Console({
           }}
           onClose={() => setMediaOpen(false)}
           roster={narrow ? roster : undefined}
+          expiryDays={server?.file_expiry_days}
         />
       ) : host !== null ? (
         <HostPanel
@@ -532,7 +548,23 @@ function Console({
       {narrow ? null : roster}
 
       <footer className="status-bar meta">
-        <span title={statusDetail}>{status}</span>
+        <span className="status-left">
+          <span title={statusDetail}>{status}</span>
+          {/* SPEC §5.6's third figure. Not the host's business alone: whether
+              there is room for the video you are about to share is a question
+              whoever is sharing it has. */}
+          {server === null ? null : (
+            <span
+              title={storageDetail(
+                server.storage_used_bytes,
+                server.storage_limit_bytes,
+                server.file_expiry_days,
+              )}
+            >
+              {storageLine(server.storage_used_bytes, server.storage_limit_bytes)}
+            </span>
+          )}
+        </span>
         <span className="status-right">
           <button
             className="status-action"

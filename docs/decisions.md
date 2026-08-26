@@ -56,7 +56,11 @@ fixable.
 **The M5 storage knobs are environment variables.** The 50 GB pool and the
 365-day file expiry (SPEC §7) go in the compose file with everything else, per
 the position `config.rs` already takes. No config-file format to document,
-version, and migrate.
+version, and migrate. Built that way in T-505: `LINGER_POOL_BYTES` (a plain
+byte count or a size like `250GB`) and `LINGER_FILE_EXPIRY_DAYS` (a number of
+days, or `off`). T-501 had parked the pool in a `server_config` row against a
+host-facing endpoint that this decision says will not exist, so that row is
+gone — one source of truth, and it is the environment.
 
 **The printed setup URL is https when a domain is set** — fixed 2026-08-21, not a
 task. The client keeps whatever scheme it is handed, for the REST base URL and

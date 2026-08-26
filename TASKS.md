@@ -178,6 +178,8 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     endpoint that sets it and the used figure on `GET /server`;
     `repo::attachments::pool_used` is the used figure, and it counts pending
     uploads so a full server cannot hand out fifty more slots.
+    *(Superseded by T-505: the pool is `LINGER_POOL_BYTES` and there is no
+    endpoint. The row and `pool_limit` are gone; `pool_used` stands.)*
   - **Abandoned uploads are swept on the way in**, not by a background task:
     slot creation deletes pending rows older than 48h and their part files. It
     is the only moment the answer matters (pending bytes count against the
@@ -390,11 +392,60 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     with the milestone check the last three tasks also deferred — **a real
     400 MB video, over a real network, from a server with real DNS** — and it is
     now possible to do end to end for the first time.
-- ⬜ **T-505 · Expiry + storage accounting** — effort: **medium**
-  365-day expiry of non-starred/non-pinned (host-configurable/off), background
-  task; storage-used figure for the status bar and `GET /server`.
-  The pool and expiry knobs are environment variables, not a config file —
-  decided in [`docs/decisions.md`](docs/decisions.md).
+- ✅ **T-505 · Expiry + storage accounting** — effort: **medium** — landed 2026-08-26
+  Files age out at `LINGER_FILE_EXPIRY_DAYS` (365, or `off`) unless starred or
+  on a pinned message; `LINGER_POOL_BYTES` is the ceiling; `GET /server` carries
+  `storage_used_bytes`, `storage_limit_bytes` and `file_expiry_days`, and the
+  status bar draws the first two (SPEC §5.6).
+  `crates/linger-server/tests/expiry.rs` (8 tests) uploads real files over real
+  HTTP, ages the rows, sweeps, and checks the objects stopped being served.
+
+  **Decisions and surprises, for whoever picks up T-506 and M6:**
+
+  - **The pool moved out of the database.** T-501 parked it in
+    `server_config['pool_bytes']` against a host-facing endpoint, and
+    `docs/decisions.md` says that endpoint is not going to exist. Both knobs are
+    read from the environment at startup and `repo::attachments::pool_limit` is
+    gone — one source of truth, and it is the compose file. `PATCH /server` is
+    untouched, so nothing about it needs a host UI.
+  - **`LINGER_POOL_BYTES` takes a unit.** `250GB`, `500MB`, `2TB`, or a plain
+    byte count. Writing 53687091200 in a compose file is how the number ends up
+    wrong. A pool smaller than one 500 MB file is a startup error rather than a
+    server that answers "storage is full" to every upload forever.
+  - **The sweeper takes three kinds of object, and only the first is about
+    age.** The spec's rule is one of them. The other two are things this task
+    found: a **deleted message** keeps its file (delete is a tombstone, T-30x),
+    and nothing anywhere will ever draw it again — the media grid and the stream
+    both filter on `deleted_at` — so the bytes were unreachable *and* counted
+    against the pool for good. Those go at once, and a star does not hold them:
+    a star stops a file ageing out and this is not ageing out. And a **finished
+    upload that never became a message** ages out on the normal window;
+    `routes::uploads` only ever swept uploads that never *completed*.
+  - **A status image is skipped whatever its age.** It is not on a message, so
+    the orphan rule above would take it. T-506 owns the rest of that story; this
+    is the half that had to be here or T-506 would land a feature that quietly
+    breaks a year later. `a_status_image_is_never_swept` pins it.
+  - **Bytes first, row second.** The other order can lose an object with nothing
+    left pointing at it — a file nobody can see and nobody can delete. This way
+    a crash in between leaves a row whose bytes are gone, and the next pass
+    finishes it. A backend that cannot delete right now keeps both.
+  - **The task lives in `main`, not `AppState`.** Building the state is what
+    every integration test does, and none of them want a loop running behind
+    them. `expiry::sweep` is public so a test drives one pass directly; ageing
+    is faked by moving `created_at` back, which is the only honest way to test a
+    year inside a test that has to finish.
+  - **The status bar figure is polled, not pushed** — one `GET /server` per
+    server every two minutes, on the existing `useNow` clock. It is a number
+    rounded to two digits that moves when somebody shares something big; a
+    gateway frame for it would be a protocol change for a cosmetic figure.
+  - **`GET /server` reports expiry to everybody, and the media panel says it in
+    words** next to the star control, because a star is the only thing that
+    stops a file going and that is worth knowing where the star is.
+  - **Not verified by a human yet:** the status bar and the media panel line, in
+    a running app. Types, unit tests, the production build and the whole of
+    `scripts/check.sh` pass. This is the same React half T-504 deferred, and it
+    belongs with the milestone check those tasks also deferred — **a real 400 MB
+    video, over a real network, from a server with real DNS**.
 - ⬜ **T-506 · The status image** — effort: **low** *(the rest of T-405, once
   there is somewhere to put a file)*
   SPEC §4.6's last bullet: one image on a status, **≤512 KB, displayed at
@@ -423,13 +474,14 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     the key names an object that exists, belongs to this user, is an image, and
     is within `MAX_STATUS_IMAGE_BYTES`. Without that, `image_key` is a
     user-controlled string that ends up in a URL.
-  - **Also.** A status image should not expire out from under the status
-    (T-505 expires non-starred objects at 365 days), and replacing one should
-    not leave the old object orphaned.
+  - **Also.** Replacing an image should not leave the old object orphaned.
+    (The other half of this is done: T-505's sweeper skips any object named by
+    a `user_status.image_key`, whatever its age, and
+    `a_status_image_is_never_swept` pins it.)
   - *Accept:* set an image, see it at 400×200 in both the roster card and the
     popover, on a second client; a 600 KB file is refused with a sentence a
     person can read; a key naming somebody else's object is refused by the
-    server; the image survives a year-old status once T-505 is in.
+    server; the image survives a year-old status.
   - **Take the line of copy out of the editor when this lands.** It currently
     says "Status images arrive with file uploads."
 

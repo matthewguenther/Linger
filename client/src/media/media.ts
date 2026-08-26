@@ -42,6 +42,48 @@ export function fileSize(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
+/**
+ * The status bar's storage figure (SPEC §5.6): what this server is holding,
+ * against what it is allowed to hold.
+ *
+ * Both halves, not a percentage and not a bar. "8.2 GB / 50 GB" answers the
+ * only question anybody actually has — is there room for this video — and a
+ * percentage does not, because 4% of an unknown number is nothing.
+ */
+export function storageLine(usedBytes: number, limitBytes: number): string {
+  return `${fileSize(usedBytes)} / ${fileSize(limitBytes)}`;
+}
+
+/**
+ * The sentence behind that figure, on hover: how full, and what happens to old
+ * files here. Expiry is a per-server setting and it deletes people's things, so
+ * it should be readable somewhere rather than only true.
+ */
+export function storageDetail(
+  usedBytes: number,
+  limitBytes: number,
+  expiryDays: number | null,
+): string {
+  const share = `${fileSize(usedBytes)} of ${fileSize(limitBytes)} used`;
+  return expiryDays === null
+    ? `${share}. Files are kept for good on this server.`
+    : `${share}. Files are removed after ${expiryText(expiryDays)} unless they are starred or on a pinned message.`;
+}
+
+/**
+ * A year is "a year", not "365 days". Anything that is not a round year or
+ * month stays in days, because rounding somebody's 45-day window to "a month
+ * and a half" is worse than saying the number.
+ */
+export function expiryText(days: number): string {
+  if (days === 365) return "a year";
+  if (days === 1) return "a day";
+  if (days % 365 === 0) return `${days / 365} years`;
+  if (days === 30) return "a month";
+  if (days % 30 === 0) return `${days / 30} months`;
+  return `${days} days`;
+}
+
 /** `4:07`, or `1:02:30` once it is over an hour. */
 export function durationText(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));

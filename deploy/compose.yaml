@@ -27,6 +27,13 @@ services:
       # it has to be a different host from LINGER_DOMAIN, and the Caddyfile
       # block has to match it.
       # LINGER_MEDIA_DOMAIN: files.linger.example.com
+      # How much this server will hold in total, and how long a file stands
+      # before it is swept. The defaults are 50 GB and a year; a starred file,
+      # and a file on a pinned message, never expire. Sizes take a unit
+      # (250GB, 500MB, 2TB) or a plain number of bytes; LINGER_FILE_EXPIRY_DAYS
+      # takes a number of days, or `off` to keep everything for good.
+      # LINGER_POOL_BYTES: 50GB
+      # LINGER_FILE_EXPIRY_DAYS: 365
       # Files in an S3 bucket instead of ./data/objects — Cloudflare R2 is the
       # one to pick, because it charges nothing for bytes going out. Set
       # LINGER_STORAGE to s3 and fill these in; the server refuses to start if
