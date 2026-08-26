@@ -390,7 +390,7 @@ backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
     with the milestone check the last three tasks also deferred — **a real
     400 MB video, over a real network, from a server with real DNS** — and it is
     now possible to do end to end for the first time.
-- ⬜ **T-505 · Expiry + storage accounting** — effort: **medium**
+- ⏳ **T-505 · Expiry + storage accounting** — effort: **medium** — claimed by Matt, 2026-08-26
   365-day expiry of non-starred/non-pinned (host-configurable/off), background
   task; storage-used figure for the status bar and `GET /server`.
   The pool and expiry knobs are environment variables, not a config file —
