@@ -28,7 +28,7 @@
       "endpoints": [
         "https://github.com/matthewguenther/Linger/releases/latest/download/latest.json"
       ],
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDRDRCMjU5MkVDMUZERjgKUldUNC9jRXVXYkxVakczU0wxWXdqZGd4eWdPUkhuOXpDaWN2L2s5a3pybm4veUU2S1ZTNkQ4bVQK",
       "windows": {
         "installMode": "passive"
       }

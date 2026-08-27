@@ -326,14 +326,18 @@ current vendor docs, not memory (AGENTS.md).*
   to update itself". Underneath that, the plugin's own `verify_signature` is
   unconditional and has no bypass, so even a mistake here fails closed.
 
-  **The key is Matt's errand and is not done.** `scripts/updater-key.sh`
-  generates it outside the repo (`~/.local/share/linger/updater.key` by
-  default), refuses to write inside the working tree, refuses to overwrite an
-  existing key, and stamps the public half into `tauri.conf.json` for
-  committing. Then: back the private half and its password up offline, and add
-  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as
-  repository secrets. Until that is done `release.yml` fails in its first job,
-  on purpose — a release that quietly built unsigned bundles would be worse.
+  **The key exists (Matt, 2026-08-27).** `scripts/updater-key.sh` generated it
+  outside the repo at `~/.local/share/linger/updater.key`; it is password
+  protected (scrypt), it is backed up in two places, and its public half —
+  minisign key id `8CD4B2592EC1FDF8` — is committed in `tauri.conf.json`. That
+  key is now permanent: replacing it orphans every copy installed under it, so
+  the script refuses to overwrite one, and a future session must not "regenerate"
+  it to fix a problem.
+
+  **Still to do before a tag:** add `TAURI_SIGNING_PRIVATE_KEY` (the contents of
+  the key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets.
+  Until then `release.yml` fails in its first job, on purpose — a release that
+  quietly built unsigned bundles would be worse than no release.
 
   **Releases are draft-first.** A tag builds Linux, Windows and both macOS
   architectures and opens a *draft* release carrying `latest.json`. Publishing
