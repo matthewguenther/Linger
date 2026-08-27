@@ -465,6 +465,13 @@ Plasma 6 Wayland and Windows.*
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
+- **Nothing in the client can pin a message.** The server has
+  `POST /messages/{id}/pin`, the media grid has a `pinned` filter, and file
+  expiry spares "starred or pinned" files — but there is no pin control
+  anywhere in the app and no `pinMessage` in `client/src/lib/api.ts`. So the
+  filter is always empty and half of the expiry promise is unreachable. Add a
+  control, or drop the filter and the half-promise. Found while writing the
+  guides, 2026-08-27.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
   member's). **Built that way in T-504** — the favicon is inlined as a `data:`
   URI so a reader's machine never touches the linked site either. Matt has not

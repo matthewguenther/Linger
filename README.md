@@ -143,6 +143,9 @@ If it's ever revisited it'll be a deliberate decision, written down in
 
 ## 📦 Installing the client
 
+**New here? The [user guide](docs/user-guide.md) covers installing and using
+Linger in plain language** — no command line, nothing assumed.
+
 Grab the installer for your platform from
 [Releases](https://github.com/matthewguenther/Linger/releases). Linux and
 Windows are built; **macOS is not built yet**, so on a Mac you build from a
@@ -160,6 +163,10 @@ quietly in the status bar, and downloads nothing until you ask it to under
 *settings → updates*.
 
 ## 🚀 Running a server
+
+**The [host guide](docs/host-guide.md) is the step-by-step version** — domain,
+DNS, install, invites, backups, updates — written for somebody who is not a
+developer. What follows is the short form.
 
 Target: a working server in under 15 minutes. One binary plus one data directory, or:
 
@@ -369,8 +376,10 @@ crates/linger-activity/   foreground-app detection, per-OS backends
 client/                   Tauri 2 shell + React/TypeScript frontend
 registry/apps.json        bundled app registry for activity detection
 deploy/                   Dockerfile, compose, Caddyfile
-docs/                     screenshots; docs/tasks/ archives closed milestones,
-                          docs/decisions.md records settled questions
+docs/                     host-guide.md and user-guide.md (the two
+                          plain-language guides), screenshots; docs/tasks/
+                          archives closed milestones, docs/decisions.md
+                          records settled questions
 scripts/                  check.sh (the whole local gate), lint-rules.sh,
                           version-check.sh (one version number, four files),
                           updater-key.sh (the update signing key),
