@@ -645,8 +645,8 @@ no longer waits on them. `TASKS.md` holds them under *Backburner* as T-901…T-9
 V1 (SPEC §6, item 8). The spikes are retired and the crate is in the tree, but the
 real backends, poller, registry and sharing UI are not needed for a usable product
 and they are large. It used to occupy M5 / T-501…T-507; those tasks are
-**T-911…T-917** now. **M5 (uploads) starts when M4.5's check passes.** Do not
-start T-911 until Matt takes this off the backburner.
+**T-911…T-917** now. M5 (uploads) took that slot and closed on 2026-08-26. Do
+not start T-911 until Matt takes this off the backburner.
 
 **M4.5 was added on 2026-08-21**, after the client turned out to have no way to create
 a room, invite anybody, or edit the server — every endpoint for all three has existed

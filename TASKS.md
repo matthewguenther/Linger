@@ -72,7 +72,7 @@ a task fails its acceptance criteria twice.
 ## Status
 
 Closed milestones are archived in `docs/tasks/` with every landing note and
-surprise intact. Tasks T-001…T-415 live there. Decisions that shaped the queue
+surprise intact. Tasks T-001…T-506 live there. Decisions that shaped the queue
 (the password floor, no host transfer, removal not banning, storage knobs as
 environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 
@@ -85,10 +85,18 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M3 — client: message stream | 2026-08-21 | Sign-in that sticks, live stream across two clients, 10k-message scrollback virtualized, composer, catch-up | [m3.md](docs/tasks/m3.md) |
 | M4 — presence, roster, statuses | 2026-08-21 | The roster moves live; in-room/away/idle mechanics; the status card | [m4.md](docs/tasks/m4.md) |
 | M4.5 — the shell's missing surfaces | 2026-08-25 | Host controls, invites, member settings, server list, remove + re-admit, password reset, live member announce | [m4-5.md](docs/tasks/m4-5.md) |
+| M5 — uploads, media, the grid | 2026-08-26 | Resumable uploads on local or S3, files served from their own origin, the media grid with stars and link cards, expiry + a storage ceiling, the status image | [m5.md](docs/tasks/m5.md) |
 
-**Still open from closed milestones:** the visual "a window opens" sign-off on
-Linux, Windows and macOS (T-002/T-003 in `docs/tasks/m0.md`) is a human errand,
-outstanding, and must be closed before M7.
+**Still open from closed milestones — two human errands, both outstanding:**
+
+- The visual "a window opens" sign-off on Linux, Windows and macOS
+  (T-002/T-003 in `docs/tasks/m0.md`). Must be closed before M7.
+- **M5's milestone check itself** (`docs/tasks/m5.md`): a real 400 MB video,
+  over a real network, from a server with real DNS for both names. Every piece
+  of it is covered by tests, but nobody has clicked `+ file` in a running app —
+  which also leaves the media grid, the storage figure in the status bar, and
+  the status image at 400×200 on a second client unseen by a person. T-504,
+  T-505 and T-506 each deferred it and each said so.
 
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -115,394 +123,13 @@ error envelope, health route, integration-test harness pattern
 (`crates/linger-server/tests/health.rs` — copy its `spawn_server` shape);
 `linger-activity` with the resolution pipeline, registry loader (+41 seed entries),
 backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
+M5 adds the whole of uploads (see [m5.md](docs/tasks/m5.md)): the `ObjectStore`
+trait with a local and an S3 backend, resumable part uploads, the complete step
+that re-encodes and sniffs, `GET /media` with keyset paging, link cards behind
+an SSRF guard, the expiry sweeper, and the status image.
 
 ---
 
-
-## M5 — uploads, media pipeline, the media grid
-
-*Milestone check: a 400 MB video uploads, resumes after a killed connection, appears in the media grid.*
-
-- ✅ **T-501 · Upload pipeline (local backend)** — effort: **high** — landed 2026-08-25
-  ARCHITECTURE §8 + PROTOCOL §6. Slot creation validates size/quota/MIME
-  allowlist; token-authenticated direct-PUT URLs (bytes never traverse app
-  routes — separate upload listener path); multipart >8MB with per-part URLs
-  (this is the resumability); complete: re-verify size, sniff real MIME,
-  re-encode images (kills EXIF + polyglots in one step — `image` crate),
-  blurhash, video poster via ffmpeg. Reject oversize at slot *and* at complete.
-  *Accept:* the milestone check, scripted: kill mid-upload, resume, complete;
-  EXIF-GPS test image comes out clean; fake-MIME file is caught.
-
-  All three accept criteria are `crates/linger-server/tests/uploads.rs`
-  (15 tests): `a_killed_upload_resumes_and_completes` sends a body that dies
-  mid-part, proves complete refuses, resends and completes;
-  `exif_never_survives_an_upload` builds a real JPEG with a hand-written EXIF
-  APP1 + GPS IFD and asserts nothing of it is in the stored bytes;
-  `a_file_that_lies_about_its_type_is_refused` sends zip bytes declared as PNG.
-
-  **Decisions and surprises, for whoever picks up T-502…T-506:**
-
-  - **An upload id is an attachment id.** Same UUID, two newtypes, no `uploads`
-    table and no migration. Nothing about an in-flight upload needs storing that
-    the attachment row does not already hold, and the part layout is a pure
-    function of the declared size (`storage::part_plan`), so a resumed upload
-    recomputes the plan rather than looking it up.
-  - **Failing at complete is two different things**, and getting this wrong is
-    what the first version did. Parts missing = the ordinary dropped connection:
-    the slot stays pending, the client sends what is missing, complete again.
-    Anything else (wrong size, a file that isn't the type it claimed) = final,
-    parts discarded. Without that split, one flaky part burned the whole upload.
-  - **A message with a file on it may have an empty body.** PROTOCOL §4 said
-    1–8000 chars, which would have made "share a photo without a caption"
-    impossible. PROTOCOL §4 is updated in the same commit; `validate::caption`
-    is the version that allows empty and `validate::message_body` still doesn't.
-  - **`ObjectStore` exists with one implementation** (`storage::LocalStore`), so
-    T-502 has a target: slot, assemble-into-a-local-file, put/read/delete,
-    discard. `assemble` returning a local path is deliberate — S3 will download
-    the completed object there, because sniffing and re-encoding need the bytes.
-  - **The listener is `PUT /upload/{id}/{part}` and serving is
-    `GET /objects/{key}`**, both outside `/api/v1`, neither authenticated. Part
-    URLs carry an HMAC over (upload id, part, expiry); the key is
-    `data/upload_hmac.key` and must survive restarts or resume breaks. Serving
-    is unauthenticated on purpose — the key holds a UUIDv7, the URL is the
-    secret, and that is the only arrangement an `<img>` tag can use. What makes
-    it safe is the headers, and **T-503 is what finishes it** by moving these
-    responses off the app origin.
-  - **WebP comes back as PNG.** The `image` crate reads WebP and cannot write
-    it. Rather than skip re-encoding (and keep EXIF), a WebP is re-encoded to
-    PNG and its filename extension corrected. GIFs are re-encoded frame by frame
-    so animation survives. AVIF is not on the allowlist: decoding it needs a
-    native dav1d build, which is not worth a system dependency yet.
-  - **`server_config['pool_bytes']` already works** — `repo::attachments::
-    pool_limit` reads it and falls back to the 50 GB default. T-505 needs the
-    endpoint that sets it and the used figure on `GET /server`;
-    `repo::attachments::pool_used` is the used figure, and it counts pending
-    uploads so a full server cannot hand out fifty more slots.
-    *(Superseded by T-505: the pool is `LINGER_POOL_BYTES` and there is no
-    endpoint. The row and `pool_limit` are gone; `pool_used` stands.)*
-  - **Abandoned uploads are swept on the way in**, not by a background task:
-    slot creation deletes pending rows older than 48h and their part files. It
-    is the only moment the answer matters (pending bytes count against the
-    pool) and slot creation is 20/hour/person, so it is nowhere near hot.
-  - **ffmpeg/ffprobe are optional and shelled out to.** No poster and no
-    duration without them; nothing fails. `deploy/Dockerfile` installs ffmpeg
-    now, so T-701's note about adding it is done. The video test skips when
-    ffmpeg is absent, so **CI is currently not exercising the poster path** —
-    add ffmpeg to the CI runner in T-701 and it starts running.
-  - The scripted resume test moves 16 MB over three parts, not the milestone's
-    400 MB over fifty. Same loop, fifty times; `storage::tests` pins the part
-    arithmetic for 400 MB and 500 MB. **A real 400 MB video over a real network
-    is still a human check** and belongs at the end of M5, with T-504's grid.
-  - `LINGER_STORAGE=s3` now refuses to start rather than booting a server whose
-    uploads cannot work. T-502 removes that.
-
-- ✅ **T-502 · S3 storage adapter** — effort: **medium** — landed 2026-08-25
-  Same `ObjectStore` trait, presigned URLs, `LINGER_STORAGE=s3` now boots.
-  `crates/linger-server/tests/s3.rs` (7 tests) drives the public endpoints
-  against a real MinIO; CI has an `s3` job that starts one, and
-  `scripts/minio-test.sh` does the same locally.
-
-  **Decisions and surprises, for whoever picks up T-503…T-506:**
-
-  - **No S3 multipart upload, on purpose.** Each part is a presigned PUT to its
-    own key, `uploads/{upload_id}/{part:05}`, and `assemble` streams them down
-    into `data/staging/`. S3's own multipart would assemble the object inside
-    the bucket, and the next thing the server does is download it anyway —
-    sniffing and EXIF-stripping need the bytes locally — so the file would
-    cross the wire three times. It would also hand out an upload id of S3's
-    own, which would have to be stored: exactly the per-upload row T-501 got
-    rid of. ARCHITECTURE §8 is updated to say this.
-  - **A server on S3 still needs a data directory.** `linger.db` and the JWT
-    key live there, and every upload passes through `data/staging/` on its way
-    to the bucket. It is deleted immediately afterwards, whether the upload
-    succeeded or was thrown away, but the disk has to be able to hold one file.
-  - **`read_object` now takes a `ServeAs`.** The download-forcing headers
-    (ARCHITECTURE §7) used to be set by the route, which works while the route
-    is the thing sending bytes. With S3 it is a redirect, so the route works
-    the two headers out and the store signs them into the presigned URL as
-    `response-content-type` / `response-content-disposition`. The local backend
-    ignores the argument. **`X-Content-Type-Options: nosniff` cannot be signed
-    into an S3 URL** — S3 has no `response-` override for it — so on S3 that one
-    header is missing until **T-503** puts these responses behind the CDN host,
-    where the proxy can add it. Worth knowing before T-503 is called done.
-  - **Serving is still `GET /objects/{key}` and then a 307.** The redirect keeps
-    one URL shape in `Attachment.url` for both backends and keeps the row lookup
-    that knows the filename and mime. It costs a round trip per image; if that
-    ever matters, the fix is a public bucket domain, not a change to the client.
-  - **`rusty-s3` + `reqwest`, not the AWS SDK.** `rusty-s3` only builds and signs
-    URLs — no sockets, no runtime of its own — which is a much smaller thing to
-    carry into a binary that already has an HTTP stack. Presigned URLs are the
-    whole S3 API surface this needs.
-  - **`reqwest` is a real dependency now**, not just a dev one, with
-    `rustls-tls`. Integration tests can still use it: cargo gives test targets
-    the regular dependencies as well as the dev ones.
-  - **MinIO in CI is `docker run`, not a `services:` block.** A service container
-    cannot pass a command, and the MinIO image needs `server /data` to start.
-    The image tag is pinned.
-  - **The S3 tests skip when `LINGER_TEST_S3_ENDPOINT` is unset**, printing a
-    line saying so. That is what keeps `cargo test --workspace` green on a
-    laptop — and it means a green workspace run proves nothing about this
-    backend. Run `scripts/minio-test.sh` before claiming it works.
-  - The test variables are `LINGER_TEST_S3_*`, deliberately not `LINGER_S3_*`.
-    A test must not be able to write into a real bucket by inheriting the
-    environment of the machine it runs on.
-  - Still a human check, as with T-501: **a real 400 MB video into a real
-    bucket over a real network.** The tests move 16 MB over three parts.
-- ✅ **T-503 · Separate media origin** — effort: **medium** — landed 2026-08-25
-  Uploads are served from `cdn.<LINGER_DOMAIN>` and nowhere else; the Caddyfile
-  block is live; the app origin's CSP is tightened.
-  `crates/linger-server/tests/media_origin.rs` (4 tests) drives real HTTP with
-  the `Host` header a reverse proxy would set, and
-  `an_object_carries_its_own_headers_in_the_bucket` in `tests/s3.rs` covers the
-  S3 half against MinIO.
-
-  **Decisions and surprises, for whoever picks up T-504…T-506:**
-
-  - **The split is enforced by the server, not just advertised by DNS.** Both
-    names reach one process through Caddy, so a `Host` check in
-    `routes::media_origin_gate` decides what each serves: on the media host,
-    `/objects/...` and nothing else; on every other name, everything *but*
-    `/objects/...`. Without that, "separate origin" would have been a URL shape
-    and no more — the app host would still have served every uploaded file, and
-    a hostile file's own origin would have had the whole API on it.
-  - **`LINGER_MEDIA_DOMAIN` defaults to `cdn.<LINGER_DOMAIN>`**, so the only
-    setup cost is a second DNS record. Setting it equal to `LINGER_DOMAIN` is a
-    startup error rather than a quiet downgrade. A server with no domain has one
-    origin and no split; that is what every test server runs as, and it is why
-    `spawn_server()` still hands out root-relative URLs while
-    `spawn_named_server()` is the one that exercises this.
-  - **The `nosniff` gap from T-502 is closed as far as S3 permits, and it is
-    worth knowing exactly how far that is.** S3 has no `response-` override for
-    `X-Content-Type-Options` or `Content-Security-Policy`, and proxying the
-    bytes back through this process to add them would break the rule the S3
-    backend exists to keep. So: both headers are now on every response the
-    server sends itself, the Caddy media block sets them on everything it
-    serves, and on the S3 path three things stand in for them — active content
-    is not storable at all, anything off the inline list is
-    `application/octet-stream` + `attachment` (which a browser downloads
-    whatever it sniffs), and those two headers are stored **on the object** as
-    well as signed into the URL. That last one is new here and is what makes a
-    CDN-fronted or public bucket safe. A host who wants the literal header on
-    the S3 path adds a response rule at their CDN; README says so.
-  - **`put_object`/`put_bytes` take a `ServeAs` now.** How a file may be served
-    is decided once, at complete, from what the server made of the bytes, and
-    travels with them. `ServeAs::for_object` and the RFC 6266 filename encoding
-    moved out of `routes/objects.rs` into `storage/mod.rs` for that reason —
-    the route was the only caller and is no longer the only place that needs
-    the answer.
-  - **MinIO stores `Content-Type`/`Content-Disposition` sent as unsigned headers
-    on a presigned PUT**, which is what makes the above work without signing
-    them into the upload URL. Real S3 behaves the same way; if some
-    implementation ever does not, the symptom is
-    `an_object_carries_its_own_headers_in_the_bucket` failing, not a security
-    hole — the presigned GET still carries the overrides.
-  - **The upload listener stays on the app host.** `PUT /upload/...` is bytes
-    coming *in* under a signature this server issued; nothing about it is
-    somebody else's content being handed to a browser. Moving it would have
-    bought nothing and given the media host a body-accepting route.
-  - **The app CSP got `base-uri`, `form-action`, `frame-src`, `worker-src` and
-    `manifest-src`.** `style-src 'unsafe-inline'` is still there: it is Vite's
-    dev-mode requirement, and **T-702 already owns dropping the dev
-    relaxations**. Do not remove it before then or `pnpm tauri dev` breaks.
-  - **T-504 and T-506 need nothing new for this.** `Attachment.url` and
-    `poster_url` are already absolute and already point at the media origin —
-    treat them as opaque and use them as given. Do not build a URL by hand from
-    the API base; that base is the app origin and `/objects` does not answer
-    there.
-  - Still a human check, as with T-501/T-502: **a real 400 MB video, over a real
-    network, from a server with real DNS for both names.**
-- ✅ **T-504 · The media UI + link cards** — effort: **medium** — landed 2026-08-25
-  `GET /media` plus the grid in the rail, filters by person/kind/date, stars,
-  and each item clicks back to its message. Link cards are one line and the
-  server fetches them. **The client can now share a file at all** — `+ file`,
-  drag, or paste in the composer — which M5 needed and nothing before this had.
-  `crates/linger-server/tests/media.rs` (10 tests) drives it all over real HTTP;
-  `media.test.ts`, `upload.test.ts` and four new `markdown.test.ts` cases cover
-  the client's arithmetic.
-
-  **Decisions and surprises, for whoever picks up T-505/T-506:**
-
-  - **`MediaItem` grew, as the parking lot expected.** It is flat and carries
-    `kind`, `cursor`, `author_id`, `created_at`, `excerpt` and `starred_at`
-    alongside an optional `attachment` *or* `link`. A pin carries neither and
-    leans on `excerpt`. The grid sorts and filters over the fields every item
-    has and only reaches for the payload once it knows which cell it is drawing.
-  - **Paging is a keyset cursor, not `before=<id>`, and PROTOCOL §6 says so
-    now.** The three sources are three tables and their ids are not comparable
-    with each other, so the cursor is `<created_at>:<id hex>` — the sort key —
-    and it is opaque. A link item appends its position so every item has a
-    unique key; `before` ignores that part.
-  - **A message's links stay in one page.** Each source is limited by *group*
-    (an upload is one, a message's links are however many it has) and the merge
-    stops on a group boundary, so a page can hold slightly more than `limit`.
-    Without that, a page ending halfway through a message's links would step
-    over the rest of them on the next cursor. It is why `link_groups` runs the
-    filter twice — once outside, once in a subquery that picks the messages.
-  - **Stars are on uploads only**, which is PROTOCOL's shape (`PUT
-    /media/:attachment_id/star`) and the honest one: a star is what stops T-505
-    sweeping a file at 365 days, and a link or a pin has no object to keep. The
-    grid draws the control only where it means something. Anyone can star
-    anything and there is no per-person star — the collection belongs to the
-    server, not to a reader.
-  - **`starred_at IS NOT NULL DESC` before the date makes paging subtle.** If
-    the cursor points at a starred item we are still inside the starred run, so
-    the attachment query has to return starred items after the cursor *and*
-    every unstarred one; if it does not, everything starred is behind us and no
-    starred item may come back at all. `a_star_sorts_first_and_paging_never_
-    repeats_or_skips` walks nine items two at a time and compares with one big
-    page, which is the test that would catch getting this backwards.
-  - **Links are extracted when a message is written, into `message_links`**, and
-    re-extracted on every edit — an edit that drops a link drops its card from
-    the collection. The alternative was scanning every body ever written on
-    every grid load. `linger-server::links::extract` and the client's
-    `linkTargets` deliberately agree, including the trailing-punctuation and
-    unbalanced-paren rules, and both normalise through a URL parser so the
-    string the card is keyed by is identical on both sides.
-  - **The SSRF guard refuses ports and bare IPs before it does any DNS**, which
-    is also why the fetch cannot be integration-tested against a local server:
-    a test HTTP listener is on `127.0.0.1:<port>`, and that is precisely what
-    the guard exists to refuse. So `a_preview_never_goes_looking_inside_the_
-    network` proves the negative — a real listener on loopback, eight shapes of
-    URL aimed at it, zero connections — and the resolve half (every address a
-    name answers with must be public) is unit-tested in `links::tests`. Making a
-    public name resolve to a private address needs a network a test cannot have.
-  - **A refused or failed fetch is stored as `state='failed'`,** not left blank.
-    Without that row every reader who scrolled past the message would trigger
-    the same doomed fetch. Successes stand for a week, failures for an hour.
-  - **Favicons come back as `data:` URIs.** A remote `<img>` would hand the
-    linked site the IP of everyone who scrolled past. Only sniffed raster bytes
-    are accepted — an SVG "favicon" is a script, and it would be inlined into
-    the app's own origin, which is the worst place for one.
-  - **The app CSP now allows `http://localhost:*` and `http://127.0.0.1:*` in
-    `img-src` and `media-src`**, matching what `connect-src` already had, so
-    `pnpm dev` against a local server can draw an uploaded picture. **A LAN
-    server on plain http at, say, `192.168.1.5` still cannot** — its images are
-    blocked. T-702 owns the CSP; that is the decision to make there, and the
-    alternative is telling LAN hosts to put a certificate on it.
-  - **Going to an old item's message reuses `loadUntil`**, the same reach "since
-    you were gone" uses, so it walks back at most ten pages (a thousand
-    messages). Past that the room simply opens at the newest message rather than
-    hanging. A real jump to an eight-month-old item would need a message window
-    endpoint (`GET /messages/:id` plus paging both ways) and a stream store that
-    can hold a window it did not anchor at the end — worth doing, not worth
-    doing inside this task.
-  - **Not verified by a human yet:** the React half. Types, unit tests, the
-    production build and a server-side render of the panel and the attachments
-    all pass, but nobody has clicked `+ file` in a running app. That belongs
-    with the milestone check the last three tasks also deferred — **a real
-    400 MB video, over a real network, from a server with real DNS** — and it is
-    now possible to do end to end for the first time.
-- ✅ **T-505 · Expiry + storage accounting** — effort: **medium** — landed 2026-08-26
-  Files age out at `LINGER_FILE_EXPIRY_DAYS` (365, or `off`) unless starred or
-  on a pinned message; `LINGER_POOL_BYTES` is the ceiling; `GET /server` carries
-  `storage_used_bytes`, `storage_limit_bytes` and `file_expiry_days`, and the
-  status bar draws the first two (SPEC §5.6).
-  `crates/linger-server/tests/expiry.rs` (8 tests) uploads real files over real
-  HTTP, ages the rows, sweeps, and checks the objects stopped being served.
-
-  **Decisions and surprises, for whoever picks up T-506 and M6:**
-
-  - **The pool moved out of the database.** T-501 parked it in
-    `server_config['pool_bytes']` against a host-facing endpoint, and
-    `docs/decisions.md` says that endpoint is not going to exist. Both knobs are
-    read from the environment at startup and `repo::attachments::pool_limit` is
-    gone — one source of truth, and it is the compose file. `PATCH /server` is
-    untouched, so nothing about it needs a host UI.
-  - **`LINGER_POOL_BYTES` takes a unit.** `250GB`, `500MB`, `2TB`, or a plain
-    byte count. Writing 53687091200 in a compose file is how the number ends up
-    wrong. A pool smaller than one 500 MB file is a startup error rather than a
-    server that answers "storage is full" to every upload forever.
-  - **The sweeper takes three kinds of object, and only the first is about
-    age.** The spec's rule is one of them. The other two are things this task
-    found: a **deleted message** keeps its file (delete is a tombstone, T-30x),
-    and nothing anywhere will ever draw it again — the media grid and the stream
-    both filter on `deleted_at` — so the bytes were unreachable *and* counted
-    against the pool for good. Those go at once, and a star does not hold them:
-    a star stops a file ageing out and this is not ageing out. And a **finished
-    upload that never became a message** ages out on the normal window;
-    `routes::uploads` only ever swept uploads that never *completed*.
-  - **A status image is skipped whatever its age.** It is not on a message, so
-    the orphan rule above would take it. T-506 owns the rest of that story; this
-    is the half that had to be here or T-506 would land a feature that quietly
-    breaks a year later. `a_status_image_is_never_swept` pins it.
-  - **Bytes first, row second.** The other order can lose an object with nothing
-    left pointing at it — a file nobody can see and nobody can delete. This way
-    a crash in between leaves a row whose bytes are gone, and the next pass
-    finishes it. A backend that cannot delete right now keeps both.
-  - **The task lives in `main`, not `AppState`.** Building the state is what
-    every integration test does, and none of them want a loop running behind
-    them. `expiry::sweep` is public so a test drives one pass directly; ageing
-    is faked by moving `created_at` back, which is the only honest way to test a
-    year inside a test that has to finish.
-  - **The status bar figure is polled, not pushed** — one `GET /server` per
-    server every two minutes, on the existing `useNow` clock. It is a number
-    rounded to two digits that moves when somebody shares something big; a
-    gateway frame for it would be a protocol change for a cosmetic figure.
-  - **`GET /server` reports expiry to everybody, and the media panel says it in
-    words** next to the star control, because a star is the only thing that
-    stops a file going and that is worth knowing where the star is.
-  - **Not verified by a human yet:** the status bar and the media panel line, in
-    a running app. Types, unit tests, the production build and the whole of
-    `scripts/check.sh` pass. This is the same React half T-504 deferred, and it
-    belongs with the milestone check those tasks also deferred — **a real 400 MB
-    video, over a real network, from a server with real DNS**.
-- ✅ **T-506 · The status image** — effort: **low** — landed 2026-08-26
-  SPEC §4.6's last bullet: one image on a status, ≤512 KB, drawn at 400×200 in
-  the roster card and the name popover at once. The editor picks a file,
-  uploads it through the T-501 pipeline, and the server checks the id against
-  what is actually stored before it will keep it.
-  `crates/linger-server/tests/status_image.rs` (9 tests) uploads real images
-  over real HTTP and drives the whole of it.
-
-  **Decisions and surprises, for whoever picks up M6:**
-
-  - **The wire names the image by attachment id, not by storage key.** The
-    field was `image_key: string`, and the client cannot produce one: PROTOCOL
-    §6 says object URLs are opaque and the media origin is not on the wire
-    anywhere, so there was nothing for a client to build a key out of. So
-    `UserStatus` now carries `image_id` (the client's, an `AttachmentId`) and
-    `image_url` (the server's, built from the key it stores). The database
-    column is unchanged and still holds the object key — the sweeper joins on
-    it — and `storage::key_owner` is `object_key` read backwards, which is the
-    whole of the conversion.
-  - **`image_url` is server-owned the way `away_since` already was.** Send
-    anything you like for it; `PATCH /me` ignores it. That pattern was already
-    in this exact type, which is what made a read-only field inside a request
-    type not a smell.
-  - **The four checks live in `validate::status_image`**, which is the first
-    thing in `validate.rs` that touches the database — everything else there is
-    a pure function over a string. It returns the object key rather than a
-    yes, so the id a client sent is never what reaches a URL: the answer is
-    built from the row the server found. Somebody else's file is `FORBIDDEN`,
-    not `NOT_FOUND` — they are telling us about a file that exists.
-  - **Replacing an image deletes the old one, and that had to be the client's
-    job as well as the server's.** The server drops the file a status stops
-    pointing at, unless it is also on a message (then it belongs to the
-    message). But an image picked in the editor and then replaced or abandoned
-    was never saved to anything, so the server never hears about it — the
-    editor takes those back with `DELETE /uploads/:id` on replace, on remove,
-    and on cancel. Without that half, opening the editor and picking three
-    pictures leaves two against the pool forever, since the sweeper skips
-    status images.
-  - **`repo::users` needed `&Config`** to build `image_url`, which is ten call
-    sites. `repo::attachments::by_id` already took one, so the shape was
-    already in the repo layer.
-  - **400×200 is the box, not the size.** The roster panel is 240px wide and
-    the popover 260px, so the width gives way and the 2:1 aspect ratio does
-    not, with `object-fit: cover` so nothing is ever stretched.
-  - **The client refuses before it uploads** (`imageProblem` in `status.ts`):
-    not an image, or over 512 KB, and it says both numbers. The server refuses
-    the same two things afterwards, and there is one case where only the server
-    can: it re-encodes every image it takes, so a file that was just under the
-    cap can land just over it. The editor shows the server's sentence when that
-    happens.
-  - **Not verified by a human yet:** nobody has picked a picture in a running
-    app. Types, unit tests, the integration tests and the whole of
-    `scripts/check.sh` pass. This is the same React half T-504 and T-505
-    deferred, and it belongs with the milestone check all three deferred — **a
-    real 400 MB video, over a real network, from a server with real DNS** —
-    plus the acceptance line this task adds: *see the image at 400×200 in both
-    the roster card and the popover, on a second client.*
 
 ## M6 — styling: names, palette, themes, fonts
 
@@ -583,12 +210,14 @@ middle of it. Anything that lands before them must not break the frames they rel
 ### Activity detection
 
 *Moved here 2026-08-23 by Matt. These used to be M5 / T-501…T-507; they are
-**T-911…T-917** now, so they do not sit in the M5 task block. Still V1 (SPEC §6,
+**T-911…T-917** now, so they never collided with M5's own tasks (archived in
+[`docs/tasks/m5.md`](docs/tasks/m5.md)). Still V1 (SPEC §6,
 item 8). The Linux and Windows spikes are already retired, `linger-activity`
 already compiles, and the Null backend already reports nothing — which is the
 correct product until this comes back. It is not needed for a usable chat app,
 and it is large: four OS backends, a poller, a registry, and a sharing-controls
-UI. **Do not start T-911.** M5 (uploads) starts when M4.5's check passes.*
+UI. **Do not start T-911.** M5 (uploads) is closed; M6 (styling) is the next
+milestone.*
 
 *Milestone check, when this comes back: foreground app appears in the roster on
 Plasma 6 Wayland and Windows.*
