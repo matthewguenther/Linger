@@ -171,7 +171,12 @@ docker compose up -d
 docker compose logs linger   # prints a one-time host-setup URL on first run
 ```
 
-Caddy is bundled so TLS certificates are automatic.
+Caddy is bundled so TLS certificates are automatic. That is not only about
+padlocks: **an installed client only talks to a server over `https`.** The
+shipped app's content-security policy allows nothing else, so a server reached
+at a bare `http://` address — including one on your own machine — is reachable
+from `pnpm tauri dev` and from a browser, and not from the installer. Point a
+name at the box and let Caddy do the certificate.
 
 **Why two names.** Files people upload are served from `cdn.` in front of your domain,
 never from the domain itself. A file somebody sends you is somebody else's file, and a
@@ -439,6 +444,16 @@ Things that surprise people the first time:
   success.
 - **Renaming a wire type leaves an orphan.** `ts-rs` writes files but never deletes them,
   so the old `.ts` file stays behind and the drift check won't catch it. Delete it by hand.
+- **There are two content-security policies and you develop under the loose one.**
+  `client/src-tauri/tauri.conf.json` carries `csp` and `devCsp`, and Tauri picks
+  between them when it compiles: `pnpm tauri dev` gets the one that allows
+  `http://localhost:*`, and every bundle the release workflow builds gets the one
+  that does not. So a shipped copy cannot reach a server at a bare `http://`
+  address, on purpose — a page that could reach `http://localhost:*` could knock on
+  every other service running on that machine. If you tighten either policy, tighten
+  both; `client/src-tauri/tests/csp.rs` fails if they drift apart, and it is also
+  what stops somebody removing `ipc:` and `http://ipc.localhost`, which are Tauri's
+  own IPC channel rather than a relaxation.
 - **`client/src-tauri` is not in the root cargo workspace.** It links against system
   webview libraries that CI and server boxes don't have. Build it with `pnpm tauri`, not
   `cargo`.

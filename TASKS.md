@@ -254,22 +254,57 @@ auto-update, installed, on a machine that did not build it.***
   committed endpoint is the final one. This mattered because a private repo's
   release assets need authentication, and the alternative — a credential in the
   client — is not one: shipping a token in a desktop app is shipping the token.
-- ⬜ **T-702 · Release CSP + the warning, said out loud** — effort: **low**
-  What is left of the old T-702 once signing moved to T-705, and none of it is
-  blocked. Two things:
-  - **Harden the CSP for release.** `tauri.conf.json`'s `connect-src`,
-    `img-src` and `media-src` still allow `http://localhost:*` and
-    `http://127.0.0.1:*` so `pnpm dev` works. A shipped build has no business
-    talking to a random local port. Keep the dev relaxations for dev — a second
-    config the release build merges over the first, or a build-time swap — and
-    check the shipped app still reaches a real server.
-  - **Document the SmartScreen warning.** A Windows installer that is not
-    code-signed shows "Windows protected your PC" and hides *Run anyway* behind
-    *More info*. Say that in the README, next to the download, with what it
-    means and why it is there. A friend who hits it with no warning assumes the
-    download is broken, and the honest sentence costs nothing.
-  *Accept:* a release build cannot reach `http://localhost:*`, still reaches its
-  own server, and the README tells a Windows user what they will see.
+- ✅ **T-702 · Release CSP + the warning, said out loud** — effort: **low** — landed 2026-08-27
+
+  **Landing note.** The policy is two policies now, and the one that ships is
+  the strict one.
+
+  **`csp` and `devCsp`, picked at compile time.** Tauri has this built in, so
+  there is no second config file and no build-time swap: `devCsp` is used when
+  `is_dev()` — which is the `tauri/custom-protocol` feature the CLI adds for a
+  bundle and not for `pnpm tauri dev` — and `csp` otherwise. Dev keeps
+  `http://localhost:*` and `http://127.0.0.1:*` (and the `ws://` pair) on
+  `connect-src`, `img-src` and `media-src`. The shipped policy has none of them.
+  It fails safe: forget to pass something and you get the strict one.
+
+  **Said plainly, this means an installed copy only talks `https`.** That is
+  less of a change than it sounds — `connect-src` never allowed a bare `http:`,
+  so a plain-HTTP server on a LAN was already unreachable from a bundle, and
+  localhost was the last exception. The README now says so next to the compose
+  instructions, because "run the server on this machine and point the installed
+  app at `http://localhost:8080`" is a reasonable thing to try and it will not
+  work.
+
+  **The surprise: neither policy allowed Tauri's own IPC.** `invoke()` is a
+  `fetch` at `ipc://localhost`, or `http://ipc.localhost` on Windows, and
+  neither was in `connect-src`. It never showed up because **the CSP has never
+  actually been enforced anywhere yet**: with a `devUrl` the page is served by
+  Vite, which sends no policy and into which Tauri injects nothing, so the
+  configured CSP has only ever applied to a bundle, and nobody has built one.
+  A blocked IPC call does not fail loudly either — it drops onto a slower
+  `postMessage` fallback with a console warning. Both sources are allowed in
+  both policies now, which is what Tauri's own docs say to do.
+
+  **`style-src 'unsafe-inline'` stays**, and ARCHITECTURE §7 now says why rather
+  than claiming otherwise: the message list is virtualized, so a row's position
+  is a style attribute, and a name is painted from `--person-*` properties set
+  the same way. `script-src` is `'self'` and nothing else.
+
+  **`client/src-tauri/tests/csp.rs`** parses the config with Tauri's own `Config`
+  type — so a misspelled `devCsp` fails there instead of silently shipping no dev
+  policy — and asserts: no local address in the release policy except
+  `http://ipc.localhost`, `https:` still allowed on all three fetching
+  directives, IPC allowed in both, the local relaxations still present in dev,
+  and the two policies identical apart from local addresses.
+
+  **The SmartScreen half was already done** — it landed in the README with the
+  packaging decision earlier the same day, next to the download link, with what
+  the warning means and a pointer to `docs/decisions.md`. Left as it was.
+
+  **What is not proven.** "Still reaches its own server" is asserted about a JSON
+  file, not watched in an installed build, because building one needs the signing
+  key and a bundle nobody has installed yet. That is M7's milestone check, and it
+  is a person's job.
 - ⬜ **T-703 · Server image publish** — effort: **low**
   ghcr.io workflow for `deploy/Dockerfile` (ffmpeg is already in it, T-501; the
   CI *runner* still needs it, or the video-poster test keeps skipping),
