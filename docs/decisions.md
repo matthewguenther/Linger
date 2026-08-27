@@ -68,3 +68,43 @@ the gateway socket both, so printing `http://` pinned the host's own session to
 plaintext on the very first thing they ever do. It falls back to `http` only for
 a bare bind address, which has no certificate and is honestly plaintext.
 
+
+---
+
+## Decided — v1 ships unsigned, and macOS does not ship at all yet
+
+**Matt, 2026-08-27.** M7 assumed installers would be code-signed on Windows and
+notarized on macOS. Both turn out to be blocked on money rather than on work: a
+Windows OV certificate is a few hundred dollars a year, and notarization needs an
+Apple Developer Program membership at $99 a year. For a server you hand to a
+friend group, neither is obviously worth buying yet.
+
+**A correction that shaped this:** notarizing does not need a Mac in the room.
+`release.yml`'s `macos-latest` runner is a Mac and can sign and notarize on its
+own. The membership is the blocker. Somebody's Mac is still wanted for *opening*
+the installer once — that is the T-002/T-003 sign-off, a different errand.
+
+**So, for v0.1.0:**
+
+- **Linux and Windows ship, unsigned.** Windows shows SmartScreen's
+  "unrecognized app" warning, which is clickable past via *More info → Run
+  anyway*. The README says so plainly rather than letting a friend discover it
+  and assume the download is broken.
+- **macOS does not ship.** Not even unsigned. Two reasons, and the second is the
+  real one. Gatekeeper on recent macOS no longer takes a right-click → Open; it
+  sends the user into System Settings to click past a malware warning. And the
+  eventual move from an ad-hoc signature to a Developer ID one is precisely the
+  transition that breaks an app the updater has replaced in place — so an
+  unsigned macOS build now is not a step towards a signed one later, it is a
+  thing that has to be uninstalled by hand. **Shipping nothing orphans nobody.**
+
+**None of this is expensive to reverse.** The minisign updater key is
+OS-independent and does not change. Adding a `darwin-aarch64` entry to a later
+`latest.json` is a pure addition. With no macOS installs in the world, there is
+nobody to strand.
+
+**What this does to the queue:** T-702 keeps the half that is not blocked — the
+release CSP hardening, and documenting the warning honestly. The signing itself
+becomes **T-705**, parked until there is a certificate and an account. Note that
+M7's milestone check says *a signed installer per OS*, so M7 closes on two
+operating systems and unsigned; that is the decision, not an oversight.

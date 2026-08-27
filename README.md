@@ -141,6 +141,24 @@ cheaper, because you can no longer tell what was chosen.
 If it's ever revisited it'll be a deliberate decision, written down in
 [SPEC.md §8](SPEC.md) with the reasoning, not a thing that quietly appears in a release.
 
+## 📦 Installing the client
+
+Grab the installer for your platform from
+[Releases](https://github.com/matthewguenther/Linger/releases). Linux and
+Windows are built; **macOS is not built yet**, so on a Mac you build from a
+checkout (see Development below).
+
+**Windows will warn you.** You get *"Windows protected your PC"*, and *Run
+anyway* is hidden behind the *More info* link. That is SmartScreen saying the
+installer is not code-signed, which is true — see
+[docs/decisions.md](docs/decisions.md) for why it isn't, and *Cutting a release*
+for the difference between that and the signature on updates, which is in place.
+Nothing about the download is broken.
+
+Once installed, the app keeps itself up to date: it checks at launch, says so
+quietly in the status bar, and downloads nothing until you ask it to under
+*settings → updates*.
+
 ## 🚀 Running a server
 
 Target: a working server in under 15 minutes. One binary plus one data directory, or:
@@ -550,18 +568,24 @@ git commit -am "chore: 0.2.0"
 git tag v0.2.0 && git push origin main v0.2.0
 ```
 
-The workflow builds Linux, Windows and both macOS architectures, signs the
-updater artifacts, and opens a **draft** GitHub release carrying `latest.json`.
-Read it, then publish it — publishing is what makes installed copies see the
-update, and it is deliberately a human's click rather than a side effect of
-pushing a tag.
+The workflow builds Linux and Windows, signs the updater artifacts, and opens a
+**draft** GitHub release carrying `latest.json`. Read it, then publish it —
+publishing is what makes installed copies see the update, and it is deliberately
+a human's click rather than a side effect of pushing a tag.
 
-One thing worth knowing before the first release: installer signing on Windows
-and notarization on macOS are T-702, so until that lands the operating systems
-will still warn about an unknown publisher on first install. The update
-signature is a separate thing and is already in place — it is what stops a
-*later* update from being tampered with, and it is not what the OS checks when
-you first run an installer.
+**macOS is deliberately not built yet**, and the Windows installer is not
+code-signed. Both are decisions rather than gaps — see
+[docs/decisions.md](docs/decisions.md). The short version: signing costs a few
+hundred dollars a year per platform and buys little for a server you hand to a
+friend group, and an *unsigned* macOS build would be worse than none, because the
+later switch to a real signature is what breaks an app the updater has replaced
+in place.
+
+Two different signatures are easy to confuse here. The **update** signature is in
+place already: it is what stops a later update from being tampered with, and the
+app verifies it with no way to skip. The **installer** signature is what the
+operating system checks the first time you run a download, and that is the one
+this project does not have yet.
 
 Current work queue lives in [TASKS.md](TASKS.md).
 
