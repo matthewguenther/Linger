@@ -351,6 +351,7 @@ docs/                     screenshots; docs/tasks/ archives closed milestones,
 scripts/                  check.sh (the whole local gate), lint-rules.sh,
                           version-check.sh (one version number, three files),
                           updater-key.sh (the update signing key),
+                          signing-preflight.sh (is that key the right one?),
                           minio-test.sh (the S3 backend, against a real MinIO),
                           fetch-fonts.sh (re-vendors the twelve bundled faces)
 ```
@@ -520,11 +521,25 @@ scripts/updater-key.sh
 
 That generates the update signing key, writes its public half into
 `client/src-tauri/tauri.conf.json` (commit that), and prints what to do with the
-private half: back it up offline, and add it plus its password as the
-`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repository
-secrets. **Losing that key means you can never ship an update to an installed
+private half: back it up offline, and add it plus its password as two repository
+secrets:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.local/share/linger/updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD   # prompts; paste the password
+```
+
+The first argument is the secret's *name*; the `<` feeds the key file in as its
+*value*. **Losing that key means you can never ship an update to an installed
 copy again** — the only way back is reinstalling every machine by hand. It is
 generated once and never regenerated.
+
+To check the secrets without cutting a release, run the `release` workflow from
+the Actions tab. A manual run does the preflight and stops: it signs a throwaway
+file with the secret and checks that the key id matches the public key in
+`tauri.conf.json`. "Present" is not "correct" — a key that signs fine but isn't
+the mate of the committed one produces a green release that no installed copy
+will accept.
 
 Then, per release:
 

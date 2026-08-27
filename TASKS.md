@@ -334,10 +334,15 @@ current vendor docs, not memory (AGENTS.md).*
   the script refuses to overwrite one, and a future session must not "regenerate"
   it to fix a problem.
 
-  **Still to do before a tag:** add `TAURI_SIGNING_PRIVATE_KEY` (the contents of
-  the key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets.
-  Until then `release.yml` fails in its first job, on purpose — a release that
-  quietly built unsigned bundles would be worse than no release.
+  **The secrets are checked, not assumed.** `release.yml`'s preflight runs
+  `scripts/signing-preflight.sh`, which signs a throwaway file with
+  `TAURI_SIGNING_PRIVATE_KEY` and then compares the key id in that signature to
+  the public key in `tauri.conf.json`. *Present* is not *correct*: a key that
+  signs fine but is not the mate of the committed one builds a green release,
+  uploads cleanly, and installs on nothing — the failure only shows up when
+  somebody tries to update. Running the workflow by hand from the Actions tab
+  does the preflight and stops, so the secrets can be proven without cutting a
+  release; only a tag builds bundles.
 
   **Releases are draft-first.** A tag builds Linux, Windows and both macOS
   architectures and opens a *draft* release carrying `latest.json`. Publishing

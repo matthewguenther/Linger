@@ -16,9 +16,14 @@ name: release
 # The updater endpoint in tauri.conf.json points at this repo's
 # releases/latest/download/latest.json, so a draft is invisible to every
 # installed copy until you publish it.
+#
+# Running it from the Actions tab (workflow_dispatch) does the checks and stops:
+# it proves the signing secrets are right without cutting a release. Only a tag
+# builds anything.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -30,23 +35,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: versions match the tag
-        run: scripts/version-check.sh "${{ github.ref_name }}"
-      - name: the signing key is present
+        # On a manual run there is no tag to match, only the three files.
+        run: scripts/version-check.sh "${{ github.ref_type == 'tag' && github.ref_name || '' }}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: install frontend deps
+        working-directory: client
+        # Only for the Tauri CLI, which is what does the signing.
+        run: pnpm install --frozen-lockfile
+      - name: the signing key works and is the one the app trusts
         env:
-          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then
-            echo "FAIL: the TAURI_SIGNING_PRIVATE_KEY secret is not set."
-            echo "      Run scripts/updater-key.sh, then add the two secrets it names."
-            echo "      Without it the bundles ship unsigned and no installed copy"
-            echo "      will accept them."
-            exit 1
-          fi
-          echo "signing key: present"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # Signs a throwaway file for real, then checks the key id against
+        # tauri.conf.json. "Present" is not "correct": a key that signs fine but
+        # isn't the mate of the committed public key builds a green release that
+        # no installed copy will accept.
+        run: scripts/signing-preflight.sh
 
   bundle:
     name: ${{ matrix.label }}
     needs: preflight
+    # A manual run is a check, not a release. Only a tag builds and publishes.
+    if: github.ref_type == 'tag'
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing should not throw away three finished builds. The
