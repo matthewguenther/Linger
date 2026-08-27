@@ -508,9 +508,9 @@ Things that surprise people the first time:
 
 ### Cutting a release
 
-Installers are built by `.github/workflows/release.yml`, which only a tag fires —
-Windows and macOS runners bill at a multiple on a private repo, so nothing
-platform-specific runs on an ordinary push.
+Installers are built by `.github/workflows/release.yml`, which only a tag fires.
+That job cuts a release and uses the signing key, so it has no business running
+on an ordinary push.
 
 Once, before the first release ever ships:
 
@@ -541,13 +541,12 @@ Read it, then publish it — publishing is what makes installed copies see the
 update, and it is deliberately a human's click rather than a side effect of
 pushing a tag.
 
-Two things this depends on, both worth knowing before the first release:
-GitHub release *assets* have to be downloadable without authentication for the
-updater to reach them, so the repo (or at least its releases) must be public by
-then; and installer signing on Windows and notarization on macOS are T-702, so
-until that lands the operating systems will still warn about an unknown
-publisher on first install. The update signature is a separate thing and is
-already in place.
+One thing worth knowing before the first release: installer signing on Windows
+and notarization on macOS are T-702, so until that lands the operating systems
+will still warn about an unknown publisher on first install. The update
+signature is a separate thing and is already in place — it is what stops a
+*later* update from being tampered with, and it is not what the OS checks when
+you first run an installer.
 
 Current work queue lives in [TASKS.md](TASKS.md).
 

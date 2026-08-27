@@ -364,11 +364,15 @@ current vendor docs, not memory (AGENTS.md).*
   operating systems, and it is M7's milestone check rather than this task's.
   What was checked here: the shell compiles and its tests pass against the real
   crate, the settings panel and status-bar line render, and both halves report
-  `unconfigured` today because the key is genuinely absent. **The private repo
-  matters for this**: GitHub release assets need no authentication only on a
-  public repo, so before the first real release either the repo goes public or
-  the endpoint moves to a host Matt controls. It is one line in
-  `tauri.conf.json` either way — see the parking lot.
+  `unconfigured` while the key is absent, then report the new version, the notes
+  and a refusal to install an unsigned bundle once pointed at a throwaway
+  manifest.
+
+  **Where downloads live is settled (Matt, 2026-08-27): the repo is public**, so
+  `releases/latest/download/latest.json` is fetchable with no token and the
+  committed endpoint is the final one. This mattered because a private repo's
+  release assets need authentication, and the alternative — a credential in the
+  client — is not one: shipping a token in a desktop app is shipping the token.
 - ⬜ **T-702 · Windows signing + macOS notarization** — effort: **high**
   Needs certs/Apple developer account (Matt). Harden CSP for release while here
   (drop dev relaxations from `tauri.conf.json`).
@@ -462,14 +466,6 @@ Plasma 6 Wayland and Windows.*
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
-- **Where release downloads live.** The updater endpoint is this repo's
-  `releases/latest/download/latest.json`, and the repo is private — GitHub
-  release assets are only fetchable without a token on a public repo. So before
-  the first release either the repo (or its releases) goes public, or the
-  endpoint moves to a static host Matt runs. Anything that needs a credential in
-  the client is not an option; shipping a token in a desktop app is shipping the
-  token. One line in `client/src-tauri/tauri.conf.json` either way, but it has
-  to be decided before a tag is pushed.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
   member's). **Built that way in T-504** — the favicon is inlined as a `data:`
   URI so a reader's machine never touches the linked site either. Matt has not

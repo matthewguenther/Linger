@@ -1,8 +1,9 @@
 name: release
 
-# Tag-driven, and only tag-driven (T-701). This job builds on Windows and macOS,
-# which bill at 2x and 10x on a private repo, so it must never fire on a push or
-# a pull request. To ship:
+# Tag-driven, and only tag-driven (T-701). Not a cost rule — the repo is public,
+# so standard runners are free — but a correctness one: this job cuts a release
+# and uses the signing key, and neither belongs on a push or a pull request.
+# To ship:
 #
 #   1. bump the version in client/package.json, client/src-tauri/Cargo.toml and
 #      client/src-tauri/tauri.conf.json — all three, `scripts/version-check.sh`
