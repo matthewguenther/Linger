@@ -19,6 +19,17 @@ const SLATE_C: f64 = 0.02;
 pub const DARK_BG: &str = "#16181C";
 pub const LIGHT_BG: &str = "#F7F8F9";
 
+/// The same two surfaces after the post-sunset warmth shift (SPEC §4.7), which
+/// mirrors `[data-warmth="warm"]` in `client/src/styles/tokens.css`.
+///
+/// They are here for one reason: warmth changes what the palette is read
+/// against, so the contrast guarantee has to be checked against these too or it
+/// is only true until dusk. The shift keeps each token's OKLab lightness and
+/// rotates its hue to the amber side, which is exactly why the guarantee
+/// survives it — a temperature change, not a brightness change.
+pub const DARK_BG_WARM: &str = "#1A1714";
+pub const LIGHT_BG_WARM: &str = "#FBF7F2";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
@@ -273,7 +284,15 @@ mod tests {
     #[test]
     fn all_16_keys_hold_contrast_in_both_themes() {
         for color in &PALETTE {
-            for (theme, bg) in [(Theme::Dark, DARK_BG), (Theme::Light, LIGHT_BG)] {
+            // Both themes, and both of each theme's surfaces: the neutral one
+            // and the one after dusk (SPEC §4.7). A guarantee that lapses at
+            // sunset is not a guarantee.
+            for (theme, bg) in [
+                (Theme::Dark, DARK_BG),
+                (Theme::Dark, DARK_BG_WARM),
+                (Theme::Light, LIGHT_BG),
+                (Theme::Light, LIGHT_BG_WARM),
+            ] {
                 let hex = color.hex(theme);
                 let ratio = contrast_ratio(&hex, bg);
                 assert!(

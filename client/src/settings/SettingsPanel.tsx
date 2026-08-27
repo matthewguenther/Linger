@@ -17,6 +17,8 @@ import type { User } from "../generated/User";
 import { ApiError, PublicApi, type AuthedApi } from "../lib/api";
 import DensityPicker from "../lib/DensityPicker";
 import type { Density } from "../lib/density";
+import { THEME_PREFS, type ThemePref } from "../lib/theme";
+import StylePicker from "./StylePicker";
 import { saveDisplayName } from "../lib/gateway";
 import {
   displayNameReady,
@@ -39,6 +41,10 @@ export default function SettingsPanel({
   onDensityChange,
   normalize,
   onNormalizeChange,
+  theme,
+  onThemeChange,
+  warmth,
+  onWarmthChange,
   onSignOut,
   onReauthenticated,
   onClose,
@@ -51,6 +57,10 @@ export default function SettingsPanel({
   onDensityChange: (density: Density) => void;
   normalize: boolean;
   onNormalizeChange: (normalize: boolean) => void;
+  theme: ThemePref;
+  onThemeChange: (theme: ThemePref) => void;
+  warmth: boolean;
+  onWarmthChange: (warmth: boolean) => void;
   onSignOut: () => Promise<void>;
   onReauthenticated: (auth: AuthResponse) => Promise<void>;
   onClose: () => void;
@@ -81,6 +91,12 @@ export default function SettingsPanel({
       </header>
       <div className="settings-body">
         <NameSection api={api} user={user} />
+        <StylePicker
+          api={api}
+          user={user}
+          normalized={normalize}
+          dense={density !== "comfortable"}
+        />
         <PasswordSection
           api={api}
           username={user.username}
@@ -97,7 +113,42 @@ export default function SettingsPanel({
           </div>
         </section>
         <section className="settings-section">
-          <h3 className="panel-label">names</h3>
+          <h3 className="panel-label">theme</h3>
+          <p className="settings-lead">
+            Dark is the one this was designed in. <em>System</em> follows
+            whatever your desktop is set to and changes with it.
+          </p>
+          <div className="settings-density">
+            <div className="density" role="group" aria-label="theme">
+              {THEME_PREFS.map((pref) => (
+                <button
+                  key={pref}
+                  type="button"
+                  className="density-option meta"
+                  aria-pressed={pref === theme}
+                  onClick={() => onThemeChange(pref)}
+                >
+                  {pref}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="settings-lead settings-warmth-lead">
+            In the evening the background and the text go slightly warmer, the
+            way a room does when the lamps come on. It is a small shift and most
+            people never notice it on purpose.
+          </p>
+          <button
+            type="button"
+            className="settings-mini settings-toggle"
+            aria-pressed={warmth}
+            onClick={() => onWarmthChange(!warmth)}
+          >
+            {warmth ? "evening warmth on" : "evening warmth off"}
+          </button>
+        </section>
+        <section className="settings-section">
+          <h3 className="panel-label">other people's names</h3>
           <p className="settings-lead">
             Everyone picks how their own name is drawn — a face, a color or two,
             sometimes a shimmer. If you would rather read a quiet room, turn this
@@ -106,7 +157,7 @@ export default function SettingsPanel({
           </p>
           <button
             type="button"
-            className="settings-mini"
+            className="settings-mini settings-toggle"
             aria-pressed={normalize}
             onClick={() => onNormalizeChange(!normalize)}
           >

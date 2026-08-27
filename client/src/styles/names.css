@@ -166,3 +166,55 @@
 :root[data-normalize="true"] .name-color {
   color: inherit;
 }
+
+/*
+ * One name in the app draws as itself no matter what: the preview in the style
+ * picker. The reader's own settings — normalized names, a dense mode with
+ * effects off — would otherwise hide the very thing being chosen, and a picker
+ * that shows you the wrong answer is worse than no preview.
+ *
+ * These carry `:root` only to outrank the normalize block above them, which is
+ * the one thing they have to beat.
+ */
+:root .name.name-raw {
+  color: var(--person-name, var(--text-primary));
+  font-family: var(--person-font, var(--font-ui));
+  font-weight: var(--person-weight, 500);
+  font-style: var(--person-slant, normal);
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  :root .name.name-raw[data-name-fill="gradient"],
+  :root .name.name-raw[data-name-effect="shimmer"] {
+    background-image: var(--person-paint);
+    background-repeat: no-repeat;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+  :root .name.name-raw[data-name-effect="shimmer"] {
+    background-image:
+      linear-gradient(92deg, transparent 46%, var(--name-shimmer) 50%, transparent 54%),
+      var(--person-paint);
+    background-size:
+      300% 100%,
+      100% 100%;
+    animation: name-shimmer 4s linear infinite;
+  }
+
+  /* Reduced motion is not a reading preference, it is a physical one, so it is
+     the one thing the preview still obeys. */
+  @media (prefers-reduced-motion: reduce) {
+    :root .name.name-raw[data-name-effect="shimmer"] {
+      background-image: var(--person-paint);
+      background-size: 100% 100%;
+      animation: none;
+    }
+  }
+}
+
+:root .name.name-raw[data-name-effect="glow"] {
+  text-shadow: 0 0 7px var(--person-name, var(--text-primary));
+}

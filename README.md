@@ -349,7 +349,8 @@ deploy/                   Dockerfile, compose, Caddyfile
 docs/                     screenshots; docs/tasks/ archives closed milestones,
                           docs/decisions.md records settled questions
 scripts/                  check.sh (the whole local gate), lint-rules.sh,
-                          minio-test.sh (the S3 backend, against a real MinIO)
+                          minio-test.sh (the S3 backend, against a real MinIO),
+                          fetch-fonts.sh (re-vendors the twelve bundled faces)
 ```
 
 Read first, in order: [SPEC.md](SPEC.md) → [ARCHITECTURE.md](ARCHITECTURE.md) →
@@ -402,6 +403,13 @@ Things that surprise people the first time:
   property per color, per theme. That file is committed and covered by the same drift
   check. Never write a hex or an `oklch()` literal into the frontend: a color is a
   palette key everywhere else in the codebase.
+- **The fonts are vendored, not fetched.** The twelve faces (SPEC §5.7) are
+  downloaded, subset to Latin, converted to woff2 and committed under
+  `client/src/fonts/` by `scripts/fetch-fonts.sh`. You never need to run it to
+  build — run it only when a face is added to `linger-core::FONTS` or to pull an
+  upstream fix. **No CDN and no remote font URL, ever**: a remote face is a
+  fingerprinting vector and a dependency on somebody else's uptime. The whole set
+  is about 800 KB; `assets/fonts/README.md` has the details.
 - **Renaming a wire type leaves an orphan.** `ts-rs` writes files but never deletes them,
   so the old `.ts` file stays behind and the drift check won't catch it. Delete it by hand.
 - **`client/src-tauri` is not in the root cargo workspace.** It links against system
@@ -450,6 +458,15 @@ Things that surprise people the first time:
   person. The gradient angle is fixed at 92° and is written down exactly once, in that
   stylesheet. Effects are off in compact and IRC density, and shimmer is off under
   `prefers-reduced-motion`.
+- **Theme and warmth are attributes on `<html>`, nothing more**
+  (`client/src/lib/theme.ts`). Dark, light, or follow the system; and after
+  about 7pm local the background and text go roughly 200K warmer, which is one
+  block of tokens in `styles/tokens.css` and can be switched off. Every warm
+  value keeps its cool twin's OKLab *lightness* and only moves the hue, which is
+  what keeps the name palette's contrast guarantee true after dark — the CI
+  property test reads all 16 colors against the warm backgrounds too. Sunset is
+  approximated by the clock on purpose: knowing the real one means knowing where
+  you are, and this app does not ask.
 - **The host's controls are absent for everybody else, not greyed out**
   (`client/src/host/`). One panel over the stream column with four sections — rooms,
   invites, people, the server itself — reached from two small controls on the rail that
