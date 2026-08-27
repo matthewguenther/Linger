@@ -88,11 +88,21 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M4.5 — the shell's missing surfaces | 2026-08-25 | Host controls, invites, member settings, server list, remove + re-admit, password reset, live member announce | [m4-5.md](docs/tasks/m4-5.md) |
 | M5 — uploads, media, the grid | 2026-08-26 | Resumable uploads on local or S3, files served from their own origin, the media grid with stars and link cards, expiry + a storage ceiling, the status image | [m5.md](docs/tasks/m5.md) |
 | M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
+| M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see below | [m7.md](docs/tasks/m7.md) |
 
-**Still open from closed milestones — three human errands, all outstanding.
-The first real tag chips at the oldest of them**, since `release.yml` builds
-Linux and Windows installers and T-701's updater is already proven end to end
-against a throwaway manifest:
+**Still open from closed milestones — four human errands, all outstanding, and
+one tag knocks out most of them.** `release.yml` builds Linux and Windows
+installers, `image.yml` publishes the server, and T-701's updater is already
+proven end to end against a throwaway manifest:
+
+- **M7's own check** (`docs/tasks/m7.md`): *one auto-update, installed, on a
+  machine that did not build it.* Every M7 task is done and archived; this is
+  the part no test can do. Cut a tag, publish the draft release, install the
+  bundle somewhere else, then cut the next tag and watch that machine take the
+  update. **The first tag is also the first time `image.yml` builds arm64 and
+  the first time a `docker compose pull` has anything to pull** — worth a
+  manual run of that workflow from the Actions tab first, and remember the ghcr
+  package starts private and has to be made public by hand once.
 
 - The visual "a window opens" sign-off on Linux, Windows and macOS
   (T-002/T-003 in `docs/tasks/m0.md`). Was meant to close before M7. Installing
@@ -150,224 +160,99 @@ names painted from `--person-*` custom properties in `styles/names.css`, the
 style picker, theme + evening warmth as attributes on `<html>`, and the twelve
 faces vendored under `client/src/fonts/` — **never write a hex or `oklch()`
 literal into the frontend, and never add a remote font URL.**
-M7 adds the release path (see T-701 below): the signed updater behind two narrow
-Rust commands, `release.yml`, and the `version-check` / `signing-preflight`
-scripts. **Updates are signed; installers are not** — that is a decision, not a
-gap ([`docs/decisions.md`](docs/decisions.md)), and macOS is deliberately not
-built at all until T-705.
+M8 adds the export (T-801 below): `POST /export` and `GET /export/:job_id`,
+the archive written on a blocking thread and served from the media origin like
+any other object, and `repo::messages::batch_ascending` for walking a room
+forwards. **Do not rebuild it** — what is missing is only the button, T-802.
+M7 adds the release path (see [m7.md](docs/tasks/m7.md)): the signed updater
+behind two narrow Rust commands, `release.yml`, `image.yml` publishing the
+server to ghcr on a tag, the four-file version check and `signing-preflight`,
+and a shipped CSP that reaches the app's own server and nothing else — which is
+why **a server needs a name; a bare `IP:port` is unreachable from anything
+anybody installed**, and says so at startup. **Updates are signed; installers
+are not** — that is a decision, not a gap
+([`docs/decisions.md`](docs/decisions.md)), and macOS is deliberately not built
+at all until T-705.
 
 ---
 
-
-## M7 — packaging and updates
-
-*Milestone check, as written: a signed installer per OS; one auto-update ships
-end-to-end.*
-
-**Amended (Matt, 2026-08-27 — [`docs/decisions.md`](docs/decisions.md)): M7
-closes on Linux and Windows, unsigned.** Code signing on Windows and
-notarization on macOS are both blocked on paid certificates, not on work, and
-neither is obviously worth buying for a server you hand to a friend group. macOS
-does not ship at all rather than shipping unsigned — the move from an ad-hoc
-signature to a real one is the transition that breaks an app the updater has
-replaced in place, so an unsigned build now is not a step towards a signed one.
-The signing work is parked as T-705, on the backburner. What still has to
-happen for real: **one auto-update, installed, on a machine that did not build
-it.***
-
-- ✅ **T-701 · Updater + signing keys** — effort: **high** — landed 2026-08-27
-  Tauri updater; generate the signing key and **back it up offline before
-  anything ships** (losing it = no more updates, ARCHITECTURE §7). Release
-  workflow: tag → build 3-OS installers → publish manifest.
-
-  **Landing note.** The updater is wired end to end in code, and one step is
-  left that only Matt can do — see *the key* below.
-
-  **The WebView is granted nothing.** `capabilities/default.json` does not list
-  `updater:default`, so the page cannot call `plugin:updater|check` or
-  `|install`. It calls two of the app's own commands in
-  `client/src-tauri/src/updates.rs`, which is the same shape the gateway and the
-  keyring already use. A page that can start an installer is not a page with a
-  minimum permission set. The plugin still has to be *registered*, because that
-  is what parses `[plugins.updater]` into somewhere `app.updater()` can read it.
-
-  **A build with no key refuses every update, rather than taking an unsigned
-  one.** `pubkey` ships as `""` in `tauri.conf.json` until the key exists, and
-  `updates.rs` treats "no key or no endpoint" as its own answer —
-  `unconfigured`, which the settings panel renders as "this copy was not built
-  to update itself". Underneath that, the plugin's own `verify_signature` is
-  unconditional and has no bypass, so even a mistake here fails closed.
-
-  **The key exists (Matt, 2026-08-27).** `scripts/updater-key.sh` generated it
-  outside the repo at `~/.local/share/linger/updater.key`; it is password
-  protected (scrypt), it is backed up in two places, and its public half —
-  minisign key id `8CD4B2592EC1FDF8` — is committed in `tauri.conf.json`. That
-  key is now permanent: replacing it orphans every copy installed under it, so
-  the script refuses to overwrite one, and a future session must not "regenerate"
-  it to fix a problem.
-
-  **The secrets are checked, not assumed.** `release.yml`'s preflight runs
-  `scripts/signing-preflight.sh`, which signs a throwaway file with
-  `TAURI_SIGNING_PRIVATE_KEY` and then compares the key id in that signature to
-  the public key in `tauri.conf.json`. *Present* is not *correct*: a key that
-  signs fine but is not the mate of the committed one builds a green release,
-  uploads cleanly, and installs on nothing — the failure only shows up when
-  somebody tries to update. Running the workflow by hand from the Actions tab
-  does the preflight and stops, so the secrets can be proven without cutting a
-  release; only a tag builds bundles.
-
-  **Releases are draft-first.** A tag builds Linux, Windows and both macOS
-  architectures and opens a *draft* release carrying `latest.json`. Publishing
-  it is what makes installed copies see the update, and that stays a human's
-  click. The endpoint is this repo's `releases/latest/download/latest.json`,
-  which resolves only to published releases.
-
-  > **Corrected 2026-08-27:** the two macOS entries are commented out of
-  > `release.yml`, so a tag builds Linux and Windows only. Everything else in
-  > this note still holds. See [`docs/decisions.md`](docs/decisions.md) and
-  > T-705.
-
-  **One version number, three files** — `client/package.json`,
-  `client/src-tauri/Cargo.toml`, `client/src-tauri/tauri.conf.json`.
-  `scripts/version-check.sh` gates it, from `check.sh` and from CI's `rules`
-  job, and `release.yml` checks the tag against it before building anything.
-  This is the failure that looks like success: ship 0.2.0 under the old number
-  and every installed copy decides it is already current.
-
-  **Two things worth knowing.** Linux builds on `ubuntu-22.04`, not `latest` —
-  a bundle linked against a newer glibc will not start on an older
-  distribution, and the reverse is fine. And `createUpdaterArtifacts` is on in
-  the committed config, so a local `pnpm tauri build` now needs
-  `TAURI_SIGNING_PRIVATE_KEY` in the environment or it stops. `pnpm tauri dev`
-  is untouched, and nobody's normal loop runs `tauri build`.
-
-  **What has not been proven.** Nobody has installed a signed bundle and watched
-  it update itself — that needs the key, a published release, and three
-  operating systems, and it is M7's milestone check rather than this task's.
-  What was checked here: the shell compiles and its tests pass against the real
-  crate, the settings panel and status-bar line render, and both halves report
-  `unconfigured` while the key is absent, then report the new version, the notes
-  and a refusal to install an unsigned bundle once pointed at a throwaway
-  manifest.
-
-  **Where downloads live is settled (Matt, 2026-08-27): the repo is public**, so
-  `releases/latest/download/latest.json` is fetchable with no token and the
-  committed endpoint is the final one. This mattered because a private repo's
-  release assets need authentication, and the alternative — a credential in the
-  client — is not one: shipping a token in a desktop app is shipping the token.
-- ✅ **T-702 · Release CSP + the warning, said out loud** — effort: **low** — landed 2026-08-27
-
-  **Landing note.** The policy is two policies now, and the one that ships is
-  the strict one.
-
-  **`csp` and `devCsp`, picked at compile time.** Tauri has this built in, so
-  there is no second config file and no build-time swap: `devCsp` is used when
-  `is_dev()` — which is the `tauri/custom-protocol` feature the CLI adds for a
-  bundle and not for `pnpm tauri dev` — and `csp` otherwise. Dev keeps
-  `http://localhost:*` and `http://127.0.0.1:*` (and the `ws://` pair) on
-  `connect-src`, `img-src` and `media-src`. The shipped policy has none of them.
-  It fails safe: forget to pass something and you get the strict one.
-
-  **Said plainly, this means an installed copy only talks `https`.** That is
-  less of a change than it sounds — `connect-src` never allowed a bare `http:`,
-  so a plain-HTTP server on a LAN was already unreachable from a bundle, and
-  localhost was the last exception. The README now says so next to the compose
-  instructions, because "run the server on this machine and point the installed
-  app at `http://localhost:8080`" is a reasonable thing to try and it will not
-  work.
-
-  **The surprise: neither policy allowed Tauri's own IPC.** `invoke()` is a
-  `fetch` at `ipc://localhost`, or `http://ipc.localhost` on Windows, and
-  neither was in `connect-src`. It never showed up because **the CSP has never
-  actually been enforced anywhere yet**: with a `devUrl` the page is served by
-  Vite, which sends no policy and into which Tauri injects nothing, so the
-  configured CSP has only ever applied to a bundle, and nobody has built one.
-  A blocked IPC call does not fail loudly either — it drops onto a slower
-  `postMessage` fallback with a console warning. Both sources are allowed in
-  both policies now, which is what Tauri's own docs say to do.
-
-  **`style-src 'unsafe-inline'` stays**, and ARCHITECTURE §7 now says why rather
-  than claiming otherwise: the message list is virtualized, so a row's position
-  is a style attribute, and a name is painted from `--person-*` properties set
-  the same way. `script-src` is `'self'` and nothing else.
-
-  **`client/src-tauri/tests/csp.rs`** parses the config with Tauri's own `Config`
-  type — so a misspelled `devCsp` fails there instead of silently shipping no dev
-  policy — and asserts: no local address in the release policy except
-  `http://ipc.localhost`, `https:` still allowed on all three fetching
-  directives, IPC allowed in both, the local relaxations still present in dev,
-  and the two policies identical apart from local addresses.
-
-  **The SmartScreen half was already done** — it landed in the README with the
-  packaging decision earlier the same day, next to the download link, with what
-  the warning means and a pointer to `docs/decisions.md`. Left as it was.
-
-  **What is not proven.** "Still reaches its own server" is asserted about a JSON
-  file, not watched in an installed build, because building one needs the signing
-  key and a bundle nobody has installed yet. That is M7's milestone check, and it
-  is a person's job.
-- ✅ **T-703 · Server image publish** — effort: **low** — landed 2026-08-27
-
-  **Landing note.** `.github/workflows/image.yml` publishes the server to
-  `ghcr.io/matthewguenther/linger`, which is the name `deploy/compose.yaml`
-  already asked for. It is release.yml's shape on purpose: **only a tag
-  publishes.** A tag pushes `0.2.0`, `0.2` and `latest`; a manual run from the
-  Actions tab builds both architectures and pushes nothing; a pull request that
-  touches `deploy/`, `crates/`, `Cargo.toml` or `Cargo.lock` builds amd64 only
-  and pushes nothing, so a Dockerfile that stops working is caught before a
-  release rather than during one. Moving `latest` is what makes a host's
-  `docker compose pull` find a new server — nothing updates on its own, which
-  is the right default for somebody else's box.
-
-  **x86-64 and ARM64.** A friend-group server on a Raspberry Pi is a normal
-  thing to want, and without an arm64 manifest those hosts get "no matching
-  manifest" from `docker compose up`. arm64 is built under emulation and is
-  slow — the better part of an hour for a Rust release build — which is
-  affordable because only tags and manual runs do it. **Not yet proven:** no
-  arm64 image has been built. Run the workflow manually once before the first
-  tag. If emulation turns out to be the problem, the fix is a second job on a
-  native `ubuntu-24.04-arm` runner pushing by digest.
-
-  **The version number lives in four files now, not three.** The root
-  `Cargo.toml` joined the other three, because the server's `GET /health`
-  reports `CARGO_PKG_VERSION` and a tag now publishes an image under that same
-  number. An image tagged 0.2.0 whose `/health` says 0.1.0 is the same class of
-  lie T-701's check exists to prevent, so `scripts/version-check.sh` covers it.
-
-  **CI has ffmpeg now.** The video-poster and duration tests skip themselves
-  when ffmpeg is missing, and it was missing on the runner, so they have never
-  actually run anywhere. They run now. (The image has had ffmpeg since T-501;
-  this was only ever the runner.)
-
-  **One human step, once ever:** the first push creates the ghcr package as
-  *private*, and a private package means `docker compose up` fails with
-  `unauthorized` for everyone who is not Matt. It has to be set public by hand
-  in the package settings. No flag in the workflow can do it.
-
-  **Also fixed in passing:** `release.yml`'s release body said installers for
-  macOS were attached. They are not.
-
-*(T-705, signing and notarization, moved to the* **Backburner** *on 2026-08-27.
-It is blocked on two paid certificates and nothing in M7 waits on it, so it
-does not belong in the middle of the queue.)*
-
-**M7 has no open tasks left — only its check, which is a person's job.** Cut a
-tag, publish the draft release, install the bundle on a machine that did not
-build it, then publish the next tag and watch that machine take the update.
-Doing that also closes the Linux and Windows two thirds of the T-002/T-003
-sign-off, and pulling `ghcr.io/matthewguenther/linger` on a real box is the
-first half of M5's check.
 
 ## M8 — export
 
 *Milestone check: one archive contains every message and file, and it opens.*
 
-- ⬜ **T-801 · Full export** — effort: **medium**
-  SPEC §4.11, PROTOCOL §7: any member, 1/hour; background job → zip: per-room
-  markdown (readable layout: dividers, names, timestamps), `media/` tree,
-  `media.md` index. Job progress endpoint; download via the media origin.
-  *Accept:* export a seeded server, unzip, spot-check messages/media; second
-  request within the hour gets `RATE_LIMITED`.
+- ✅ **T-801 · Full export** — effort: **medium** — landed 2026-08-27
+
+  **Landing note.** `POST /export` writes a row, spawns a task and hands back an
+  id; `GET /export/:job_id` says how far along and, when there is one, where to
+  download it. The archive is served from `/objects/...` on the **media
+  origin** — the same host uploads come from — because the whole server in one
+  file has no more business being same-origin with the app than a photo does.
+  The origin split is tested, not assumed: on a named server the archive
+  answers on `cdn.` and 404s on the app's own name.
+
+  **What is in the zip**, under one top-level folder so unzipping it does not
+  scatter files across somebody's downloads: `rooms/<slug>.md` per room in the
+  order things were said, with a divider and a heading per day and every
+  message as `**HH:MM** — Display Name (@username)`; a reply quoting what it
+  answered, because a transcript where replies point at nothing is the least
+  readable kind there is; `media/` with every file
+  under its own name; `media.md` indexing who shared what, when and in which
+  room; and a `README.md` that says what the archive is and that it needs
+  nothing from this project to read. Times are UTC and the archive says so —
+  the server does not know what timezone a reader is in, and quietly writing
+  its own would be worse than naming the one it used.
+
+  **Three decisions worth knowing.**
+  *Deleted messages stay deleted.* A tombstone is skipped; an archive that
+  resurrects what somebody deleted would be a worse product.
+  *One archive per member.* Asking again deletes the previous one's bytes
+  first, so a member with a button cannot fill a host's disk with copies of
+  their own server. An old `url` stops working, and there is a test for that.
+  *Archives are not attachments.* They are not `attachments` rows, do not count
+  against `LINGER_POOL_BYTES`, and never appear in the media grid. Their keys
+  (`exports/<id>.zip`) cannot be mistaken for an attachment key by
+  `storage::key_owner`.
+
+  **The zip is written on a blocking thread.** `zip` is synchronous and an
+  archive is hundreds of megabytes; doing it on the reactor would stall every
+  other connection. Media entries are `Stored` rather than deflated — a JPEG is
+  already compressed, and running deflate over one spends the CPU of the whole
+  export to save a fraction of a percent.
+
+  **Uploaded filenames are somebody else's text**, so `archive_filename` is
+  also the zip-slip guard: no directories, no `..`, nothing that can climb out
+  of `media/` when an unzipper puts it back on a disk. Two people who both
+  shared `IMG_0001.jpg` both keep their name (` (2)`).
+
+  **Dates are hand-written rather than a dependency.** One format in one file
+  did not justify a date crate; `civil_date` is Hinnant's algorithm with tests
+  for the leap day, the 1900/2000 century rule and a pre-epoch date.
+
+  **What is not proven here.** The S3 path — an export on a bucket has to pull
+  every file back out through a presigned URL, which the local backend never
+  does — has a test in `tests/s3.rs`, and that file skips itself without a
+  bucket. It has only run in CI's `s3` job, never on this machine. And nobody
+  has exported a server with a year of real video in it; the tests use small
+  files.
+
+  **Also added:** `repo::messages::batch_ascending`. `page` is newest-first
+  because the stream reads that way, and its `after` still orders `DESC` — the
+  newest messages after a point rather than the next ones. An archive reads
+  forwards, so it gets its own query rather than a flag on that one.
+- ⬜ **T-802 · The export button** — effort: **low**
+  T-801 built the whole feature and no way for a person to reach it: nothing in
+  the client calls `POST /export`, so a member cannot ask for their archive
+  without curl. The wire types are generated and waiting
+  (`ExportStarted`, `ExportJob`, `ExportState`).
+  Settings, under a heading of its own: one control that starts an export,
+  the progress while it builds, and the finished archive as a download handed
+  to the system browser (`tauri-plugin-opener`, the way a link in a message is
+  — the WebView must not navigate itself to a zip). `RATE_LIMITED` says when to
+  come back; say that in words rather than showing an error.
+  *Accept:* click it in a running app, watch it finish, and open the file that
+  lands in Downloads. Then `docs/user-guide.md` loses the line saying there is
+  no button yet.
 
 ---
 

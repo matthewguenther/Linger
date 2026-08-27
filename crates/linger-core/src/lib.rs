@@ -14,7 +14,7 @@ pub mod media;
 pub mod palette;
 pub mod wire;
 
-pub use id::{AttachmentId, MessageId, RoomId, UploadId, UserId};
+pub use id::{AttachmentId, ExportId, MessageId, RoomId, UploadId, UserId};
 pub use palette::{Theme, PALETTE};
 
 /// The curated bundled font set (SPEC §5.7). `font_key` / `msg_font_key` on the wire

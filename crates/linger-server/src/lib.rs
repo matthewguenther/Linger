@@ -9,6 +9,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod expiry;
+pub mod export;
 pub mod gateway;
 pub mod links;
 pub mod media;

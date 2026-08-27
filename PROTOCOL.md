@@ -480,10 +480,22 @@ GET    /invites          → Invite[]
 POST   /invites          { expires_in_hours?, max_uses? }   → Invite
 DELETE /invites/:code                                       → 204
 
-POST /export             → { job_id }
-GET  /export/:job_id     → { state, progress, url? }        # any member, 1/hour
+POST /export             → { job_id }                        # any member, 1/hour
+GET  /export/:job_id     → { job_id, state, progress, url? } # the asker's own only
 POST /knock              { target_user_id }                 → 204   # V2
 ```
+
+**Export** (SPEC §4.11, T-801). `state` is `queued | running | complete |
+failed`; `progress` is `0.0`–`1.0`; `url` appears once `state` is `complete`
+and points at the **media origin**, the host uploads are served from, because
+an archive of the whole server has no more business being same-origin with the
+app than an upload does.
+
+Asking about somebody else's job is `NOT_FOUND`, not `FORBIDDEN` — which of the
+two it was is not the asker's business. A member has one archive at a time:
+starting a new export deletes the previous one's bytes, so an old `url` stops
+working. The rate limit is about the host's disk and CPU, not about permission;
+there is no host approval anywhere in this flow and there must never be one.
 
 ---
 

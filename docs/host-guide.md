@@ -203,6 +203,24 @@ To restore: stop everything, put the `data` folder back, start again.
 (If you moved files to a cloud bucket, `data/objects/` is empty and the bucket
 is the other half of your backup.)
 
+## Exports (and what they do to your disk)
+
+Any member can ask the server for a zip of everything on it — every message and
+every file. This is deliberate and you cannot turn it off: it is the promise
+that nobody is locked in, including when the person locking them in would be
+you.
+
+Two things keep it from being a problem. A member can only ask **once an hour**,
+and each member has **one** archive at a time — asking again deletes the
+previous one. So the most it can cost you is one extra copy of your server per
+member, and in practice far less.
+
+Those archives live alongside your uploaded files and are not counted in the
+storage figure members see. If disk space is tight, that is worth knowing.
+
+**An export is not your backup.** It is a readable copy for a person. Your
+backup is the `data` folder, above.
+
 ## Updating the server
 
 ```bash
