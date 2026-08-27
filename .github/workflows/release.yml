@@ -9,7 +9,8 @@ name: release
 #      client/src-tauri/tauri.conf.json — all three, `scripts/version-check.sh`
 #      says so if you miss one
 #   2. commit, then `git tag v0.2.0 && git push origin v0.2.0`
-#   3. this builds four bundles and opens a **draft** release with `latest.json`
+#   3. this builds Linux and Windows bundles and opens a **draft** release with
+#      `latest.json`
 #   4. read it, then publish it — publishing is what ships the update, and it is
 #      a human's click on purpose
 #
@@ -62,19 +63,11 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ${{ matrix.os }}
     strategy:
-      # One platform failing should not throw away three finished builds. The
-      # release is a draft either way, so a partial one is reviewable.
+      # One platform failing should not throw away the other's finished build.
+      # The release is a draft either way, so a partial one is reviewable.
       fail-fast: false
       matrix:
         include:
-          - label: macOS (Apple silicon)
-            os: macos-latest
-            rust-target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
-          - label: macOS (Intel)
-            os: macos-latest
-            rust-target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
           # 22.04 rather than latest: a bundle built against a newer glibc will
           # not start on an older distribution, and the reverse is fine.
           - label: Linux
@@ -85,6 +78,26 @@ jobs:
             os: windows-latest
             rust-target: ""
             args: ""
+          # macOS is deliberately absent (Matt, 2026-08-27 — docs/decisions.md).
+          # Notarization needs an Apple Developer Program membership, and until
+          # there is one, shipping an *unsigned* macOS bundle would be the worst
+          # of the three options: Gatekeeper on recent macOS sends the user into
+          # System Settings to click past "macOS cannot verify this app is free
+          # of malware", and the later move from an ad-hoc signature to a real
+          # Developer ID one is exactly the transition that breaks an app the
+          # updater has replaced in place. Shipping nothing orphans nobody.
+          #
+          # To turn it back on, uncomment these two and do T-705 in the same
+          # pass — an unsigned macOS build is not a step towards a signed one.
+          #
+          # - label: macOS (Apple silicon)
+          #   os: macos-latest
+          #   rust-target: aarch64-apple-darwin
+          #   args: --target aarch64-apple-darwin
+          # - label: macOS (Intel)
+          #   os: macos-latest
+          #   rust-target: x86_64-apple-darwin
+          #   args: --target x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 

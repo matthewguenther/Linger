@@ -61,7 +61,8 @@ works in every tool:
 | **low** | Any capable model at its default setting. Mechanical and tightly specified — a frontier model at max effort just burns money re-deriving what the task text already decides. |
 | **medium** | A frontier model at its normal setting. Real features with judgment in the details. |
 | **high** | A frontier model at a high-reasoning setting. Cross-cutting, but the architecture docs carry a lot of the load. |
-| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Currently T-702 (signing/notarization) and, on the backburner, T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
+| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Currently T-705 (signing/notarization, blocked on certificates) and, on the
+backburner, T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
 
 Running everything at maximum is not better — it is slower, pricier, and prone
 to overbuilding simple tasks. Match the effort to the label and escalate only if
@@ -89,15 +90,18 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
 
 **Still open from closed milestones — three human errands, all outstanding.
-The first real tag would retire two of them in one pass**, since `release.yml`
-builds installers for all three operating systems and T-701's updater is
-already proven end to end against a throwaway manifest:
+The first real tag chips at the oldest of them**, since `release.yml` builds
+Linux and Windows installers and T-701's updater is already proven end to end
+against a throwaway manifest:
 
 - The visual "a window opens" sign-off on Linux, Windows and macOS
   (T-002/T-003 in `docs/tasks/m0.md`). Was meant to close before M7. Installing
-  the bundles from a `v0.1.0` draft release closes it and exercises the release
-  path at the same time; they will carry an unknown-publisher warning until
-  T-702 lands, which is expected and not a reason to wait.
+  the bundles from a `v0.1.0` draft release closes **the Linux and Windows two
+  thirds** of it and exercises the release path at the same time; the Windows one
+  carries a SmartScreen warning, which is expected (see
+  [`docs/decisions.md`](docs/decisions.md)) and not a reason to wait. The macOS
+  third stays open, because v0.1.0 does not build a macOS bundle — it needs
+  somebody with a Mac and a `cargo tauri build` from a checkout.
 - **M5's milestone check itself** (`docs/tasks/m5.md`): a real 400 MB video,
   over a real network, from a server with real DNS for both names. Every piece
   of it is covered by tests, but nobody has clicked `+ file` in a running app —
@@ -148,16 +152,27 @@ faces vendored under `client/src/fonts/` — **never write a hex or `oklch()`
 literal into the frontend, and never add a remote font URL.**
 M7 adds the release path (see T-701 below): the signed updater behind two narrow
 Rust commands, `release.yml`, and the `version-check` / `signing-preflight`
-scripts.
+scripts. **Updates are signed; installers are not** — that is a decision, not a
+gap ([`docs/decisions.md`](docs/decisions.md)), and macOS is deliberately not
+built at all until T-705.
 
 ---
 
 
 ## M7 — packaging and updates
 
-*Milestone check: a signed installer per OS; one auto-update ships end-to-end.
-Budget the full estimate; notarization is a version-sensitive slog — follow
-current vendor docs, not memory (AGENTS.md).*
+*Milestone check, as written: a signed installer per OS; one auto-update ships
+end-to-end.*
+
+**Amended (Matt, 2026-08-27 — [`docs/decisions.md`](docs/decisions.md)): M7
+closes on Linux and Windows, unsigned.** Code signing on Windows and
+notarization on macOS are both blocked on paid certificates, not on work, and
+neither is obviously worth buying for a server you hand to a friend group. macOS
+does not ship at all rather than shipping unsigned — the move from an ad-hoc
+signature to a real one is the transition that breaks an app the updater has
+replaced in place, so an unsigned build now is not a step towards a signed one.
+The signing work is parked as T-705. What still has to happen for real: **one
+auto-update, installed, on a machine that did not build it.***
 
 - ✅ **T-701 · Updater + signing keys** — effort: **high** — landed 2026-08-27
   Tauri updater; generate the signing key and **back it up offline before
@@ -206,6 +221,11 @@ current vendor docs, not memory (AGENTS.md).*
   click. The endpoint is this repo's `releases/latest/download/latest.json`,
   which resolves only to published releases.
 
+  > **Corrected 2026-08-27:** the two macOS entries are commented out of
+  > `release.yml`, so a tag builds Linux and Windows only. Everything else in
+  > this note still holds. See [`docs/decisions.md`](docs/decisions.md) and
+  > T-705.
+
   **One version number, three files** — `client/package.json`,
   `client/src-tauri/Cargo.toml`, `client/src-tauri/tauri.conf.json`.
   `scripts/version-check.sh` gates it, from `check.sh` and from CI's `rules`
@@ -234,13 +254,39 @@ current vendor docs, not memory (AGENTS.md).*
   committed endpoint is the final one. This mattered because a private repo's
   release assets need authentication, and the alternative — a credential in the
   client — is not one: shipping a token in a desktop app is shipping the token.
-- ⬜ **T-702 · Windows signing + macOS notarization** — effort: **high**
-  Needs certs/Apple developer account (Matt). Harden CSP for release while here
-  (drop dev relaxations from `tauri.conf.json`).
+- ⬜ **T-702 · Release CSP + the warning, said out loud** — effort: **low**
+  What is left of the old T-702 once signing moved to T-705, and none of it is
+  blocked. Two things:
+  - **Harden the CSP for release.** `tauri.conf.json`'s `connect-src`,
+    `img-src` and `media-src` still allow `http://localhost:*` and
+    `http://127.0.0.1:*` so `pnpm dev` works. A shipped build has no business
+    talking to a random local port. Keep the dev relaxations for dev — a second
+    config the release build merges over the first, or a build-time swap — and
+    check the shipped app still reaches a real server.
+  - **Document the SmartScreen warning.** A Windows installer that is not
+    code-signed shows "Windows protected your PC" and hides *Run anyway* behind
+    *More info*. Say that in the README, next to the download, with what it
+    means and why it is there. A friend who hits it with no warning assumes the
+    download is broken, and the honest sentence costs nothing.
+  *Accept:* a release build cannot reach `http://localhost:*`, still reaches its
+  own server, and the README tells a Windows user what they will see.
 - ⬜ **T-703 · Server image publish** — effort: **low**
   ghcr.io workflow for `deploy/Dockerfile` (ffmpeg is already in it, T-501; the
   CI *runner* still needs it, or the video-poster test keeps skipping),
   version tags, compose points at it.
+- ⬜ **T-705 · Windows signing + macOS notarization** — effort: **treacherous**
+  **Blocked on money, not on effort** — a Windows OV certificate (a few hundred
+  a year) and an Apple Developer Program membership ($99/year). Do not start
+  without both; there is nothing to test against.
+  Windows: certificate into a repository secret, signing wired into the bundler,
+  the workflow refusing to publish an unsigned installer. macOS: Developer ID
+  signing plus `notarytool` and a stapled ticket, then uncomment the two macOS
+  entries in `release.yml` — **in the same pass, never before**. Follow current
+  vendor docs, not memory; this is the version-sensitive slog AGENTS.md warns
+  about.
+  *Accept:* a downloaded installer raises no warning on either OS, and a macOS
+  copy installed from it takes an auto-update without being killed for a
+  signature mismatch.
 
 ## M8 — export
 
