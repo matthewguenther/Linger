@@ -41,6 +41,14 @@ import { storageDetail, storageLine } from "./media/media";
 import { useNow } from "./lib/clock";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
 import { applyNormalize, loadNormalize } from "./lib/normalize";
+import {
+  applyTheme,
+  applyWarmth,
+  loadTheme,
+  loadWarmth,
+  type ThemePref,
+  watchSystemTheme,
+} from "./lib/theme";
 import SettingsPanel from "./settings/SettingsPanel";
 import { noRoomsBody, noRoomsRail } from "./settings/copy";
 import {
@@ -73,6 +81,9 @@ import "./app.css";
  * on purpose: nothing here is urgent, and it is one small GET per server.
  */
 const INFO_REFRESH_MS = 120_000;
+
+/** How often the frame re-asks whether the sun has gone down (SPEC §4.7). */
+const WARMTH_TICK_MS = 120_000;
 
 export default function App() {
   const sessions = useSessions();
@@ -196,6 +207,13 @@ function Console({
   // name styling. It is one attribute on `<html>`, so it lives beside density
   // rather than anywhere near the components that draw a name.
   const [normalize, setNormalize] = useState<boolean>(loadNormalize);
+  // Theme and the post-sunset warmth (SPEC §4.7, §5.3). Both are the reader's
+  // own and both are one attribute on `<html>`, so they sit here with density.
+  const [theme, setTheme] = useState<ThemePref>(loadTheme);
+  const [warmth, setWarmth] = useState<boolean>(loadWarmth);
+  // Slow on purpose: this is the clock that lets dusk arrive without a reload,
+  // and a 200K tint does not need to be punctual to the second.
+  const clock = useNow(WARMTH_TICK_MS);
   // Which host surface is open over the stream, if any (T-410).
   const [hostSection, setHostSection] = useState<HostSection | null>(null);
   // The member's own settings (T-411). Mutually exclusive with the host panel:
@@ -264,6 +282,19 @@ function Console({
   useEffect(() => {
     applyNormalize(normalize);
   }, [normalize]);
+
+  // Re-applied when the OS changes its mind too, which is the whole of what
+  // the `system` preference means.
+  useEffect(() => {
+    applyTheme(theme);
+    return watchSystemTheme(() => applyTheme(theme));
+  }, [theme]);
+
+  // The slow clock is what makes dusk arrive without a reload. It ticks every
+  // couple of minutes, which is as precise as a 200K tint needs to be.
+  useEffect(() => {
+    applyWarmth(warmth, new Date(clock));
+  }, [warmth, clock]);
 
   // One watcher for the window, however many servers there are. The per-server
   // records live inside it and are added and dropped by `ServerLink`.
@@ -486,6 +517,10 @@ function Console({
           onDensityChange={setDensity}
           normalize={normalize}
           onNormalizeChange={setNormalize}
+          theme={theme}
+          onThemeChange={setTheme}
+          warmth={warmth}
+          onWarmthChange={setWarmth}
           onSignOut={() => onSignOut(active.baseUrl)}
           onReauthenticated={(auth) => onAddServer(api.baseUrl, auth)}
           onClose={() => setSettingsOpen(false)}

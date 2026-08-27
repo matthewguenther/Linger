@@ -31,6 +31,29 @@ export const FONT_KEYS = [
 
 export type FontKey = (typeof FONT_KEYS)[number];
 
+/**
+ * What each face is called when a person is choosing one.
+ *
+ * A label and not a derivation: "ibm-plex-sans" does not title-case into "IBM
+ * Plex Sans", and a picker that offers you "Ibm Plex Sans" looks like nobody
+ * checked. Same category as a reaction key's glyph — the key is the contract,
+ * the label is ours.
+ */
+export const FONT_LABELS: Record<FontKey, string> = {
+  "geist-sans": "Geist Sans",
+  "geist-mono": "Geist Mono",
+  "ibm-plex-sans": "IBM Plex Sans",
+  "ibm-plex-mono": "IBM Plex Mono",
+  "jetbrains-mono": "JetBrains Mono",
+  inter: "Inter",
+  "space-grotesk": "Space Grotesk",
+  "commit-mono": "Commit Mono",
+  newsreader: "Newsreader",
+  "instrument-serif": "Instrument Serif",
+  "departure-mono": "Departure Mono",
+  silkscreen: "Silkscreen",
+};
+
 export function isFontKey(value: string): value is FontKey {
   return FONT_KEYS.some((key) => key === value);
 }

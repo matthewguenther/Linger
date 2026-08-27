@@ -1158,6 +1158,18 @@ export async function saveDisplayName(api: AuthedApi, request: UpdateMeRequest):
   return user;
 }
 
+/**
+ * Save how your name is drawn (T-602). Same fold again, and it matters more
+ * here than anywhere: the picker's preview and every name in the stream read
+ * the same store, so folding the answer in is what makes your own name change
+ * under you the moment it is saved.
+ */
+export async function saveStyle(api: AuthedApi, request: UpdateMeRequest): Promise<User> {
+  const user = await api.updateMe(request);
+  foldUser(api, user);
+  return user;
+}
+
 /** The status bar line (SPEC §5.6): protocol text, never a spinner. */
 export function statusText(status: GatewayStatus): string {
   switch (status.kind) {

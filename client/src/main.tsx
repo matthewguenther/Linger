@@ -1,5 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+// The twelve bundled faces, subset and committed by `scripts/fetch-fonts.sh`.
+// First, so every family is declared before anything asks for one.
+import "./fonts/fonts.css";
 import "./styles/tokens.css";
 // The 16 palette colors, generated from linger-core::PALETTE by
 // `cargo test -p linger-core`. It comes after the tokens so `[data-theme]`

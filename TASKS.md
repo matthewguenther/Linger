@@ -135,6 +135,13 @@ an SSRF guard, the expiry sweeper, and the status image.
 
 *Milestone check: a gradient name from two palette keys, contrast verifiably ≥4.5:1 in both themes (the CI property test already guards the values).*
 
+**The check is met (2026-08-27).** A gradient name from `rose` and `amber` was
+picked in the running client against a running server, saved, and came back on
+the roster — screenshots and the engine's own computed styles are in the T-602
+note. Contrast is guarded by the CI property test, which since T-603 reads all
+16 keys against four backgrounds: both themes, cool and after dusk. Ready for
+the architect to archive.
+
 - ✅ **T-601 · Name rendering engine** — effort: **medium** — landed 2026-08-27
   Build step: emit `palette.generated.css` from `linger-core::palette::css_variables`
   (single source of truth; oklch or hex per T-002's verdict). Render styled names
@@ -189,20 +196,106 @@ an SSRF guard, the expiry sweeper, and the status image.
   falls through to its generic. A name in Silkscreen looks like a name in the UI
   face today. That is the expected state, not a bug.
 
-  **Not seen by a person in the running app.** Same gap M5 left: the checks
-  above are computed styles read out of the engine and two offscreen
-  screenshots, which is a real check but not somebody clicking through a signed-in
-  client. T-602 puts the picker in front of a human and will close it.
-- ⬜ **T-602 · Style picker + settings** — effort: **medium**
+  **Not seen by a person in the running app** — *closed by T-602*, which drove
+  the real client against a real server and watched a saved gradient land on the
+  roster. What is still unseen is the **message stream**: the gateway is a Tauri
+  IPC channel, so a browser gets no rooms and no messages, and the stream's names
+  and the message-font override have only ever been checked as computed styles.
+  Every one of them goes through the same `nameProps` and the same `.msg-body`
+  rule as the surfaces that were verified live.
+- ✅ **T-602 · Style picker + settings** — effort: **medium** — landed 2026-08-27
   Two-click named-color picker (mIRC energy, modern craft), font/weight/italic/
   effect, live preview, msg-font override. Server already validates keys.
-- ⬜ **T-603 · Themes + time-of-day warmth** — effort: **low**
+
+  **Landing note.** `settings/StylePicker.tsx` over `settings/style.ts`, in the
+  `you` panel under *how your name looks*. Everything is drawn as itself: each
+  face is labelled in its own face, each weight shown at that weight, each
+  swatch is the color, and the preview is your display name through the same
+  `nameProps` the stream uses — so there is one rendering path, not two that can
+  disagree. A gradient is the same sixteen swatches a second time, labelled
+  `from` and `to`; no hidden "which one am I editing" mode, because the promise
+  is two clicks and a mode you have to discover is a third.
+
+  `style.ts` holds the part that can be wrong without looking wrong — draft ⇄
+  wire, and `isDirty`, which compares through the wire shape so changing the
+  second color of a *solid* fill correctly leaves the save button down.
+
+  One deliberate exception in the CSS: the preview carries `name-raw`, which
+  exempts it from the reader's own normalize and density settings. A preview
+  that obeys "normalize everyone" shows you a flat name while you are picking a
+  gradient. The panel says so in a line under the preview rather than silently
+  lying.
+
+  **Driven live, in the real engine.** `pnpm dev` in a plain browser is a
+  supported way to work on the UI (`lib/ipc.ts`), so this was checked by loading
+  the actual client off the actual Vite server against a real `linger-server` in
+  WebKitGTK 2.52.3 — first-run setup, sign in, pick `rose`→`amber` + Newsreader
+  + 700 + shimmer, save, and watch the name come back styled on the roster.
+  Theme, warmth and normalize were flipped the same way: light reports
+  `#F7F8F9`, warm-light `#FBF7F2` and warm-dark `#1A1714`, matching the Rust
+  constants exactly; normalize flattens the roster and leaves the preview alone.
+
+  **What that could not reach:** the gateway is a Tauri IPC channel, so a browser
+  has no rooms and no messages. The stream's names and the message-font override
+  are still computed-style checks only. They go through the same `nameProps` and
+  the same `.msg-body` rule as everything that was verified live, but nobody has
+  watched a styled name go past in a room.
+
+- ✅ **T-603 · Themes + time-of-day warmth** — effort: **low** — landed 2026-08-27
   Light theme tokens exist; add the ~200K post-sunset warmth shift (one variable
   swap, user-disableable) and theme switching.
-- ⬜ **T-604 · Font pipeline** — effort: **low**
+
+  **Landing note.** `lib/theme.ts` plus one block of tokens. Theme is dark /
+  light / system, and `system` resolves through `prefers-color-scheme` and
+  re-resolves when the OS changes its mind, so `data-theme` is always explicit
+  and the CSS never had to learn a third state.
+
+  **The warmth shift keeps lightness and moves only hue.** Every warm token is
+  its cool twin's OKLab lightness with the hue rotated to the amber side. That
+  is what makes it a temperature change instead of a dimming — and it is the
+  reason the 16-color palette is still safe after dark. `linger-core::palette`
+  now carries `DARK_BG_WARM` / `LIGHT_BG_WARM` and the CI property test reads
+  all 16 keys against **four** backgrounds instead of two. Measured: the worst
+  case moves from 7.79 to 7.83 (dark) and 4.89 to 4.87 (light). A contrast
+  guarantee that lapsed at dusk would not be one.
+
+  **Sunset is approximated by the clock, and that is a decision.** Knowing real
+  sunset means knowing latitude and longitude. A chat client that asks for your
+  coordinates to tint its background has made a bad trade, so warmth is on from
+  19:00 to 07:00 local. At high latitudes in June that is wrong by a couple of
+  hours; the whole effect is a 200K tint nobody is meant to consciously notice,
+  which is why that is acceptable and a location permission is not. If Matt
+  wants real sunset later, it needs a location and that is his call.
+
+- ✅ **T-604 · Font pipeline** — effort: **low** — landed 2026-08-27
   Script: fetch the 12 faces (`assets/fonts/README.md` table), subset
   (latin/latin-ext, 400/500/700 + italics) to woff2, keep OFL texts,
   `@font-face` wiring. No CDN.
+
+  **Landing note.** `scripts/fetch-fonts.sh` → `scripts/fetch_fonts.py`. Output
+  is committed: 30 faces, **about 800 KB total** in `client/src/fonts/`, plus
+  generated `@font-face` rules and the OFL texts in `assets/fonts/`. Nobody
+  needs to run the script to build — run it when a face is added to
+  `linger-core::FONTS` or to pull an upstream fix. The script refuses to run if
+  its manifest and `linger-core::FONTS` disagree.
+
+  Things worth knowing:
+  - **Ten of the twelve come from `google/fonts`.** It is where those projects
+    publish, its paths are stable, and it carries the OFL text next to the
+    binary. Commit Mono and Departure Mono come from their own repos. The Source
+    column in `assets/fonts/README.md` is each face's *home*, not the download
+    URL — those live in the manifest.
+  - **Variable fonts where they exist.** Seven faces publish one, so one file
+    covers 400–700 and the rule declares `font-weight: 400 700`. Two-axis fonts
+    (Plex Sans, Inter, Newsreader) get the second axis pinned before subsetting,
+    which is most of the size saving.
+  - **Nothing is faked.** Instrument Serif has one weight, Departure Mono has
+    one and no italic, Silkscreen has no italic. Those ship as they are drawn
+    and the browser synthesises if somebody asks for what does not exist.
+  - **Debian and Ubuntu ship python3 without `ensurepip`**, so the plain
+    `python3 -m venv` fails on exactly the machines this project is developed
+    on. The script falls back to `--without-pip` and bootstraps pip. The venv
+    lives under `target/` and nothing is installed system-wide.
 
 ## M7 — packaging and updates
 

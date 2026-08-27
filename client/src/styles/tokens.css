@@ -95,6 +95,49 @@
   --name-shimmer: rgb(0 0 0 / 0.34);
 }
 
+/*
+ * Time-of-day warmth (SPEC §4.7, T-603). After local sunset the background and
+ * text colors go about 200K warmer. Subtle enough that most people never
+ * consciously notice, and switchable off.
+ *
+ * It is one variable swap — this block and nothing else. Every value keeps its
+ * cool twin's OKLab *lightness* exactly and rotates the hue from the blue side
+ * to the amber side, so this is a temperature change and not a dimming. That is
+ * also what keeps the 16-color name palette safe after dark: contrast is a
+ * function of lightness, and the lightness did not move.
+ * `linger-core::palette::{DARK_BG_WARM, LIGHT_BG_WARM}` mirror the two
+ * surface-0 values below, and the CI property test reads the palette against
+ * them — a contrast guarantee that lapsed at dusk would not be one.
+ *
+ * The accent does not warm. It has exactly four jobs (SPEC §5.3) and being the
+ * one cool thing left in the room after sunset is not a problem to fix. Neither
+ * do the `--name-*` colors: they are the expressive element, and they are the
+ * thing the guarantee is about.
+ */
+[data-warmth="warm"] {
+  --surface-0: #1a1714;
+  --surface-1: #201c17;
+  --surface-2: #29241e;
+  --hairline: #322d26;
+  --hairline-strong: #413a31;
+  --text-primary: #eae6e1;
+  --text-secondary: #999085;
+  --text-muted: #6a6156;
+  --text-faint: #584f45;
+}
+
+[data-theme="light"][data-warmth="warm"] {
+  --surface-0: #fbf7f2;
+  --surface-1: #fffef9;
+  --surface-2: #fffef9;
+  --hairline: #e8e4df;
+  --hairline-strong: #d7d2cb;
+  --text-primary: #1a1714;
+  --text-secondary: #6a6156;
+  --text-muted: #999085;
+  --text-faint: #b4aca3;
+}
+
 /* Density modes (SPEC §5.6). IRC mode's mono body is the one sanctioned
    exception to "mono is metadata-only", and it stops at the body: the rail,
    the roster and the composer stay in the UI face. */
