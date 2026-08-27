@@ -325,8 +325,10 @@
   padding: 4px 0;
 }
 
+/* Weight, face and color come from `.name` (styles/names.css) — this is a
+   person, drawn as themselves, the same as anywhere else in the app. */
 .host-person-name {
-  font-weight: 500;
+  min-width: 0;
 }
 
 .host-person-username {

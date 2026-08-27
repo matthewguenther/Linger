@@ -65,7 +65,10 @@
 .msg-body {
   border-left: 3px solid var(--person-rule);
   padding-left: 11px;
-  font-family: var(--font-body);
+  /* The author's optional message-font override (SPEC §4.5) — the only message
+     styling that exists. No color, no size, no background: the name carries the
+     identity and the body stays legible. */
+  font-family: var(--person-msg-font, var(--font-body));
   font-size: var(--text-body-size);
   line-height: var(--text-body-leading);
   overflow-wrap: anywhere;
@@ -195,7 +198,11 @@
  * mIRC had, then the text. No grouping, no aging, no effects (SPEC §5.6).
  * The gutter is fixed-width for free — mono type and a padded hour.
  */
+/* IRC mode defines its own body face — 12.5px mono, one line per message
+   (SPEC §5.6) — so an author's font override does not apply here. The mode is
+   uniform on purpose; that is the whole of what it is for. */
 [data-density="irc"] .msg-body {
+  font-family: var(--font-body);
   display: flex;
   gap: 8px;
   border-left: 0;
@@ -207,8 +214,13 @@
   flex: none;
 }
 
+/* The aligned nick column mIRC had. It is measured in `ch`, so it only lines
+   up if every name is in the same fixed-width face — which is why this is the
+   one surface that overrides the person's own font. Their color, weight and
+   slant still come through; only the metric is the room's. */
 [data-density="irc"] .irc-name {
   flex: none;
+  font-family: var(--font-mono);
   width: 12ch;
   text-align: right;
   color: var(--person-name);

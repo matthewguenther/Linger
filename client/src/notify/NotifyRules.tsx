@@ -19,6 +19,7 @@ import type { Room } from "../generated/Room";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { setNotifyRule, useGateway } from "../lib/gateway";
+import { nameProps } from "../lib/names";
 import "./notify.css";
 
 export default function NotifyRules({ api, rooms }: { api: AuthedApi; rooms: Room[] }) {
@@ -99,7 +100,7 @@ function PersonRules({
         aria-expanded={open}
         onClick={onToggleOpen}
       >
-        <span>{person.display_name}</span>
+        <span {...nameProps(person)}>{person.display_name}</span>
         <span className="notify-summary meta">{summary}</span>
       </button>
 

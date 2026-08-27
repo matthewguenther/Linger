@@ -350,7 +350,7 @@ function Tile({
         </span>
         <span className="media-name">{itemLabel(item)}</span>
         <span className="media-foot meta">
-          <span className="media-who" style={personStyle(who)}>
+          <span className="media-who name-color" style={personStyle(who)}>
             {name}
           </span>
           {room === undefined ? null : <span>#{room}</span>}

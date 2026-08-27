@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 
 import type { PresenceState } from "../generated/PresenceState";
 import type { User } from "../generated/User";
-import { nameStyle, personStyle } from "../lib/names";
+import { nameProps, personStyle } from "../lib/names";
 import { stateWord } from "../roster/roster";
 import StatusCard from "./StatusCard";
 import { awayMessageOf, isBlank } from "./status";
@@ -48,11 +48,7 @@ export default function PersonName({
 
   // Nobody to show. A button that opens an empty card is worse than plain text.
   if (!user) {
-    return (
-      <span className={className} style={nameStyle(user)}>
-        {name}
-      </span>
-    );
+    return <span {...nameProps(user, className)}>{name}</span>;
   }
 
   return (
@@ -60,8 +56,7 @@ export default function PersonName({
       <button
         ref={anchor}
         type="button"
-        className={`${className} person-link`}
-        style={nameStyle(user)}
+        {...nameProps(user, `${className} person-link`)}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((held) => !held)}
@@ -150,9 +145,7 @@ function Popover({
     >
       <p className="popover-head">
         <span className="person-dot" data-state={state} aria-hidden="true" />
-        <span className="person-name" style={nameStyle(user)}>
-          {user.display_name}
-        </span>
+        <span {...nameProps(user, "person-name")}>{user.display_name}</span>
         <span className="popover-username meta">@{user.username}</span>
       </p>
       <p className="popover-state meta">{stateWord(state)}</p>

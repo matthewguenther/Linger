@@ -1,9 +1,10 @@
 /**
  * The member's settings (T-411).
  *
- * Display name, password, density, sign out. One panel over the stream, the
- * same way the host's controls sit over it: no modal stack, and the roster
- * stays visible so you can see your name change on the card that is yours.
+ * Display name, password, density, whether other people's name styling is drawn
+ * at all, sign out. One panel over the stream, the same way the host's controls
+ * sit over it: no modal stack, and the roster stays visible so you can see your
+ * name change on the card that is yours.
  *
  * Username is on this screen because people look for it next to the display
  * name, but it is not a field you can edit — PROTOCOL §2, usernames are
@@ -36,6 +37,8 @@ export default function SettingsPanel({
   user,
   density,
   onDensityChange,
+  normalize,
+  onNormalizeChange,
   onSignOut,
   onReauthenticated,
   onClose,
@@ -46,6 +49,8 @@ export default function SettingsPanel({
   user: User;
   density: Density;
   onDensityChange: (density: Density) => void;
+  normalize: boolean;
+  onNormalizeChange: (normalize: boolean) => void;
   onSignOut: () => Promise<void>;
   onReauthenticated: (auth: AuthResponse) => Promise<void>;
   onClose: () => void;
@@ -90,6 +95,23 @@ export default function SettingsPanel({
           <div className="settings-density">
             <DensityPicker density={density} onChange={onDensityChange} />
           </div>
+        </section>
+        <section className="settings-section">
+          <h3 className="panel-label">names</h3>
+          <p className="settings-lead">
+            Everyone picks how their own name is drawn — a face, a color or two,
+            sometimes a shimmer. If you would rather read a quiet room, turn this
+            on and every name, including the fonts people set for their messages,
+            comes out in your default style.
+          </p>
+          <button
+            type="button"
+            className="settings-mini"
+            aria-pressed={normalize}
+            onClick={() => onNormalizeChange(!normalize)}
+          >
+            {normalize ? "names normalized" : "normalize everyone"}
+          </button>
         </section>
         <section className="settings-section">
           <h3 className="panel-label">this computer</h3>

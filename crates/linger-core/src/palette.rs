@@ -121,15 +121,76 @@ impl PaletteColor {
 }
 
 /// CSS custom properties for every palette entry in one theme, e.g.
-/// `--name-azure: #8FB3FF;`. M6 wires this into the client build so the palette
-/// is defined exactly once, here.
+/// `--name-azure: oklch(0.76 0.13 255);`. This is what the client build emits,
+/// so the palette is defined exactly once — here.
+///
+/// The values are `oklch()` literals rather than the hex fallbacks because T-002
+/// answered that question against a real engine: WebKitGTK 2.52.3 rendered all
+/// 16 keys x 2 themes byte-identically to [`PaletteColor::hex`]. Hex would also
+/// have been safe, but it is clipped to sRGB, and a custom property cannot carry
+/// a fallback declaration the way a normal property can — an unparsable value in
+/// `--name-azure` is not dropped at parse time, it fails later at substitution.
+/// So there is exactly one value per key and it is the wider-gamut one.
 #[must_use]
 pub fn css_variables(theme: Theme) -> String {
     PALETTE
         .iter()
-        .map(|p| format!("--name-{}: {};", p.key, p.hex(theme)))
+        .map(|p| format!("--name-{}: {};", p.key, p.css_oklch(theme)))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The whole generated stylesheet: both themes, every key, one file.
+///
+/// The client imports the result as `palette.generated.css`. Dark is primary and
+/// sits on `:root`; light overrides it under `[data-theme="light"]`, which is the
+/// same shape `client/src/styles/tokens.css` uses for every other themed value.
+#[must_use]
+pub fn stylesheet() -> String {
+    const HEADER: &str = r#"/*
+ * The 16-color name palette (SPEC §5.4). Generated — do not edit.
+ *
+ * Source of truth: `linger-core::palette::PALETTE`. Rewritten by
+ * `cargo test -p linger-core`, committed, and checked for drift in CI alongside
+ * the TypeScript bindings. Editing this file by hand is a defect: the next test
+ * run throws the edit away.
+ *
+ * Colors are palette *keys* everywhere else in this codebase (AGENTS rule 12).
+ * This file is the one place a key becomes a color, and these values are the
+ * only reason `var(--name-azure)` draws anything.
+ */"#;
+
+    fn block(selector: &str, theme: Theme) -> String {
+        let body = css_variables(theme)
+            .lines()
+            .map(|line| format!("  {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{selector} {{\n{body}\n}}\n")
+    }
+
+    format!(
+        "{HEADER}\n\n{}\n{}",
+        block(":root", Theme::Dark),
+        block("[data-theme=\"light\"]", Theme::Light),
+    )
+}
+
+/// Where the generated stylesheet is written, next to the ts-rs bindings.
+///
+/// `TS_RS_EXPORT_DIR` is set in `.cargo/config.toml` and is the directory CI's
+/// drift check watches, so pointing at it means the palette gets that check for
+/// free rather than needing a second one.
+#[cfg(test)]
+fn generated_dir() -> std::path::PathBuf {
+    match std::env::var("TS_RS_EXPORT_DIR") {
+        Ok(dir) => std::path::PathBuf::from(dir),
+        // A toolchain invoked without the workspace config still lands in the
+        // right place rather than writing the file somewhere nobody looks.
+        Err(_) => {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../client/src/generated")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +311,42 @@ mod tests {
     fn css_variables_emit_all_keys() {
         let css = css_variables(Theme::Dark);
         assert_eq!(css.lines().count(), 16);
-        assert!(css.contains("--name-azure: #"));
+        assert!(css.contains("--name-azure: oklch(0.76 0.13 255);"));
+        assert!(css.contains("--name-slate: oklch(0.76 0.02 250);"));
+        // Light mirrors the lightness rather than repeating it (SPEC §5.4).
+        assert!(css_variables(Theme::Light).contains("--name-azure: oklch(0.5 0.14 255);"));
+        // A hex literal in this file would mean somebody re-introduced the
+        // sRGB-clipped values as the shipped ones. `hex()` stays, for contrast.
+        assert!(!css.contains('#'));
+    }
+
+    #[test]
+    fn stylesheet_carries_both_themes() {
+        let css = stylesheet();
+        assert!(css.contains(":root {"));
+        assert!(css.contains("[data-theme=\"light\"] {"));
+        for color in &PALETTE {
+            let count = css.matches(&format!("--name-{}:", color.key)).count();
+            assert_eq!(count, 2, "{} is not defined in both themes", color.key);
+        }
+    }
+
+    /// Writing a source file from a test is the same trick ts-rs plays next
+    /// door, and for the same reason: `cargo test --workspace` is what everyone
+    /// already runs, and CI's `git diff --exit-code client/src/generated` then
+    /// fails the moment a palette change lands without its stylesheet. The
+    /// alternative — a build script, or a step people have to remember — is a
+    /// palette that silently drifts from the one place it is defined.
+    #[test]
+    fn emit_palette_stylesheet() {
+        let dir = generated_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("palette.generated.css");
+        let css = stylesheet();
+        // Only write when it actually changed: an unconditional write churns
+        // the file's mtime on every test run and makes watchers rebuild.
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(css.as_str()) {
+            std::fs::write(&path, css).unwrap();
+        }
     }
 }

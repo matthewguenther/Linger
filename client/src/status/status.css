@@ -118,12 +118,16 @@
 /* The name keeps the type it always had; only the affordance is new. A button
    reset rather than a restyle, so nothing about the stream's texture changes
    until the pointer is actually over a name. */
+/* A name that is also a button. The reset stops at the box: the face, the
+   weight, the slant and the color belong to the person and come from `.name`
+   in `styles/names.css`, so `font:` and `color:` are deliberately not reset
+   here — doing so would quietly flatten every styled name in the stream. */
 .person-link {
   background: none;
   border: 0;
   padding: 0;
-  font: inherit;
-  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
   cursor: pointer;
   text-align: left;
 }

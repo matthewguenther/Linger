@@ -135,12 +135,64 @@ an SSRF guard, the expiry sweeper, and the status image.
 
 *Milestone check: a gradient name from two palette keys, contrast verifiably ≥4.5:1 in both themes (the CI property test already guards the values).*
 
-- ⬜ **T-601 · Name rendering engine** — effort: **medium**
+- ✅ **T-601 · Name rendering engine** — effort: **medium** — landed 2026-08-27
   Build step: emit `palette.generated.css` from `linger-core::palette::css_variables`
   (single source of truth; oklch or hex per T-002's verdict). Render styled names
   everywhere names appear; gradient fixed 92°; shimmer (4s linear)/glow honor
   `prefers-reduced-motion`, disabled in compact + IRC; "normalize everyone"
   toggle flattens names *and* message fonts.
+
+  **Landing note.** `css_variables` now emits `oklch()` rather than hex, per
+  T-002, and a new `palette::stylesheet()` wraps both themes into one file. A
+  unit test writes it to `client/src/generated/palette.generated.css`, which is
+  the same trick ts-rs plays next door — so `cargo test --workspace` regenerates
+  it and CI's existing `git diff --exit-code client/src/generated` is the drift
+  check. No new CI step. **Custom properties cannot carry a fallback
+  declaration**: an unparsable value in `--name-azure` is not dropped at parse
+  time the way a normal property's is, it fails later at substitution, so
+  shipping hex *and* oklch was never an option and the file holds one value per
+  key.
+
+  A name is now drawn from custom properties, not from React. `lib/names.ts`
+  turns a `Style` into `--person-*` values plus two data attributes;
+  `styles/names.css` does all the painting. That split is what makes "normalize
+  everyone" one attribute on `<html>` (`lib/normalize.ts`, toggle in settings
+  beside density) instead of a flag threaded through every component that draws
+  a person — a flag like that eventually misses one. Same reason the 92° angle
+  and the density rules live there.
+
+  **Verified in the real engine, not just in tests.** WebKitGTK 2.52.3 —
+  what the shell renders in — reports: `--name-azure` = `oklch(0.76 0.13 255)`
+  dark and `oklch(0.5 0.14 255)` light; a gradient name computes
+  `linear-gradient(92deg, oklch(...350), oklch(...68))` clipped to the glyphs;
+  shimmer computes `name-shimmer 4s linear`; compact and IRC report
+  `animation-name: none` and `text-shadow: none` while the gradient *fill*
+  survives (a fill is not an effect); normalize drops the background, the weight
+  and the color back to the reader's default.
+
+  Three judgment calls worth knowing about:
+  - **The 3px gutter rule does not normalize.** It is SPEC §4.7's replacement
+    for the avatar column, not name styling, and flattening it would leave the
+    stream with nothing to identify a speaker by at a glance.
+  - **IRC mode overrides the person's font on the nick column only.** That
+    column is `width: 12ch`, so mixed faces would break the alignment the mode
+    exists for. Color, weight and slant still come through. IRC also ignores a
+    message-font override, because the mode defines its own body face.
+  - **A name inside a line of mono metadata takes the color and stops** — the
+    quoted author on a reply line, the uploader on a media tile. They use a
+    lighter `.name-color` class that still answers to normalize. Mono is
+    metadata-only (SPEC §5.2) and a shimmer inside a one-line quote is noise.
+
+  **The font half is wired but unfed.** `--font-<key>` stacks for all twelve
+  faces are in `tokens.css` and `lib/fonts.ts` guards the key, so a chosen face
+  applies — but nothing is bundled until **T-604**, so every stack currently
+  falls through to its generic. A name in Silkscreen looks like a name in the UI
+  face today. That is the expected state, not a bug.
+
+  **Not seen by a person in the running app.** Same gap M5 left: the checks
+  above are computed styles read out of the engine and two offscreen
+  screenshots, which is a real check but not somebody clicking through a signed-in
+  client. T-602 puts the picker in front of a human and will close it.
 - ⬜ **T-602 · Style picker + settings** — effort: **medium**
   Two-click named-color picker (mIRC energy, modern craft), font/weight/italic/
   effect, live preview, msg-font override. Server already validates keys.

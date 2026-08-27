@@ -3,8 +3,9 @@
  * properties — density modes and time-of-day warmth are one variable swap, never
  * a second stylesheet.
  *
- * The 16-color name palette is NOT defined here by hand: M6 generates it from
- * linger-core::PALETTE (the single source of truth) into palette.generated.css.
+ * The 16-color name palette is NOT defined here by hand: it is generated from
+ * linger-core::PALETTE (the single source of truth) into
+ * generated/palette.generated.css, which main.tsx imports right after this file.
  */
 
 :root {
@@ -25,12 +26,36 @@
   --accent-default: #6e9bff;
   --accent: var(--accent-default);
 
+  /* The band that crosses a shimmering name (SPEC §4.5). Lighter than the name
+     in the dark theme, darker in the light one, so the sweep reads as a sweep in
+     both and never washes the name out to nothing. */
+  --name-shimmer: rgb(255 255 255 / 0.6);
+
   /* --- typography (SPEC §5.2): sans for content, mono for metadata ONLY --- */
   --font-ui: "Geist Sans", "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
   /* The message body's face. Its own property because IRC mode is the one
      place a body is allowed to be monospace, and only the body. */
   --font-body: var(--font-ui);
+
+  /* The twelve curated faces (SPEC §5.7), one variable per `linger-core::FONTS`
+     key. The keys are the contract and the server validates them; which family
+     a key draws is a client concern, the same way a reaction key's glyph is.
+     T-604 fetches, subsets and `@font-face`s the real files — until it lands
+     every stack falls through to the generic at its end, so a name in a face
+     nobody has installed is plain rather than missing. */
+  --font-geist-sans: "Geist Sans", system-ui, sans-serif;
+  --font-geist-mono: "Geist Mono", ui-monospace, monospace;
+  --font-ibm-plex-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-ibm-plex-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-jetbrains-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-space-grotesk: "Space Grotesk", system-ui, sans-serif;
+  --font-commit-mono: "Commit Mono", ui-monospace, monospace;
+  --font-newsreader: "Newsreader", Georgia, serif;
+  --font-instrument-serif: "Instrument Serif", Georgia, serif;
+  --font-departure-mono: "Departure Mono", ui-monospace, monospace;
+  --font-silkscreen: "Silkscreen", ui-monospace, monospace;
   --text-body-size: 13.5px;
   --text-body-leading: 1.6;
   --text-label-size: 12px;
@@ -67,6 +92,7 @@
   --text-muted: #8b929e;
   --text-faint: #a8aeb8;
   --accent-default: #2563c9;
+  --name-shimmer: rgb(0 0 0 / 0.34);
 }
 
 /* Density modes (SPEC §5.6). IRC mode's mono body is the one sanctioned

@@ -396,6 +396,12 @@ Things that surprise people the first time:
   linger-core` regenerates them. The output is committed, and CI fails if it drifts from
   the Rust source — so commit the regenerated files with your change. Never hand-write a
   type that crosses the wire.
+- **The name palette is generated too.** The sixteen colors are defined once in
+  `linger-core::palette::PALETTE`, and the same `cargo test -p linger-core` run writes
+  them out as `client/src/generated/palette.generated.css` — one `--name-<key>` custom
+  property per color, per theme. That file is committed and covered by the same drift
+  check. Never write a hex or an `oklch()` literal into the frontend: a color is a
+  palette key everywhere else in the codebase.
 - **Renaming a wire type leaves an orphan.** `ts-rs` writes files but never deletes them,
   so the old `.ts` file stays behind and the drift check won't catch it. Delete it by hand.
 - **`client/src-tauri` is not in the root cargo workspace.** It links against system
@@ -435,6 +441,15 @@ Things that surprise people the first time:
   saves it and is the only thing that stamps `away_since`, then the gateway frame tells
   everyone. The room leave has to go before the away frame, because the server sets
   `around` on any room leave.
+- **A name is drawn from custom properties, not from React** (`client/src/lib/names.ts`,
+  `client/src/styles/names.css`). Everything a person controls about their own name —
+  face, weight, slant, one palette color or a gradient of two, shimmer or glow — becomes
+  a handful of `--person-*` properties on the element, and the stylesheet does the
+  painting. That is what makes the reader's `normalize everyone` switch a single
+  attribute on `<html>` instead of a flag threaded through every component that draws a
+  person. The gradient angle is fixed at 92° and is written down exactly once, in that
+  stylesheet. Effects are off in compact and IRC density, and shimmer is off under
+  `prefers-reduced-motion`.
 - **The host's controls are absent for everybody else, not greyed out**
   (`client/src/host/`). One panel over the stream column with four sections — rooms,
   invites, people, the server itself — reached from two small controls on the rail that
