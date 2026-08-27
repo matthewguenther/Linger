@@ -72,7 +72,7 @@ a task fails its acceptance criteria twice.
 ## Status
 
 Closed milestones are archived in `docs/tasks/` with every landing note and
-surprise intact. Tasks T-001…T-506 live there. Decisions that shaped the queue
+surprise intact. Tasks T-001…T-604 live there. Decisions that shaped the queue
 (the password floor, no host transfer, removal not banning, storage knobs as
 environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 
@@ -86,17 +86,30 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M4 — presence, roster, statuses | 2026-08-21 | The roster moves live; in-room/away/idle mechanics; the status card | [m4.md](docs/tasks/m4.md) |
 | M4.5 — the shell's missing surfaces | 2026-08-25 | Host controls, invites, member settings, server list, remove + re-admit, password reset, live member announce | [m4-5.md](docs/tasks/m4-5.md) |
 | M5 — uploads, media, the grid | 2026-08-26 | Resumable uploads on local or S3, files served from their own origin, the media grid with stars and link cards, expiry + a storage ceiling, the status image | [m5.md](docs/tasks/m5.md) |
+| M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
 
-**Still open from closed milestones — two human errands, both outstanding:**
+**Still open from closed milestones — three human errands, all outstanding.
+The first real tag would retire two of them in one pass**, since `release.yml`
+builds installers for all three operating systems and T-701's updater is
+already proven end to end against a throwaway manifest:
 
 - The visual "a window opens" sign-off on Linux, Windows and macOS
-  (T-002/T-003 in `docs/tasks/m0.md`). Must be closed before M7.
+  (T-002/T-003 in `docs/tasks/m0.md`). Was meant to close before M7. Installing
+  the bundles from a `v0.1.0` draft release closes it and exercises the release
+  path at the same time; they will carry an unknown-publisher warning until
+  T-702 lands, which is expected and not a reason to wait.
 - **M5's milestone check itself** (`docs/tasks/m5.md`): a real 400 MB video,
   over a real network, from a server with real DNS for both names. Every piece
   of it is covered by tests, but nobody has clicked `+ file` in a running app —
   which also leaves the media grid, the storage figure in the status bar, and
   the status image at 400×200 on a second client unseen by a person. T-504,
   T-505 and T-506 each deferred it and each said so.
+- **A styled name in the message stream** (`docs/tasks/m6.md`). The roster, the
+  style picker, themes and warmth were all driven live, but the gateway is a
+  Tauri IPC channel, so the browser sessions that verified them had no rooms and
+  no messages. The stream's names and the per-person message font have only ever
+  been checked as computed styles. Same code path as what was verified; still
+  nobody has watched a styled name go past in a room.
 
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -127,175 +140,18 @@ M5 adds the whole of uploads (see [m5.md](docs/tasks/m5.md)): the `ObjectStore`
 trait with a local and an S3 backend, resumable part uploads, the complete step
 that re-encodes and sniffs, `GET /media` with keyset paging, link cards behind
 an SSRF guard, the expiry sweeper, and the status image.
+M6 adds the whole of styling (see [m6.md](docs/tasks/m6.md)): `palette.generated.css`
+written out of `linger-core` by a unit test and drift-checked like the bindings,
+names painted from `--person-*` custom properties in `styles/names.css`, the
+style picker, theme + evening warmth as attributes on `<html>`, and the twelve
+faces vendored under `client/src/fonts/` — **never write a hex or `oklch()`
+literal into the frontend, and never add a remote font URL.**
+M7 adds the release path (see T-701 below): the signed updater behind two narrow
+Rust commands, `release.yml`, and the `version-check` / `signing-preflight`
+scripts.
 
 ---
 
-
-## M6 — styling: names, palette, themes, fonts
-
-*Milestone check: a gradient name from two palette keys, contrast verifiably ≥4.5:1 in both themes (the CI property test already guards the values).*
-
-**The check is met (2026-08-27).** A gradient name from `rose` and `amber` was
-picked in the running client against a running server, saved, and came back on
-the roster — screenshots and the engine's own computed styles are in the T-602
-note. Contrast is guarded by the CI property test, which since T-603 reads all
-16 keys against four backgrounds: both themes, cool and after dusk. Ready for
-the architect to archive.
-
-- ✅ **T-601 · Name rendering engine** — effort: **medium** — landed 2026-08-27
-  Build step: emit `palette.generated.css` from `linger-core::palette::css_variables`
-  (single source of truth; oklch or hex per T-002's verdict). Render styled names
-  everywhere names appear; gradient fixed 92°; shimmer (4s linear)/glow honor
-  `prefers-reduced-motion`, disabled in compact + IRC; "normalize everyone"
-  toggle flattens names *and* message fonts.
-
-  **Landing note.** `css_variables` now emits `oklch()` rather than hex, per
-  T-002, and a new `palette::stylesheet()` wraps both themes into one file. A
-  unit test writes it to `client/src/generated/palette.generated.css`, which is
-  the same trick ts-rs plays next door — so `cargo test --workspace` regenerates
-  it and CI's existing `git diff --exit-code client/src/generated` is the drift
-  check. No new CI step. **Custom properties cannot carry a fallback
-  declaration**: an unparsable value in `--name-azure` is not dropped at parse
-  time the way a normal property's is, it fails later at substitution, so
-  shipping hex *and* oklch was never an option and the file holds one value per
-  key.
-
-  A name is now drawn from custom properties, not from React. `lib/names.ts`
-  turns a `Style` into `--person-*` values plus two data attributes;
-  `styles/names.css` does all the painting. That split is what makes "normalize
-  everyone" one attribute on `<html>` (`lib/normalize.ts`, toggle in settings
-  beside density) instead of a flag threaded through every component that draws
-  a person — a flag like that eventually misses one. Same reason the 92° angle
-  and the density rules live there.
-
-  **Verified in the real engine, not just in tests.** WebKitGTK 2.52.3 —
-  what the shell renders in — reports: `--name-azure` = `oklch(0.76 0.13 255)`
-  dark and `oklch(0.5 0.14 255)` light; a gradient name computes
-  `linear-gradient(92deg, oklch(...350), oklch(...68))` clipped to the glyphs;
-  shimmer computes `name-shimmer 4s linear`; compact and IRC report
-  `animation-name: none` and `text-shadow: none` while the gradient *fill*
-  survives (a fill is not an effect); normalize drops the background, the weight
-  and the color back to the reader's default.
-
-  Three judgment calls worth knowing about:
-  - **The 3px gutter rule does not normalize.** It is SPEC §4.7's replacement
-    for the avatar column, not name styling, and flattening it would leave the
-    stream with nothing to identify a speaker by at a glance.
-  - **IRC mode overrides the person's font on the nick column only.** That
-    column is `width: 12ch`, so mixed faces would break the alignment the mode
-    exists for. Color, weight and slant still come through. IRC also ignores a
-    message-font override, because the mode defines its own body face.
-  - **A name inside a line of mono metadata takes the color and stops** — the
-    quoted author on a reply line, the uploader on a media tile. They use a
-    lighter `.name-color` class that still answers to normalize. Mono is
-    metadata-only (SPEC §5.2) and a shimmer inside a one-line quote is noise.
-
-  **The font half is wired but unfed.** `--font-<key>` stacks for all twelve
-  faces are in `tokens.css` and `lib/fonts.ts` guards the key, so a chosen face
-  applies — but nothing is bundled until **T-604**, so every stack currently
-  falls through to its generic. A name in Silkscreen looks like a name in the UI
-  face today. That is the expected state, not a bug.
-
-  **Not seen by a person in the running app** — *closed by T-602*, which drove
-  the real client against a real server and watched a saved gradient land on the
-  roster. What is still unseen is the **message stream**: the gateway is a Tauri
-  IPC channel, so a browser gets no rooms and no messages, and the stream's names
-  and the message-font override have only ever been checked as computed styles.
-  Every one of them goes through the same `nameProps` and the same `.msg-body`
-  rule as the surfaces that were verified live.
-- ✅ **T-602 · Style picker + settings** — effort: **medium** — landed 2026-08-27
-  Two-click named-color picker (mIRC energy, modern craft), font/weight/italic/
-  effect, live preview, msg-font override. Server already validates keys.
-
-  **Landing note.** `settings/StylePicker.tsx` over `settings/style.ts`, in the
-  `you` panel under *how your name looks*. Everything is drawn as itself: each
-  face is labelled in its own face, each weight shown at that weight, each
-  swatch is the color, and the preview is your display name through the same
-  `nameProps` the stream uses — so there is one rendering path, not two that can
-  disagree. A gradient is the same sixteen swatches a second time, labelled
-  `from` and `to`; no hidden "which one am I editing" mode, because the promise
-  is two clicks and a mode you have to discover is a third.
-
-  `style.ts` holds the part that can be wrong without looking wrong — draft ⇄
-  wire, and `isDirty`, which compares through the wire shape so changing the
-  second color of a *solid* fill correctly leaves the save button down.
-
-  One deliberate exception in the CSS: the preview carries `name-raw`, which
-  exempts it from the reader's own normalize and density settings. A preview
-  that obeys "normalize everyone" shows you a flat name while you are picking a
-  gradient. The panel says so in a line under the preview rather than silently
-  lying.
-
-  **Driven live, in the real engine.** `pnpm dev` in a plain browser is a
-  supported way to work on the UI (`lib/ipc.ts`), so this was checked by loading
-  the actual client off the actual Vite server against a real `linger-server` in
-  WebKitGTK 2.52.3 — first-run setup, sign in, pick `rose`→`amber` + Newsreader
-  + 700 + shimmer, save, and watch the name come back styled on the roster.
-  Theme, warmth and normalize were flipped the same way: light reports
-  `#F7F8F9`, warm-light `#FBF7F2` and warm-dark `#1A1714`, matching the Rust
-  constants exactly; normalize flattens the roster and leaves the preview alone.
-
-  **What that could not reach:** the gateway is a Tauri IPC channel, so a browser
-  has no rooms and no messages. The stream's names and the message-font override
-  are still computed-style checks only. They go through the same `nameProps` and
-  the same `.msg-body` rule as everything that was verified live, but nobody has
-  watched a styled name go past in a room.
-
-- ✅ **T-603 · Themes + time-of-day warmth** — effort: **low** — landed 2026-08-27
-  Light theme tokens exist; add the ~200K post-sunset warmth shift (one variable
-  swap, user-disableable) and theme switching.
-
-  **Landing note.** `lib/theme.ts` plus one block of tokens. Theme is dark /
-  light / system, and `system` resolves through `prefers-color-scheme` and
-  re-resolves when the OS changes its mind, so `data-theme` is always explicit
-  and the CSS never had to learn a third state.
-
-  **The warmth shift keeps lightness and moves only hue.** Every warm token is
-  its cool twin's OKLab lightness with the hue rotated to the amber side. That
-  is what makes it a temperature change instead of a dimming — and it is the
-  reason the 16-color palette is still safe after dark. `linger-core::palette`
-  now carries `DARK_BG_WARM` / `LIGHT_BG_WARM` and the CI property test reads
-  all 16 keys against **four** backgrounds instead of two. Measured: the worst
-  case moves from 7.79 to 7.83 (dark) and 4.89 to 4.87 (light). A contrast
-  guarantee that lapsed at dusk would not be one.
-
-  **Sunset is approximated by the clock, and that is a decision.** Knowing real
-  sunset means knowing latitude and longitude. A chat client that asks for your
-  coordinates to tint its background has made a bad trade, so warmth is on from
-  19:00 to 07:00 local. At high latitudes in June that is wrong by a couple of
-  hours; the whole effect is a 200K tint nobody is meant to consciously notice,
-  which is why that is acceptable and a location permission is not. If Matt
-  wants real sunset later, it needs a location and that is his call.
-
-- ✅ **T-604 · Font pipeline** — effort: **low** — landed 2026-08-27
-  Script: fetch the 12 faces (`assets/fonts/README.md` table), subset
-  (latin/latin-ext, 400/500/700 + italics) to woff2, keep OFL texts,
-  `@font-face` wiring. No CDN.
-
-  **Landing note.** `scripts/fetch-fonts.sh` → `scripts/fetch_fonts.py`. Output
-  is committed: 30 faces, **about 800 KB total** in `client/src/fonts/`, plus
-  generated `@font-face` rules and the OFL texts in `assets/fonts/`. Nobody
-  needs to run the script to build — run it when a face is added to
-  `linger-core::FONTS` or to pull an upstream fix. The script refuses to run if
-  its manifest and `linger-core::FONTS` disagree.
-
-  Things worth knowing:
-  - **Ten of the twelve come from `google/fonts`.** It is where those projects
-    publish, its paths are stable, and it carries the OFL text next to the
-    binary. Commit Mono and Departure Mono come from their own repos. The Source
-    column in `assets/fonts/README.md` is each face's *home*, not the download
-    URL — those live in the manifest.
-  - **Variable fonts where they exist.** Seven faces publish one, so one file
-    covers 400–700 and the rule declares `font-weight: 400 700`. Two-axis fonts
-    (Plex Sans, Inter, Newsreader) get the second axis pinned before subsetting,
-    which is most of the size saving.
-  - **Nothing is faked.** Instrument Serif has one weight, Departure Mono has
-    one and no italic, Silkscreen has no italic. Those ship as they are drawn
-    and the browser synthesises if somebody asks for what does not exist.
-  - **Debian and Ubuntu ship python3 without `ensurepip`**, so the plain
-    `python3 -m venv` fails on exactly the machines this project is developed
-    on. The script falls back to `--without-pip` and bootstraps pip. The venv
-    lives under `target/` and nothing is installed system-wide.
 
 ## M7 — packaging and updates
 
@@ -432,7 +288,7 @@ item 8). The Linux and Windows spikes are already retired, `linger-activity`
 already compiles, and the Null backend already reports nothing — which is the
 correct product until this comes back. It is not needed for a usable chat app,
 and it is large: four OS backends, a poller, a registry, and a sharing-controls
-UI. **Do not start T-911.** M5 (uploads) is closed; M6 (styling) is the next
+UI. **Do not start T-911.** M5 and M6 are closed; M7 (packaging) is the current
 milestone.*
 
 *Milestone check, when this comes back: foreground app appears in the roster on
