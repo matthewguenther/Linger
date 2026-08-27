@@ -114,11 +114,27 @@ async fn serve() -> anyhow::Result<()> {
     let config = linger_server::config::Config::from_env()?;
     tracing::info!(data_dir = %config.data_dir.display(), bind = %config.bind, "starting linger-server");
 
+    // Said at every start, not only the first one: a server with no name runs
+    // perfectly well and is unreachable from every installed client, and the
+    // gap between those two facts is where a host loses an evening. It is a
+    // warning rather than a refusal because a bare bind address is a real
+    // deployment — it is what every test server and every `pnpm tauri dev`
+    // session runs as.
+    if config.domain.is_none() {
+        tracing::warn!(
+            "LINGER_DOMAIN is not set, so this server has no name and no certificate. \
+             An installed Linger client only talks to https addresses and cannot reach \
+             it — only a development build can. Uploads are also served from the same \
+             origin as the app, without the split that keeps somebody's file from \
+             impersonating it. See docs/host-guide.md."
+        );
+    }
+
     let db = db::init(&config.db_path()).await?;
     tokio::fs::create_dir_all(config.objects_dir()).await?;
 
     let bind = config.bind;
-    let domain = config.domain.clone();
+    let setup_origin = config.setup_origin();
     let state = linger_server::AppState::build(db, config).await?;
 
     // First run: no users yet, so hand the host their one-time setup URL.
@@ -129,16 +145,21 @@ async fn serve() -> anyhow::Result<()> {
         // means the documented deployment has Caddy terminating TLS in front
         // (ARCHITECTURE §9), so the reachable address is https — printing http
         // there would pin the host's own session to plaintext on their first
-        // action. With no domain we are talking to a bare bind address, which
-        // has no certificate and is honestly http.
-        let (scheme, host) = match domain {
-            Some(domain) => ("https", domain),
-            None => ("http", bind.to_string()),
-        };
+        // action. `Config::setup_origin` works the address out, and says
+        // whether an installed client can reach it at all.
         println!("\n  ┌─────────────────────────────────────────────────");
         println!("  │  This server isn't set up yet.");
-        println!("  │  Open:  {scheme}://{host}/setup?token={token}");
+        println!("  │  Open:  {}/setup?token={token}", setup_origin.url);
         println!("  │  (the link works once, then never again)");
+        println!("  │  Paste it into the Linger app, not a browser.");
+        if !setup_origin.reachable {
+            println!("  │");
+            println!("  │  That address is http, and an installed Linger");
+            println!("  │  app only talks https — it cannot reach this");
+            println!("  │  server. Only a development build can. Set");
+            println!("  │  LINGER_DOMAIN and put a name in front of it:");
+            println!("  │  see docs/host-guide.md.");
+        }
         println!("  └─────────────────────────────────────────────────\n");
     }
 

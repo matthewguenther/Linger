@@ -178,6 +178,12 @@ docker compose up -d
 docker compose logs linger   # prints a one-time host-setup URL on first run
 ```
 
+**Two names, and they have to be names.** The desktop client only talks `https`,
+so a bare `IP:port` server is reachable from `pnpm tauri dev` and from nothing
+anybody has installed — the server warns at startup when `LINGER_DOMAIN` is
+unset. Buying a domain is not required: two free dynamic-DNS names work, one for
+the app and one for files. The [host guide](docs/host-guide.md) has the recipe.
+
 Caddy is bundled so TLS certificates are automatic. That is not only about
 padlocks: **an installed client only talks to a server over `https`.** The
 shipped app's content-security policy allows nothing else, so a server reached

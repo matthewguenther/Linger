@@ -81,6 +81,16 @@ pub struct Config {
     pub file_expiry_days: Option<u32>,
 }
 
+/// Where to point a client on first run — see [`Config::setup_origin`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupOrigin {
+    /// The base URL, with no trailing slash.
+    pub url: String,
+    /// Whether an *installed* desktop client can reach that URL. False means
+    /// http, which only a development build is allowed to talk to.
+    pub reachable: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("LINGER_BIND is not a valid socket address: {0}")]
@@ -243,6 +253,43 @@ impl Config {
         }
     }
 
+    /// The address to print on first run, and whether an installed client can
+    /// actually reach it.
+    ///
+    /// These are two separate facts because they disagree exactly when it
+    /// matters. A shipped desktop build's content-security policy allows
+    /// `https` and nothing else, so a server with no `LINGER_DOMAIN` — no
+    /// name, no certificate — is unreachable from every installed copy, even
+    /// though the server itself runs fine and every test server runs this way.
+    /// Printing a link that cannot work, with nothing said about it, is how a
+    /// host spends an evening on a problem the server already knew about.
+    ///
+    /// With no domain the address is `localhost` rather than the bind address:
+    /// `0.0.0.0` means "listen on everything" and is not somewhere anybody can
+    /// visit, and a development build on the same machine is the one client
+    /// that *can* reach a plain-http server. A bind address with a real IP in
+    /// it was chosen deliberately, so it is left alone.
+    #[must_use]
+    pub fn setup_origin(&self) -> SetupOrigin {
+        match &self.domain {
+            Some(domain) => SetupOrigin {
+                url: format!("https://{domain}"),
+                reachable: true,
+            },
+            None => {
+                let host = if self.bind.ip().is_unspecified() {
+                    format!("localhost:{}", self.bind.port())
+                } else {
+                    self.bind.to_string()
+                };
+                SetupOrigin {
+                    url: format!("http://{host}"),
+                    reachable: false,
+                }
+            }
+        }
+    }
+
     /// The hostname `/objects` is served on, when it is a host of its own.
     #[must_use]
     pub fn media_host(&self) -> Option<&str> {
@@ -362,6 +409,33 @@ mod tests {
             pool_bytes: DEFAULT_POOL_BYTES,
             file_expiry_days: Some(DEFAULT_FILE_EXPIRY_DAYS),
         }
+    }
+
+    #[test]
+    fn a_domain_prints_an_address_an_installed_client_can_reach() {
+        let origin = config(Some("linger.example"), None).setup_origin();
+        assert_eq!(origin.url, "https://linger.example");
+        assert!(origin.reachable);
+    }
+
+    #[test]
+    fn no_domain_prints_localhost_rather_than_the_bind_address() {
+        // `0.0.0.0` means "listen on everything" and is not somewhere anybody
+        // can visit, so printing it sends a host looking for a problem in the
+        // wrong place. A development build on this machine can reach
+        // localhost, and it is the only client that can reach plain http.
+        let origin = config(None, None).setup_origin();
+        assert_eq!(origin.url, "http://localhost:8420");
+        assert!(!origin.reachable);
+    }
+
+    #[test]
+    fn a_bind_address_somebody_chose_is_left_alone() {
+        let mut config = config(None, None);
+        config.bind = "192.168.1.50:9000".parse().unwrap();
+        let origin = config.setup_origin();
+        assert_eq!(origin.url, "http://192.168.1.50:9000");
+        assert!(!origin.reachable);
     }
 
     #[test]

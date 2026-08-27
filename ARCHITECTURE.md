@@ -447,7 +447,12 @@ what each one serves: on the media host, `/objects/...` and nothing else; on eve
 name, everything *but* `/objects/...`. A file that talked a browser into running it would
 find no API at its own origin, and an upload cannot be fetched from the app's own name at
 all. A server with no `LINGER_DOMAIN` has one origin and no split — honest for a box on a
-LAN, and what every test server runs as.
+LAN, and what every test server runs as. **It is also unreachable from an installed
+client**, whose CSP allows `https` and nothing else, so that mode belongs to
+development and to tests rather than to anybody's friends. The server says so at
+startup: no domain gets a warning, and the first-run setup link says the address
+cannot be reached by an installed app. It warns rather than refusing, because a bare
+bind address is what `cargo test` and `pnpm tauri dev` both run against.
 
 Every served object also carries `Content-Security-Policy: default-src 'none'; sandbox`
 and `Cross-Origin-Resource-Policy: cross-origin`, and the `Content-Type` is never the
