@@ -15,6 +15,7 @@
 //! the client can always switch on `error.code`.
 
 mod auth;
+mod export;
 mod health;
 mod invites;
 mod links;
@@ -94,6 +95,7 @@ pub fn router(state: AppState) -> Router {
         .merge(messages::router())
         .merge(uploads::router())
         .merge(media::router())
+        .merge(export::router())
         .merge(links::router())
         .route("/gateway", any(crate::gateway::ws_route))
         .fallback(api_not_found);

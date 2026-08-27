@@ -159,6 +159,23 @@ deliberate. Nothing is keeping score of what you have not read, so nothing can
 make you feel behind. When you come back, the stream shows a **go to where you
 left off** marker; use it or ignore it.
 
+## Taking everything with you
+
+Any member can ask the server for a copy of **everything on it** — every
+message, every file — at any time. You do not need the host's permission, and
+there is nothing to ask for.
+
+What you get is a single zip. Inside it: one plain text file per room in the
+order things were said, a `media` folder with every file anybody shared, and an
+index listing who shared what and when. It opens with an ordinary text editor
+and an ordinary file browser. **You do not need Linger, or an account, or the
+server to still exist**, which is the entire point.
+
+It takes a moment to build on a busy server, and you can ask once an hour.
+
+*Note: at the moment this is only reachable through the server's own interface
+— there is no button in the app for it yet.*
+
 ## Updates
 
 The app checks for a new version when it starts and when you open settings. If

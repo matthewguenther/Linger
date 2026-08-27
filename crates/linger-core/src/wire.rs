@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::id::{AttachmentId, MessageId, RoomId, UploadId, UserId};
+use crate::id::{AttachmentId, ExportId, MessageId, RoomId, UploadId, UserId};
 
 // NOTE on 64-bit integers: ts-rs maps i64/u64 to `bigint`, but JSON.parse hands
 // the frontend plain numbers. Every 64-bit value on this wire (Unix ms, byte
@@ -614,6 +614,15 @@ pub struct NotifyRule {
     pub room_id: Option<RoomId>,
 }
 
+// ---------------------------------------------------------------------------
+// Export (SPEC §4.11, PROTOCOL §7)
+// ---------------------------------------------------------------------------
+
+/// Where an export has got to.
+///
+/// Building the archive is a background job, because a server with a year of
+/// photos in it cannot answer inside one request. `queued` is the moment
+/// between the row existing and the task picking it up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
@@ -624,10 +633,23 @@ pub enum ExportState {
     Failed,
 }
 
+/// The answer to `POST /export`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExportStarted {
+    pub job_id: ExportId,
+}
+
+/// The answer to `GET /export/:job_id`.
+///
+/// `url` is on the media origin — the host uploads are served from — so an
+/// archive is no more same-origin with the app than an upload is
+/// (ARCHITECTURE §7). It appears only once there is something to download;
+/// asking before then is not an error, it is `running`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ExportJob {
-    pub job_id: String,
+    pub job_id: ExportId,
     pub state: ExportState,
     /// 0.0–1.0.
     pub progress: f32,

@@ -117,6 +117,12 @@ async fn put_part(
 }
 
 /// Serve a stored object.
+///
+/// Two kinds of thing live in the store and both are served from here, because
+/// both are somebody's bytes and both belong on the media host rather than on
+/// the app's own name: uploads, and the export archives in [`crate::export`].
+/// An export key never looks like an attachment key (`exports/<id>.zip`), so
+/// the two lookups cannot collide.
 async fn get_object(
     State(state): State<AppState>,
     Path(key): Path<String>,
@@ -128,8 +134,11 @@ async fn get_object(
     .bind(&key)
     .bind(&key)
     .fetch_optional(&state.db.read)
-    .await?
-    .ok_or_else(|| ApiError::not_found("No such file."))?;
+    .await?;
+
+    let Some(row) = row else {
+        return get_export(&state, &key).await;
+    };
 
     let is_poster = row.get::<Option<String>, _>("poster_key").as_deref() == Some(key.as_str());
     let filename: String = row.get("filename");
@@ -193,6 +202,79 @@ async fn get_object(
     );
     // The client is a webview on one origin and this is another host again, so
     // say plainly that loading these from elsewhere is allowed.
+    insert(&mut headers, "cross-origin-resource-policy", "cross-origin");
+
+    Ok((headers, body).into_response())
+}
+
+/// Serve a finished export archive.
+///
+/// Unauthenticated for the same reason an upload is: the key holds a UUIDv7
+/// with 74 random bits, so the URL is the secret. That matters more here than
+/// it does for one photo — this is the whole server in a file — which is why
+/// asking for somebody else's *job* is a 404 (see [`crate::export::job`]) and
+/// why a new export deletes the previous archive rather than leaving old URLs
+/// working forever.
+async fn get_export(state: &AppState, key: &str) -> Result<Response, ApiError> {
+    let row = sqlx::query(
+        "SELECT filename, size_bytes FROM exports WHERE state = 'complete' AND object_key = ?",
+    )
+    .bind(key)
+    .fetch_optional(&state.db.read)
+    .await?
+    .ok_or_else(|| ApiError::not_found("No such file."))?;
+
+    let filename: String = row
+        .get::<Option<String>, _>("filename")
+        .unwrap_or_else(|| "linger-export.zip".to_string());
+    let serve = ServeAs {
+        content_type: "application/zip".to_string(),
+        disposition: format!("attachment; filename=\"{filename}\""),
+    };
+
+    let Some(object) = state
+        .storage
+        .read_object(key, &serve)
+        .await
+        .map_err(ApiError::from)?
+    else {
+        return Err(ApiError::not_found("No such file."));
+    };
+
+    let (body, length) = match object {
+        ObjectBody::Redirect(url) => {
+            return Ok(axum::response::Redirect::temporary(&url).into_response())
+        }
+        ObjectBody::File(path, length) => {
+            let file = tokio::fs::File::open(&path).await.map_err(|err| {
+                tracing::error!(error = %err, "opening an export archive");
+                ApiError::internal()
+            })?;
+            (
+                Body::from_stream(tokio_util::io::ReaderStream::new(file)),
+                length,
+            )
+        }
+    };
+
+    let mut headers = HeaderMap::new();
+    insert(&mut headers, header::CONTENT_TYPE, &serve.content_type);
+    insert(&mut headers, header::CONTENT_LENGTH, &length.to_string());
+    insert(&mut headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+    insert(
+        &mut headers,
+        header::CONTENT_DISPOSITION,
+        &serve.disposition,
+    );
+    insert(
+        &mut headers,
+        header::CONTENT_SECURITY_POLICY,
+        "default-src 'none'; sandbox",
+    );
+    // An archive is a snapshot and is replaced rather than revised, but the URL
+    // stops working the moment its owner asks for another one — so it is not
+    // the year-long immutable cache an upload gets.
+    insert(&mut headers, header::CACHE_CONTROL, "private, no-store");
     insert(&mut headers, "cross-origin-resource-policy", "cross-origin");
 
     Ok((headers, body).into_response())

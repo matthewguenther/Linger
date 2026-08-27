@@ -117,6 +117,10 @@ define_id!(
     /// An in-flight upload slot.
     UploadId
 );
+define_id!(
+    /// One member's request for an archive of the whole server (SPEC §4.11).
+    ExportId
+);
 
 #[cfg(test)]
 mod tests {

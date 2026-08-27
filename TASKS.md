@@ -160,6 +160,10 @@ names painted from `--person-*` custom properties in `styles/names.css`, the
 style picker, theme + evening warmth as attributes on `<html>`, and the twelve
 faces vendored under `client/src/fonts/` — **never write a hex or `oklch()`
 literal into the frontend, and never add a remote font URL.**
+M8 adds the export (T-801 below): `POST /export` and `GET /export/:job_id`,
+the archive written on a blocking thread and served from the media origin like
+any other object, and `repo::messages::batch_ascending` for walking a room
+forwards. **Do not rebuild it** — what is missing is only the button, T-802.
 M7 adds the release path (see [m7.md](docs/tasks/m7.md)): the signed updater
 behind two narrow Rust commands, `release.yml`, `image.yml` publishing the
 server to ghcr on a tag, the four-file version check and `signing-preflight`,
@@ -177,12 +181,76 @@ at all until T-705.
 
 *Milestone check: one archive contains every message and file, and it opens.*
 
-- ⬜ **T-801 · Full export** — effort: **medium**
-  SPEC §4.11, PROTOCOL §7: any member, 1/hour; background job → zip: per-room
-  markdown (readable layout: dividers, names, timestamps), `media/` tree,
-  `media.md` index. Job progress endpoint; download via the media origin.
-  *Accept:* export a seeded server, unzip, spot-check messages/media; second
-  request within the hour gets `RATE_LIMITED`.
+- ✅ **T-801 · Full export** — effort: **medium** — landed 2026-08-27
+
+  **Landing note.** `POST /export` writes a row, spawns a task and hands back an
+  id; `GET /export/:job_id` says how far along and, when there is one, where to
+  download it. The archive is served from `/objects/...` on the **media
+  origin** — the same host uploads come from — because the whole server in one
+  file has no more business being same-origin with the app than a photo does.
+  The origin split is tested, not assumed: on a named server the archive
+  answers on `cdn.` and 404s on the app's own name.
+
+  **What is in the zip**, under one top-level folder so unzipping it does not
+  scatter files across somebody's downloads: `rooms/<slug>.md` per room in the
+  order things were said, with a divider and a heading per day and every
+  message as `**HH:MM** — Display Name (@username)`; `media/` with every file
+  under its own name; `media.md` indexing who shared what, when and in which
+  room; and a `README.md` that says what the archive is and that it needs
+  nothing from this project to read. Times are UTC and the archive says so —
+  the server does not know what timezone a reader is in, and quietly writing
+  its own would be worse than naming the one it used.
+
+  **Three decisions worth knowing.**
+  *Deleted messages stay deleted.* A tombstone is skipped; an archive that
+  resurrects what somebody deleted would be a worse product.
+  *One archive per member.* Asking again deletes the previous one's bytes
+  first, so a member with a button cannot fill a host's disk with copies of
+  their own server. An old `url` stops working, and there is a test for that.
+  *Archives are not attachments.* They are not `attachments` rows, do not count
+  against `LINGER_POOL_BYTES`, and never appear in the media grid. Their keys
+  (`exports/<id>.zip`) cannot be mistaken for an attachment key by
+  `storage::key_owner`.
+
+  **The zip is written on a blocking thread.** `zip` is synchronous and an
+  archive is hundreds of megabytes; doing it on the reactor would stall every
+  other connection. Media entries are `Stored` rather than deflated — a JPEG is
+  already compressed, and running deflate over one spends the CPU of the whole
+  export to save a fraction of a percent.
+
+  **Uploaded filenames are somebody else's text**, so `archive_filename` is
+  also the zip-slip guard: no directories, no `..`, nothing that can climb out
+  of `media/` when an unzipper puts it back on a disk. Two people who both
+  shared `IMG_0001.jpg` both keep their name (` (2)`).
+
+  **Dates are hand-written rather than a dependency.** One format in one file
+  did not justify a date crate; `civil_date` is Hinnant's algorithm with tests
+  for the leap day, the 1900/2000 century rule and a pre-epoch date.
+
+  **What is not proven here.** The S3 path — an export on a bucket has to pull
+  every file back out through a presigned URL, which the local backend never
+  does — has a test in `tests/s3.rs`, and that file skips itself without a
+  bucket. It has only run in CI's `s3` job, never on this machine. And nobody
+  has exported a server with a year of real video in it; the tests use small
+  files.
+
+  **Also added:** `repo::messages::batch_ascending`. `page` is newest-first
+  because the stream reads that way, and its `after` still orders `DESC` — the
+  newest messages after a point rather than the next ones. An archive reads
+  forwards, so it gets its own query rather than a flag on that one.
+- ⬜ **T-802 · The export button** — effort: **low**
+  T-801 built the whole feature and no way for a person to reach it: nothing in
+  the client calls `POST /export`, so a member cannot ask for their archive
+  without curl. The wire types are generated and waiting
+  (`ExportStarted`, `ExportJob`, `ExportState`).
+  Settings, under a heading of its own: one control that starts an export,
+  the progress while it builds, and the finished archive as a download handed
+  to the system browser (`tauri-plugin-opener`, the way a link in a message is
+  — the WebView must not navigate itself to a zip). `RATE_LIMITED` says when to
+  come back; say that in words rather than showing an error.
+  *Accept:* click it in a running app, watch it finish, and open the file that
+  lands in Downloads. Then `docs/user-guide.md` loses the line saying there is
+  no button yet.
 
 ---
 

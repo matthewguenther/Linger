@@ -547,3 +547,99 @@ async fn the_upload_listener_is_not_there_when_storage_is_the_bucket() {
         .unwrap();
     assert_eq!(resp.status(), 404);
 }
+
+/// An export on the S3 backend has to pull every file back out of the bucket to
+/// put it in the archive — the local backend has the bytes on its own disk and
+/// this one does not (T-801). That download is the only part of the export that
+/// differs between backends, so it is the part that gets a test against a real
+/// bucket.
+#[tokio::test]
+async fn an_export_pulls_the_files_back_out_of_the_bucket() {
+    use std::io::Read;
+
+    let server = s3_server!("an_export_pulls_the_files_back_out_of_the_bucket");
+    let host = bootstrap_host(&server).await;
+
+    let room: linger_core::wire::Room = client()
+        .post(server.url("/rooms"))
+        .bearer_auth(&host.access_token)
+        .json(&serde_json::json!({ "slug": "general", "name": "general" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let attachment = upload(
+        &server,
+        &host.access_token,
+        "from the bucket.png",
+        "image/png",
+        png(8, 8),
+    )
+    .await;
+    let posted = client()
+        .post(server.url(&format!("/rooms/{}/messages", room.id)))
+        .bearer_auth(&host.access_token)
+        .json(&serde_json::json!({
+            "body": "a file that lives in S3",
+            "attachment_ids": [attachment.id],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), 200);
+
+    let started: linger_core::wire::ExportStarted = client()
+        .post(server.url("/export"))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let mut job = None;
+    for _ in 0..200 {
+        let asked: linger_core::wire::ExportJob = client()
+            .get(server.url(&format!("/export/{}", started.job_id)))
+            .bearer_auth(&host.access_token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        match asked.state {
+            linger_core::wire::ExportState::Complete => {
+                job = Some(asked);
+                break;
+            }
+            linger_core::wire::ExportState::Failed => panic!("the export failed"),
+            _ => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
+        }
+    }
+    let job = job.expect("the export never finished");
+    let url = job.url.expect("a finished export has a url");
+
+    // The archive itself is an object in the bucket, so asking for it is a
+    // redirect like any other object.
+    let archive = fetch_object(&server, &url).await;
+    assert_eq!(archive.status(), 200);
+
+    let bytes = archive.bytes().await.unwrap().to_vec();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("it opens");
+    let mut image = Vec::new();
+    let mut found = false;
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).unwrap();
+        if file.name().ends_with("media/from the bucket.png") {
+            file.read_to_end(&mut image).unwrap();
+            found = true;
+        }
+    }
+    assert!(found, "the file never came back out of the bucket");
+    assert_eq!(&image[1..4], b"PNG", "and the bytes are the real file");
+}

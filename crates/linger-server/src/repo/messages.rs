@@ -136,6 +136,42 @@ pub async fn page(
     Ok(messages)
 }
 
+/// A batch of messages in the order they were said, for anything that walks a
+/// room forwards.
+///
+/// [`page`] is newest-first because the stream reads that way, and its `after`
+/// still orders by `id DESC` — which is the newest messages after a point, not
+/// the next ones. An archive reads the other way round, so it gets its own
+/// query rather than a flag on that one.
+pub async fn batch_ascending(
+    db: &SqlitePool,
+    config: &Config,
+    room_id: RoomId,
+    after: Option<MessageId>,
+    limit: u32,
+) -> Result<Vec<Message>, ApiError> {
+    let mut sql = String::from("SELECT * FROM messages WHERE room_id = ?");
+    if after.is_some() {
+        sql.push_str(" AND id > ?");
+    }
+    sql.push_str(" ORDER BY id ASC LIMIT ?");
+
+    let mut query = sqlx::query(&sql).bind(room_id.to_vec());
+    if let Some(a) = after {
+        query = query.bind(a.to_vec());
+    }
+    query = query.bind(i64::from(limit));
+
+    let rows = query.fetch_all(db).await?;
+    let mut messages = rows
+        .iter()
+        .map(row_to_message)
+        .collect::<Result<Vec<_>, _>>()?;
+    hydrate_reactions(db, &mut messages).await?;
+    crate::repo::attachments::hydrate(db, config, &mut messages).await?;
+    Ok(messages)
+}
+
 /// One reaction key's current state on a message, for `reaction.update` fan-out.
 pub async fn reaction_group(
     db: &SqlitePool,

@@ -163,11 +163,13 @@ async fn serve() -> anyhow::Result<()> {
         println!("  └─────────────────────────────────────────────────\n");
     }
 
-    // The one background job the server runs (ARCHITECTURE §1): files age out
+    // The one *scheduled* background job (ARCHITECTURE §1): files age out
     // at LINGER_FILE_EXPIRY_DAYS unless they are starred or on a pinned
     // message. It sweeps once now and then every few hours, and it lives here
     // rather than in `AppState` so that building the state — which every
-    // integration test does — never starts a task nobody asked for.
+    // integration test does — never starts a task nobody asked for. Exports
+    // (T-801) are the other background work, but one is spawned per request
+    // rather than running on a clock.
     let _sweeper = expiry::spawn(state.clone());
 
     let app = linger_server::app(state);

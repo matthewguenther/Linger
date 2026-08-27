@@ -48,6 +48,7 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"
