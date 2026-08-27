@@ -40,10 +40,27 @@ async fn make_room(server: &TestServer, token: &str, slug: &str, topic: Option<&
 }
 
 async fn say(server: &TestServer, token: &str, room: &Room, body: &str) -> Message {
+    post(server, token, room, body, None).await
+}
+
+async fn reply(server: &TestServer, token: &str, room: &Room, body: &str, to: &Message) -> Message {
+    post(server, token, room, body, Some(to)).await
+}
+
+async fn post(
+    server: &TestServer,
+    token: &str,
+    room: &Room,
+    body: &str,
+    to: Option<&Message>,
+) -> Message {
     let resp = client()
         .post(server.url(&format!("/rooms/{}/messages", room.id)))
         .bearer_auth(token)
-        .json(&serde_json::json!({ "body": body }))
+        .json(&serde_json::json!({
+            "body": body,
+            "reply_to": to.map(|m| m.id.to_string()),
+        }))
         .send()
         .await
         .unwrap();
@@ -195,8 +212,15 @@ async fn an_archive_holds_every_message_and_every_file_and_it_opens() {
     let general = make_room(&server, &host.access_token, "general", Some("the big one")).await;
     let quiet = make_room(&server, &host.access_token, "quiet", None).await;
 
-    say(&server, &host.access_token, &general, "first thing said").await;
-    say(&server, &sam.access_token, &general, "**bold** reply").await;
+    let opener = say(&server, &host.access_token, &general, "first thing said").await;
+    reply(
+        &server,
+        &sam.access_token,
+        &general,
+        "**bold** reply",
+        &opener,
+    )
+    .await;
     let doomed = say(&server, &sam.access_token, &general, "regret this").await;
     share(
         &server,
@@ -242,6 +266,12 @@ async fn an_archive_holds_every_message_and_every_file_and_it_opens() {
     assert!(general_md.contains("**bold** reply"));
     assert!(general_md.contains("the big one"), "the topic is in there");
     assert!(general_md.contains("Matt (@matt)"));
+    // A reply quotes what it answered. A transcript where replies point at
+    // nothing is the least readable kind there is.
+    assert!(
+        general_md.contains("> ↩ **Matt**: first thing said"),
+        "a reply did not quote what it answered: {general_md}"
+    );
     assert!(general_md.contains("sam (@sam)"));
     assert!(
         !general_md.contains("regret this"),

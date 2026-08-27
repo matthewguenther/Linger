@@ -474,6 +474,11 @@ async fn room_markdown(
     let mut after: Option<MessageId> = None;
     let mut day: Option<(i64, u32, u32)> = None;
     let mut wrote_any = false;
+    // What each message said, in a few words, so a reply can quote the thing it
+    // is answering. A reply pointing at nothing is the least readable part of a
+    // transcript, and this is the whole cost of fixing it: a short string per
+    // message, in a room this loop is already walking.
+    let mut said: HashMap<MessageId, String> = HashMap::new();
 
     loop {
         let batch = crate::repo::messages::batch_ascending(
@@ -502,7 +507,8 @@ async fn room_markdown(
                 out.push_str(&format!("\n---\n\n## {y:04}-{m:02}-{d:02}\n\n"));
                 day = Some(today);
             }
-            out.push_str(&message_markdown(message, users, names));
+            out.push_str(&message_markdown(message, users, names, &said));
+            said.insert(message.id, excerpt(message, users));
             wrote_any = true;
         }
     }
@@ -518,6 +524,7 @@ fn message_markdown(
     message: &Message,
     users: &HashMap<UserId, User>,
     names: &HashMap<String, String>,
+    said: &HashMap<MessageId, String>,
 ) -> String {
     let mut out = String::new();
     let who = users.get(&message.author_id).map_or_else(
@@ -536,8 +543,14 @@ fn message_markdown(
         edited
     ));
 
-    if message.reply_to.is_some() {
-        out.push_str("*in reply to an earlier message*\n");
+    if let Some(replied_to) = message.reply_to {
+        match said.get(&replied_to) {
+            // A blockquote, which is what a reply looks like everywhere else.
+            Some(quoted) => out.push_str(&format!("> ↩ {quoted}\n")),
+            // The message it answered was deleted, or came before this room's
+            // first batch. Say that rather than quoting nothing.
+            None => out.push_str("> ↩ *a message that is no longer here*\n"),
+        }
     }
 
     let body = message.body.trim();
@@ -575,6 +588,29 @@ fn message_markdown(
 
     out.push('\n');
     out
+}
+
+/// A message in a few words, for the reply above it to quote.
+fn excerpt(message: &Message, users: &HashMap<UserId, User>) -> String {
+    let who = users
+        .get(&message.author_id)
+        .map_or("somebody who is gone", |u| u.display_name.as_str());
+    let body: String = message
+        .body
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let short: String = body.chars().take(60).collect();
+    let short = if short.chars().count() < body.chars().count() {
+        format!("{short}…")
+    } else {
+        short
+    };
+    if short.is_empty() {
+        format!("**{who}**")
+    } else {
+        format!("**{who}**: {short}")
+    }
 }
 
 /// The storage key behind a wire attachment.

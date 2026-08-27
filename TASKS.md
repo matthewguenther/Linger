@@ -194,7 +194,9 @@ at all until T-705.
   **What is in the zip**, under one top-level folder so unzipping it does not
   scatter files across somebody's downloads: `rooms/<slug>.md` per room in the
   order things were said, with a divider and a heading per day and every
-  message as `**HH:MM** — Display Name (@username)`; `media/` with every file
+  message as `**HH:MM** — Display Name (@username)`; a reply quoting what it
+  answered, because a transcript where replies point at nothing is the least
+  readable kind there is; `media/` with every file
   under its own name; `media.md` indexing who shared what, when and in which
   room; and a `README.md` that says what the archive is and that it needs
   nothing from this project to read. Times are UTC and the archive says so —
