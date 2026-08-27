@@ -23,15 +23,47 @@ have copied the whole server.
 - **A computer that stays on and is reachable from the internet.** A cheap
   virtual server (about $5–10 a month) is the usual answer. An old machine at
   home works if you can forward ports 80 and 443 to it.
-- **A domain name.** Any registrar. This is the address your friends type.
+- **A web address.** Either a domain you buy (around $12 a year) or a free one
+  from a dynamic-DNS service. See *Do I have to buy a domain?* below.
 - **Docker.** Install it from [docker.com](https://docs.docker.com/engine/install/).
+
+## Do I have to buy a domain?
+
+**No — but you do need a *name*, and a plain IP address will not work.** Here is
+why, in one line each:
+
+- The app only talks to servers over an encrypted connection, and encryption
+  needs a name to put on the certificate. An IP address cannot have one.
+- Uploaded files are served from a *second* name. That is what stops a file
+  somebody uploads from pretending to be the app itself.
+- Home internet connections get a new IP address every few weeks. With a name,
+  the server can move and nobody has to be told anything.
+
+**The free way.** Dynamic-DNS services — DuckDNS is the usual one — hand out
+names for nothing. Register **two** of them, one for the app and one for files:
+
+```yaml
+LINGER_DOMAIN: yourgroup.duckdns.org
+LINGER_MEDIA_DOMAIN: yourgroupfiles.duckdns.org
+```
+
+Put those same two names in the Caddyfile, one per block. Everything else in
+this guide works the same, and Caddy still gets a real certificate.
+
+Two separate names, rather than one name with `cdn.` in front of it, because
+free providers differ on whether you can put anything in front of your name.
+Two names always works.
 
 ---
 
-## 1. Point your domain at the machine
+## 1. Point your address at the machine
 
-Add **two** records at your domain registrar. Both point at your server's IP
-address.
+**Using a free dynamic-DNS name?** You do not add records yourself — you set
+your IP on the provider's website, or run their small updater so it keeps up
+when your IP changes. Do that for both names and skip to step 2.
+
+**Using a domain you bought?** Add **two** records at your registrar. Both point
+at your server's IP address.
 
 | Type | Name                     | Points to      |
 |------|--------------------------|----------------|
@@ -55,11 +87,13 @@ curl -O https://raw.githubusercontent.com/matthewguenther/Linger/main/deploy/com
 curl -O https://raw.githubusercontent.com/matthewguenther/Linger/main/deploy/Caddyfile
 ```
 
-## 3. Put your domain in both of them
+## 3. Put your address in both of them
 
-- In **compose.yaml**, change `LINGER_DOMAIN` to your domain.
+- In **compose.yaml**, change `LINGER_DOMAIN` to your address. If you are using
+  two free names, uncomment `LINGER_MEDIA_DOMAIN` and put the second one there.
 - In **Caddyfile**, replace `linger.example.com` everywhere it appears. There
-  are two blocks and both need it — the second one is the `cdn.` name.
+  are two blocks: the first is your main address, the second is the one files
+  are served from.
 
 Nothing else has to change to get started.
 
@@ -81,7 +115,11 @@ In the log you will see a box like this:
 ```
 
 **Copy that whole link. It goes into the Linger app, not into a web browser** —
-there is no website to visit, and a browser will just show an error.
+there is no website to visit, and a browser will just show an error. The server
+says so in the box too.
+
+If the box also says the address is `http` and an installed app cannot reach it,
+that means `LINGER_DOMAIN` is not set. Fix that before going further.
 
 ## 5. Make your account
 
@@ -130,7 +168,7 @@ After a change, run `docker compose up -d` again.
 |---|---|---|
 | `LINGER_POOL_BYTES` | Total storage the server will use. Write `250GB`, `500MB`, or a plain number. | `50GB` |
 | `LINGER_FILE_EXPIRY_DAYS` | How long a file stays before it is deleted. `off` keeps everything forever. Starred files never expire. | `365` |
-| `LINGER_MEDIA_DOMAIN` | The name files are served from, if you want something other than `cdn.` + your domain. It must be a different name from the main one. | `cdn.<your domain>` |
+| `LINGER_MEDIA_DOMAIN` | The name files are served from. Set it if you are using two free names, or want something other than `cdn.` + your domain. It must be different from the main one. | `cdn.<your address>` |
 | `LINGER_STORAGE` | `local` keeps files on the machine. `s3` keeps them in a cloud bucket. | `local` |
 | `LINGER_DATA_DIR` | Where the database and files live inside the container. | `/data` |
 
@@ -204,6 +242,9 @@ It prints a new password. Send it to them; they can change it in the app under
   `docker build -f deploy/Dockerfile -t ghcr.io/matthewguenther/linger:latest .`
 - **The setup link does not work.** It works once. If you already made an
   account, it is gone for good — that is deliberate.
+- **The startup log warns that `LINGER_DOMAIN` is not set.** Then your friends
+  cannot connect, whatever else looks fine. The app only talks to `https`
+  addresses. Go back to *Do I have to buy a domain?*
 
 ---
 
