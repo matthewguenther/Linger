@@ -18,6 +18,13 @@ import { ApiError, PublicApi, type AuthedApi } from "../lib/api";
 import DensityPicker from "../lib/DensityPicker";
 import type { Density } from "../lib/density";
 import { THEME_PREFS, type ThemePref } from "../lib/theme";
+import {
+  appVersion,
+  checkForUpdate,
+  installUpdate,
+  updateLine,
+  type UpdateCheck,
+} from "../lib/updates";
 import StylePicker from "./StylePicker";
 import { saveDisplayName } from "../lib/gateway";
 import {
@@ -164,6 +171,7 @@ export default function SettingsPanel({
             {normalize ? "names normalized" : "normalize everyone"}
           </button>
         </section>
+        <UpdatesSection />
         <section className="settings-section">
           <h3 className="panel-label">this computer</h3>
           <p className="settings-lead">
@@ -181,6 +189,99 @@ export default function SettingsPanel({
       </div>
       {roster}
     </main>
+  );
+}
+
+/**
+ * Updates (T-701).
+ *
+ * Nothing here happens on its own. The check runs when this panel opens and
+ * when the button is pressed; the download only ever starts because somebody
+ * asked for it. A chat window that restarts itself mid-sentence is worse than
+ * one that is a version behind, so installing is always the second click.
+ *
+ * The signature check is not a setting and is not mentioned as one — it is not
+ * optional, and there is no build of this that installs an unsigned update.
+ */
+function UpdatesSection() {
+  const [version, setVersion] = useState<string | null>(null);
+  const [check, setCheck] = useState<UpdateCheck | null>(null);
+  const [looking, setLooking] = useState(true);
+  const [installing, setInstalling] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const look = async (): Promise<void> => {
+    setLooking(true);
+    setProblem(null);
+    setCheck(await checkForUpdate());
+    setLooking(false);
+  };
+
+  useEffect(() => {
+    let open = true;
+    void (async () => {
+      const [found, current] = await Promise.all([checkForUpdate(), appVersion()]);
+      if (!open) return;
+      setCheck(found);
+      setVersion(current);
+      setLooking(false);
+    })();
+    return () => {
+      open = false;
+    };
+  }, []);
+
+  const install = async (): Promise<void> => {
+    setInstalling(true);
+    setProblem(null);
+    // On success this never comes back: the app is replaced by the new one.
+    const outcome = await installUpdate();
+    setInstalling(false);
+    setProblem(
+      outcome.kind === "failed"
+        ? `Couldn't install the update: ${outcome.reason}`
+        : "This copy was not built to update itself.",
+    );
+  };
+
+  const ready = check?.kind === "ready";
+
+  return (
+    <section className="settings-section">
+      <h3 className="panel-label">updates</h3>
+      <p className="settings-lead">
+        Linger checks for a new version when you open this panel. Nothing is
+        downloaded until you ask for it, and every update is checked against
+        this project's signing key before it is installed.
+      </p>
+      <p className="settings-lead settings-warmth-lead">
+        {version === null ? "Running from a browser, so there is no version to update." : `You are on version ${version}.`}
+      </p>
+      <p className={problem === null ? "settings-ok" : "settings-problem"} aria-live="polite">
+        {problem ?? updateLine(check, looking)}
+      </p>
+      {ready && check.notes !== null ? <p className="settings-notes">{check.notes}</p> : null}
+      <div className="settings-update-actions">
+        <button
+          type="button"
+          className="settings-mini"
+          disabled={looking || installing}
+          onClick={() => void look()}
+        >
+          check again
+        </button>
+        {ready ? (
+          <button
+            type="button"
+            className="settings-mini"
+            disabled={installing}
+            onClick={() => void install()}
+          >
+            {installing ? "downloading…" : "install and restart"}
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

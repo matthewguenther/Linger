@@ -349,6 +349,9 @@ deploy/                   Dockerfile, compose, Caddyfile
 docs/                     screenshots; docs/tasks/ archives closed milestones,
                           docs/decisions.md records settled questions
 scripts/                  check.sh (the whole local gate), lint-rules.sh,
+                          version-check.sh (one version number, three files),
+                          updater-key.sh (the update signing key),
+                          signing-preflight.sh (is that key the right one?),
                           minio-test.sh (the S3 backend, against a real MinIO),
                           fetch-fonts.sh (re-vendors the twelve bundled faces)
 ```
@@ -410,6 +413,12 @@ Things that surprise people the first time:
   upstream fix. **No CDN and no remote font URL, ever**: a remote face is a
   fingerprinting vector and a dependency on somebody else's uptime. The whole set
   is about 800 KB; `assets/fonts/README.md` has the details.
+- **The version number lives in three files** — `client/package.json`,
+  `client/src-tauri/Cargo.toml` and `client/src-tauri/tauri.conf.json`. Bump all
+  three together; `scripts/version-check.sh` (which CI runs) fails if they
+  disagree. If they drift, a release ships under the old number and every
+  installed copy decides it is already up to date, which looks exactly like
+  success.
 - **Renaming a wire type leaves an orphan.** `ts-rs` writes files but never deletes them,
   so the old `.ts` file stays behind and the drift check won't catch it. Delete it by hand.
 - **`client/src-tauri` is not in the root cargo workspace.** It links against system
@@ -481,11 +490,78 @@ Things that surprise people the first time:
   off. On Linux that means a notification service on the session bus — Plasma, GNOME and
   `dunst` all provide one. Without one, or if you turn notifications off at the OS level,
   the message still arrives in the stream; you just don't get interrupted about it.
+- **The app updates itself, and only ever because you asked it to**
+  (`client/src-tauri/src/updates.rs`, `client/src/lib/updates.ts`). It checks for
+  a new version at launch and when you open settings. A waiting update gets one
+  quiet word in the status bar; downloading and restarting is a second click in
+  settings, under *updates*. Nothing installs on its own and nothing pops up
+  mid-sentence. Every update is verified against the project's signing key
+  before a byte of it is installed, with no bypass — a build compiled without a
+  key configured refuses updates rather than taking an unsigned one. The WebView
+  is granted none of the updater plugin's own permissions; it calls two narrow
+  commands in the Rust shell, the same way it does for the gateway and the
+  keyring.
 - **Signing in needs a keyring to be remembered.** Each server's refresh token goes to
   the OS keyring — Keychain, Credential Manager, or a Secret Service provider like
   gnome-keyring or KWallet — as its own entry, plus one small entry listing which
   servers you have. Without a keyring, or with `pnpm dev` in a plain browser, the app
   still works; it just says so and asks you to sign in again next launch.
+
+### Cutting a release
+
+Installers are built by `.github/workflows/release.yml`, which only a tag fires.
+That job cuts a release and uses the signing key, so it has no business running
+on an ordinary push.
+
+Once, before the first release ever ships:
+
+```bash
+scripts/updater-key.sh
+```
+
+That generates the update signing key, writes its public half into
+`client/src-tauri/tauri.conf.json` (commit that), and prints what to do with the
+private half: back it up offline, and add it plus its password as two repository
+secrets:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.local/share/linger/updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD   # prompts; paste the password
+```
+
+The first argument is the secret's *name*; the `<` feeds the key file in as its
+*value*. **Losing that key means you can never ship an update to an installed
+copy again** — the only way back is reinstalling every machine by hand. It is
+generated once and never regenerated.
+
+To check the secrets without cutting a release, run the `release` workflow from
+the Actions tab. A manual run does the preflight and stops: it signs a throwaway
+file with the secret and checks that the key id matches the public key in
+`tauri.conf.json`. "Present" is not "correct" — a key that signs fine but isn't
+the mate of the committed one produces a green release that no installed copy
+will accept.
+
+Then, per release:
+
+```bash
+# bump all three version numbers, then:
+scripts/version-check.sh
+git commit -am "chore: 0.2.0"
+git tag v0.2.0 && git push origin main v0.2.0
+```
+
+The workflow builds Linux, Windows and both macOS architectures, signs the
+updater artifacts, and opens a **draft** GitHub release carrying `latest.json`.
+Read it, then publish it — publishing is what makes installed copies see the
+update, and it is deliberately a human's click rather than a side effect of
+pushing a tag.
+
+One thing worth knowing before the first release: installer signing on Windows
+and notarization on macOS are T-702, so until that lands the operating systems
+will still warn about an unknown publisher on first install. The update
+signature is a separate thing and is already in place — it is what stops a
+*later* update from being tampered with, and it is not what the OS checks when
+you first run an installer.
 
 Current work queue lives in [TASKS.md](TASKS.md).
 

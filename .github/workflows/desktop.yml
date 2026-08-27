@@ -1,11 +1,12 @@
 name: desktop
 
-# Manual trigger on purpose. This repo is private, so Actions minutes are
-# metered and non-Linux runners are billed at a multiplier (Windows 2x,
-# macOS 10x). Verifying the desktop shell on every push would burn the monthly
-# allowance for no benefit — the Linux shell check in ci.yml already catches
-# ordinary breakage, and WebKitGTK is the strictest of the three engines.
-# Run this before a release, or after touching client/src-tauri.
+# Manual trigger on purpose. The reason used to be money — this repo was
+# private and non-Linux runners billed at a multiplier — and since it went
+# public (2026-08-27) standard runners are free, so what is left is time and
+# noise. The Linux shell check in ci.yml already catches ordinary breakage,
+# WebKitGTK is the strictest of the three engines, and release.yml builds all
+# three on a tag anyway. Run this before a release, or after touching
+# client/src-tauri.
 on:
   workflow_dispatch:
 

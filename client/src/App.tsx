@@ -71,6 +71,7 @@ import { colorVar } from "./lib/palette";
 import { type ServerSession, useSessions } from "./lib/session";
 import { dropPresence, setPresenceLive, setPresenceRoom, startPresence } from "./lib/watchPresence";
 import { forgetPreviews } from "./lib/previews";
+import { checkForUpdate } from "./lib/updates";
 import { forgetNotifications, resetNotifications, setViewing } from "./notify/notify";
 import Roster from "./roster/Roster";
 import Stream from "./stream/Stream";
@@ -228,6 +229,11 @@ function Console({
   // A message the collection pointed at, on its way to the stream that holds
   // it. Cleared once that stream has been and looked.
   const [jumpTo, setJumpTo] = useState<MessageId | null>(null);
+
+  // A new version, found once at launch (T-701). It gets one quiet word in the
+  // status bar and nothing else: no dialog, no nag, no automatic restart. The
+  // panel is where you decide, and it is also where the check runs again.
+  const [updateWaiting, setUpdateWaiting] = useState(false);
   const narrow = useNarrow();
 
   // A server that has gone — signed out of, or refused — must not leave the
@@ -273,6 +279,16 @@ function Console({
       }
       return { ...held, [baseUrl]: next };
     });
+  }, []);
+
+  useEffect(() => {
+    let open = true;
+    void checkForUpdate().then((found) => {
+      if (open) setUpdateWaiting(found.kind === "ready");
+    });
+    return () => {
+      open = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -621,6 +637,16 @@ function Console({
           >
             {you.display_name}
           </button>
+          {updateWaiting && !settingsOpen ? (
+            <button
+              type="button"
+              className="status-action"
+              onClick={openSettings}
+              title="A new version is ready. Nothing installs until you say so."
+            >
+              update ready
+            </button>
+          ) : null}
           {keyringNotice ? <span className="status-warn">not remembered</span> : null}
         </span>
       </footer>

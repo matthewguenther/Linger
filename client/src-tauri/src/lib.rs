@@ -4,6 +4,7 @@
 
 pub mod gateway;
 mod secrets;
+mod updates;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -244,6 +245,11 @@ pub fn run() {
         // them, or one from a person they asked to hear from (SPEC §4.2).
         // There are no other notifications and no unread badge to attach one to.
         .plugin(tauri_plugin_notification::init())
+        // Signed in-app updates (T-701, ARCHITECTURE §7 baseline 8). Registering
+        // the plugin is what makes `[plugins.updater]` readable from Rust; the
+        // capability file grants the WebView none of the plugin's own commands,
+        // so the page goes through `updates.rs` or not at all.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Connections::default())
         .invoke_handler(tauri::generate_handler![
             activity_probe,
@@ -253,7 +259,10 @@ pub fn run() {
             gateway_connect,
             gateway_disconnect,
             gateway_token,
-            gateway_send
+            gateway_send,
+            updates::app_version,
+            updates::update_check,
+            updates::update_install
         ])
         .run(tauri::generate_context!())
         .expect("failed to start linger");
