@@ -372,7 +372,7 @@ deploy/                   Dockerfile, compose, Caddyfile
 docs/                     screenshots; docs/tasks/ archives closed milestones,
                           docs/decisions.md records settled questions
 scripts/                  check.sh (the whole local gate), lint-rules.sh,
-                          version-check.sh (one version number, three files),
+                          version-check.sh (one version number, four files),
                           updater-key.sh (the update signing key),
                           signing-preflight.sh (is that key the right one?),
                           minio-test.sh (the S3 backend, against a real MinIO),
@@ -436,12 +436,14 @@ Things that surprise people the first time:
   upstream fix. **No CDN and no remote font URL, ever**: a remote face is a
   fingerprinting vector and a dependency on somebody else's uptime. The whole set
   is about 800 KB; `assets/fonts/README.md` has the details.
-- **The version number lives in three files** — `client/package.json`,
-  `client/src-tauri/Cargo.toml` and `client/src-tauri/tauri.conf.json`. Bump all
-  three together; `scripts/version-check.sh` (which CI runs) fails if they
-  disagree. If they drift, a release ships under the old number and every
-  installed copy decides it is already up to date, which looks exactly like
-  success.
+- **The version number lives in four files** — `client/package.json`,
+  `client/src-tauri/Cargo.toml`, `client/src-tauri/tauri.conf.json` and the root
+  `Cargo.toml`. The first three are the desktop app; the fourth is the server,
+  and so the version its `GET /health` reports and the tag its container image
+  is published under. Bump all four together; `scripts/version-check.sh` (which
+  CI runs) fails if they disagree. If they drift, a release ships under the old
+  number and every installed copy decides it is already up to date, which looks
+  exactly like success.
 - **Renaming a wire type leaves an orphan.** `ts-rs` writes files but never deletes them,
   so the old `.ts` file stays behind and the drift check won't catch it. Delete it by hand.
 - **There are two content-security policies and you develop under the loose one.**
@@ -587,6 +589,21 @@ The workflow builds Linux and Windows, signs the updater artifacts, and opens a
 **draft** GitHub release carrying `latest.json`. Read it, then publish it —
 publishing is what makes installed copies see the update, and it is deliberately
 a human's click rather than a side effect of pushing a tag.
+
+The same tag also publishes the server as a container image
+(`.github/workflows/image.yml`): `ghcr.io/matthewguenther/linger` gets `0.2.0`,
+`0.2` and `latest`, for x86-64 and ARM64. That is what `deploy/compose.yaml`
+pulls, so moving `latest` is what makes a host's `docker compose pull` find a
+new server. Nothing about it is signed and nothing auto-updates — a host
+chooses when to pull. Running that workflow from the Actions tab builds the
+image and pushes nothing, the same way a manual `release` run checks the
+signing key and stops.
+
+**One thing to do by hand, once ever:** the first image push creates the ghcr
+package as *private*, and a private package means `docker compose up` fails
+with `unauthorized` for everybody who is not you. Set it public at
+`github.com/users/<you>/packages/container/linger/settings` after the first
+tag.
 
 **macOS is deliberately not built yet**, and the Windows installer is not
 code-signed. Both are decisions rather than gaps — see

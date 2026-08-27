@@ -5,9 +5,9 @@ name: release
 # and uses the signing key, and neither belongs on a push or a pull request.
 # To ship:
 #
-#   1. bump the version in client/package.json, client/src-tauri/Cargo.toml and
-#      client/src-tauri/tauri.conf.json — all three, `scripts/version-check.sh`
-#      says so if you miss one
+#   1. bump the version in client/package.json, client/src-tauri/Cargo.toml,
+#      client/src-tauri/tauri.conf.json and the root Cargo.toml — all four,
+#      `scripts/version-check.sh` says so if you miss one
 #   2. commit, then `git tag v0.2.0 && git push origin v0.2.0`
 #   3. this builds Linux and Windows bundles and opens a **draft** release with
 #      `latest.json`
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: versions match the tag
-        # On a manual run there is no tag to match, only the three files.
+        # On a manual run there is no tag to match, only the four files.
         run: scripts/version-check.sh "${{ github.ref_type == 'tag' && github.ref_name || '' }}"
       - uses: actions/setup-node@v4
         with:
@@ -145,7 +145,8 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Linger ${{ github.ref_name }}
           releaseBody: |
-            Installers for Linux, macOS and Windows are attached.
+            Installers for Linux and Windows are attached. macOS is not built
+            yet — see docs/decisions.md.
 
             Installed copies find this release through `latest.json` once it is
             published — settings, `updates`, `check again`.
