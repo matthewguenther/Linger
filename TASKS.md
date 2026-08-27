@@ -135,7 +135,7 @@ an SSRF guard, the expiry sweeper, and the status image.
 
 *Milestone check: a gradient name from two palette keys, contrast verifiably ≥4.5:1 in both themes (the CI property test already guards the values).*
 
-- ⬜ **T-601 · Name rendering engine** — effort: **medium**
+- ⏳ **T-601 · Name rendering engine** — effort: **medium** — Matt, 2026-08-27
   Build step: emit `palette.generated.css` from `linger-core::palette::css_variables`
   (single source of truth; oklch or hex per T-002's verdict). Render styled names
   everywhere names appear; gradient fixed 92°; shimmer (4s linear)/glow honor
