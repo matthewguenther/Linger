@@ -423,7 +423,21 @@ E2EE launders a false promise, which is worse than an honest limitation.
   anything not on the image/video/audio allowlist.
 - Re-encode images server-side. This strips EXIF (spec §4.10) and neutralizes polyglot
   files in one step.
-- Strict CSP on the app origin: no `unsafe-inline`, no remote script, no remote fonts.
+- Strict CSP on the app origin: no remote script, no remote fonts, and nothing
+  reachable except the server the app is signed in to. `unsafe-inline` survives on
+  `style-src` alone and cannot be removed: the message list is virtualized, so a row's
+  position is a style attribute, and a person's name is painted from `--person-*`
+  properties set the same way. `script-src` is `'self'` and nothing else.
+- **The policy comes in two, and the shipped one is the strict one.**
+  `tauri.conf.json` carries `csp` and `devCsp`; Tauri picks between them at compile
+  time, so `pnpm tauri dev` gets the local-server relaxations
+  (`http://localhost:*`, `http://127.0.0.1:*`) and anything the bundler produces
+  does not. A shipped page that could reach `http://localhost:*` could knock on
+  every other service the person is running. Two sources in both policies look like
+  relaxations and are not: `ipc:` and `http://ipc.localhost` are Tauri's own IPC
+  channel — `invoke()` is a `fetch` at one of them — and blocking them does not stop
+  IPC, it drops it silently onto a slower `postMessage` fallback.
+  `client/src-tauri/tests/csp.rs` holds both policies to this.
 - Markdown rendering: allowlist-based sanitizer, no raw HTML passthrough, ever.
 
 **The origin split is enforced, not just advertised.** `LINGER_MEDIA_DOMAIN` defaults to
