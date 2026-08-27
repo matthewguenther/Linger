@@ -303,7 +303,7 @@ the architect to archive.
 Budget the full estimate; notarization is a version-sensitive slog — follow
 current vendor docs, not memory (AGENTS.md).*
 
-- ⬜ **T-701 · Updater + signing keys** — effort: **high**
+- ⏳ **T-701 · Updater + signing keys** — effort: **high** — claimed by Matt, 2026-08-27
   Tauri updater; generate the signing key and **back it up offline before
   anything ships** (losing it = no more updates, ARCHITECTURE §7.7). Release
   workflow: tag → build 3-OS installers → publish manifest.
