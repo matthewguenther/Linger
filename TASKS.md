@@ -61,7 +61,7 @@ works in every tool:
 | **low** | Any capable model at its default setting. Mechanical and tightly specified — a frontier model at max effort just burns money re-deriving what the task text already decides. |
 | **medium** | A frontier model at its normal setting. Real features with judgment in the details. |
 | **high** | A frontier model at a high-reasoning setting. Cross-cutting, but the architecture docs carry a lot of the load. |
-| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Currently T-701+T-702 (signing/notarization) and, on the backburner, T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
+| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Currently T-702 (signing/notarization) and, on the backburner, T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
 
 Running everything at maximum is not better — it is slower, pricier, and prone
 to overbuilding simple tasks. Match the effort to the label and escalate only if
@@ -303,10 +303,68 @@ the architect to archive.
 Budget the full estimate; notarization is a version-sensitive slog — follow
 current vendor docs, not memory (AGENTS.md).*
 
-- ⏳ **T-701 · Updater + signing keys** — effort: **high** — claimed by Matt, 2026-08-27
+- ✅ **T-701 · Updater + signing keys** — effort: **high** — landed 2026-08-27
   Tauri updater; generate the signing key and **back it up offline before
-  anything ships** (losing it = no more updates, ARCHITECTURE §7.7). Release
+  anything ships** (losing it = no more updates, ARCHITECTURE §7). Release
   workflow: tag → build 3-OS installers → publish manifest.
+
+  **Landing note.** The updater is wired end to end in code, and one step is
+  left that only Matt can do — see *the key* below.
+
+  **The WebView is granted nothing.** `capabilities/default.json` does not list
+  `updater:default`, so the page cannot call `plugin:updater|check` or
+  `|install`. It calls two of the app's own commands in
+  `client/src-tauri/src/updates.rs`, which is the same shape the gateway and the
+  keyring already use. A page that can start an installer is not a page with a
+  minimum permission set. The plugin still has to be *registered*, because that
+  is what parses `[plugins.updater]` into somewhere `app.updater()` can read it.
+
+  **A build with no key refuses every update, rather than taking an unsigned
+  one.** `pubkey` ships as `""` in `tauri.conf.json` until the key exists, and
+  `updates.rs` treats "no key or no endpoint" as its own answer —
+  `unconfigured`, which the settings panel renders as "this copy was not built
+  to update itself". Underneath that, the plugin's own `verify_signature` is
+  unconditional and has no bypass, so even a mistake here fails closed.
+
+  **The key is Matt's errand and is not done.** `scripts/updater-key.sh`
+  generates it outside the repo (`~/.local/share/linger/updater.key` by
+  default), refuses to write inside the working tree, refuses to overwrite an
+  existing key, and stamps the public half into `tauri.conf.json` for
+  committing. Then: back the private half and its password up offline, and add
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as
+  repository secrets. Until that is done `release.yml` fails in its first job,
+  on purpose — a release that quietly built unsigned bundles would be worse.
+
+  **Releases are draft-first.** A tag builds Linux, Windows and both macOS
+  architectures and opens a *draft* release carrying `latest.json`. Publishing
+  it is what makes installed copies see the update, and that stays a human's
+  click. The endpoint is this repo's `releases/latest/download/latest.json`,
+  which resolves only to published releases.
+
+  **One version number, three files** — `client/package.json`,
+  `client/src-tauri/Cargo.toml`, `client/src-tauri/tauri.conf.json`.
+  `scripts/version-check.sh` gates it, from `check.sh` and from CI's `rules`
+  job, and `release.yml` checks the tag against it before building anything.
+  This is the failure that looks like success: ship 0.2.0 under the old number
+  and every installed copy decides it is already current.
+
+  **Two things worth knowing.** Linux builds on `ubuntu-22.04`, not `latest` —
+  a bundle linked against a newer glibc will not start on an older
+  distribution, and the reverse is fine. And `createUpdaterArtifacts` is on in
+  the committed config, so a local `pnpm tauri build` now needs
+  `TAURI_SIGNING_PRIVATE_KEY` in the environment or it stops. `pnpm tauri dev`
+  is untouched, and nobody's normal loop runs `tauri build`.
+
+  **What has not been proven.** Nobody has installed a signed bundle and watched
+  it update itself — that needs the key, a published release, and three
+  operating systems, and it is M7's milestone check rather than this task's.
+  What was checked here: the shell compiles and its tests pass against the real
+  crate, the settings panel and status-bar line render, and both halves report
+  `unconfigured` today because the key is genuinely absent. **The private repo
+  matters for this**: GitHub release assets need no authentication only on a
+  public repo, so before the first real release either the repo goes public or
+  the endpoint moves to a host Matt controls. It is one line in
+  `tauri.conf.json` either way — see the parking lot.
 - ⬜ **T-702 · Windows signing + macOS notarization** — effort: **high**
   Needs certs/Apple developer account (Matt). Harden CSP for release while here
   (drop dev relaxations from `tauri.conf.json`).
@@ -400,6 +458,14 @@ Plasma 6 Wayland and Windows.*
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
+- **Where release downloads live.** The updater endpoint is this repo's
+  `releases/latest/download/latest.json`, and the repo is private — GitHub
+  release assets are only fetchable without a token on a public repo. So before
+  the first release either the repo (or its releases) goes public, or the
+  endpoint moves to a static host Matt runs. Anything that needs a credential in
+  the client is not an option; shipping a token in a desktop app is shipping the
+  token. One line in `client/src-tauri/tauri.conf.json` either way, but it has
+  to be decided before a tag is pushed.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
   member's). **Built that way in T-504** — the favicon is inlined as a `data:`
   URI so a reader's machine never touches the linked site either. Matt has not

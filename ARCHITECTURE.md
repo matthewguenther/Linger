@@ -403,8 +403,15 @@ E2EE launders a false promise, which is worse than an honest limitation.
 7. **Tauri capabilities:** the WebView gets the minimum permission set. Activity
    detection is exposed as exactly one narrow command returning a resolved
    `Activity`. The WebView can never enumerate processes.
-8. **Signed auto-updates.** Tauri's updater with a signing key generated at M0 and
-   **backed up offline**. Losing it means you can never ship an update.
+8. **Signed auto-updates.** Tauri's updater, with one minisign key whose public half
+   is committed in `client/src-tauri/tauri.conf.json` and whose private half is
+   **generated once by `scripts/updater-key.sh` and backed up offline** (T-701).
+   Losing it means you can never ship an update; leaking it means whoever has it
+   can ship code to every machine running Linger. Verification is not optional and
+   has no bypass: a build with no key configured refuses every update rather than
+   installing an unverified one. The WebView is granted none of the updater
+   plugin's permissions — it calls two of the app's own commands
+   (`client/src-tauri/src/updates.rs`), so a page can never start an installer.
 9. **No telemetry.** Not opt-in, not anonymous, not crash reporting. None.
 
 ### User content is hostile

@@ -90,8 +90,8 @@ jobs:
   tauri-shell:
     # Builds the desktop shell against real WebKitGTK and runs its tests — the
     # gateway client lives here, and its resume/sequence accounting is the kind
-    # of thing that has to be gated, not checked by hand. Full bundles and
-    # signing are M7.
+    # of thing that has to be gated, not checked by hand. Signed bundles for all
+    # three OSes are release.yml, which only a tag fires.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -129,3 +129,7 @@ jobs:
           fetch-depth: 0
       - name: rules lint
         run: scripts/lint-rules.sh "${{ github.event.pull_request.base.sha || '' }}"
+      - name: one version number in three files
+        # An updater that compares the wrong version is a release that installs
+        # nothing and reports success (T-701).
+        run: scripts/version-check.sh

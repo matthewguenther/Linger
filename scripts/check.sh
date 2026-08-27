@@ -8,6 +8,9 @@ cd "$(dirname "$0")/.."
 echo "== rules lint =="
 scripts/lint-rules.sh "${1:-}"
 
+echo "== version check =="
+scripts/version-check.sh
+
 echo "== rust: fmt =="
 cargo fmt --all --check
 echo "== rust: clippy =="

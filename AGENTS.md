@@ -133,8 +133,9 @@ nothing, so when a feature moves or gets cut, fix the README in the same commit.
 ## Build and check
 
 `scripts/check.sh` runs the whole local gate in the order CI runs it — rules
-lint, fmt, clippy, workspace tests, bindings drift, client typecheck + tests,
-and the desktop-shell pass. Green here should mean green there. The pieces:
+lint, the version check, fmt, clippy, workspace tests, bindings drift, client
+typecheck + tests, and the desktop-shell pass. Green here should mean green
+there. The pieces:
 
 ```bash
 cargo test --workspace          # core + server + activity; also regenerates TS bindings
@@ -157,6 +158,10 @@ Things that trip people up, whatever machine or agent you're on:
   `scripts/check.sh` runs it when the GUI deps are installed.
 - **If your toolchain has no `rustfmt` or `clippy`**, install a rustup toolchain
   into a scratch directory rather than system-wide, and let CI be the authority.
+- **The app's version number lives in three files** — `client/package.json`,
+  `client/src-tauri/Cargo.toml` and `client/src-tauri/tauri.conf.json`. Bump all
+  three together or `scripts/version-check.sh` (in `check.sh` and in CI) fails.
+  A release built under the wrong number installs nothing and reports success.
 - **`crates/linger-server/tests/s3.rs` skips itself** unless
   `LINGER_TEST_S3_ENDPOINT` points at an S3 API, so `cargo test --workspace`
   proves nothing about the S3 backend. `scripts/minio-test.sh` starts a
