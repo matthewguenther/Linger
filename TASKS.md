@@ -254,7 +254,7 @@ auto-update, installed, on a machine that did not build it.***
   committed endpoint is the final one. This mattered because a private repo's
   release assets need authentication, and the alternative — a credential in the
   client — is not one: shipping a token in a desktop app is shipping the token.
-- ⬜ **T-702 · Release CSP + the warning, said out loud** — effort: **low**
+- ⏳ **T-702 · Release CSP + the warning, said out loud** — effort: **low** — claimed by Matt, 2026-08-27
   What is left of the old T-702 once signing moved to T-705, and none of it is
   blocked. Two things:
   - **Harden the CSP for release.** `tauri.conf.json`'s `connect-src`,
