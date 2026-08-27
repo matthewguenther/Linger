@@ -158,10 +158,11 @@ Things that trip people up, whatever machine or agent you're on:
   `scripts/check.sh` runs it when the GUI deps are installed.
 - **If your toolchain has no `rustfmt` or `clippy`**, install a rustup toolchain
   into a scratch directory rather than system-wide, and let CI be the authority.
-- **The app's version number lives in three files** — `client/package.json`,
-  `client/src-tauri/Cargo.toml` and `client/src-tauri/tauri.conf.json`. Bump all
-  three together or `scripts/version-check.sh` (in `check.sh` and in CI) fails.
-  A release built under the wrong number installs nothing and reports success.
+- **The version number lives in four files** — `client/package.json`,
+  `client/src-tauri/Cargo.toml`, `client/src-tauri/tauri.conf.json` and the root
+  `Cargo.toml` (the server, and so the published image). Bump all four together
+  or `scripts/version-check.sh` (in `check.sh` and in CI) fails. A release built
+  under the wrong number installs nothing and reports success.
 - **`crates/linger-server/tests/s3.rs` skips itself** unless
   `LINGER_TEST_S3_ENDPOINT` points at an S3 API, so `cargo test --workspace`
   proves nothing about the S3 backend. `scripts/minio-test.sh` starts a

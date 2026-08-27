@@ -11,6 +11,11 @@
 #
 # Backup = ./data/linger.db + ./data/objects/. That's the whole server. (With
 # LINGER_STORAGE=s3, the bucket replaces ./data/objects/.)
+#
+# Updating = `docker compose pull && docker compose up -d`. The image below
+# follows `latest`, which moves when a version is tagged; write `:0.2.0`
+# instead if you would rather pick your moment. Nothing updates on its own.
+# Images are published for x86-64 and ARM64, so a Raspberry Pi works too.
 
 services:
   linger:

@@ -61,8 +61,8 @@ works in every tool:
 | **low** | Any capable model at its default setting. Mechanical and tightly specified — a frontier model at max effort just burns money re-deriving what the task text already decides. |
 | **medium** | A frontier model at its normal setting. Real features with judgment in the details. |
 | **high** | A frontier model at a high-reasoning setting. Cross-cutting, but the architecture docs carry a lot of the load. |
-| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Currently T-705 (signing/notarization, blocked on certificates) and, on the
-backburner, T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
+| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Both are on the backburner: T-705 (signing/notarization, blocked on
+certificates) and T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
 
 Running everything at maximum is not better — it is slower, pricier, and prone
 to overbuilding simple tasks. Match the effort to the label and escalate only if
@@ -171,8 +171,9 @@ neither is obviously worth buying for a server you hand to a friend group. macOS
 does not ship at all rather than shipping unsigned — the move from an ad-hoc
 signature to a real one is the transition that breaks an app the updater has
 replaced in place, so an unsigned build now is not a step towards a signed one.
-The signing work is parked as T-705. What still has to happen for real: **one
-auto-update, installed, on a machine that did not build it.***
+The signing work is parked as T-705, on the backburner. What still has to
+happen for real: **one auto-update, installed, on a machine that did not build
+it.***
 
 - ✅ **T-701 · Updater + signing keys** — effort: **high** — landed 2026-08-27
   Tauri updater; generate the signing key and **back it up offline before
@@ -305,23 +306,57 @@ auto-update, installed, on a machine that did not build it.***
   file, not watched in an installed build, because building one needs the signing
   key and a bundle nobody has installed yet. That is M7's milestone check, and it
   is a person's job.
-- ⬜ **T-703 · Server image publish** — effort: **low**
-  ghcr.io workflow for `deploy/Dockerfile` (ffmpeg is already in it, T-501; the
-  CI *runner* still needs it, or the video-poster test keeps skipping),
-  version tags, compose points at it.
-- ⬜ **T-705 · Windows signing + macOS notarization** — effort: **treacherous**
-  **Blocked on money, not on effort** — a Windows OV certificate (a few hundred
-  a year) and an Apple Developer Program membership ($99/year). Do not start
-  without both; there is nothing to test against.
-  Windows: certificate into a repository secret, signing wired into the bundler,
-  the workflow refusing to publish an unsigned installer. macOS: Developer ID
-  signing plus `notarytool` and a stapled ticket, then uncomment the two macOS
-  entries in `release.yml` — **in the same pass, never before**. Follow current
-  vendor docs, not memory; this is the version-sensitive slog AGENTS.md warns
-  about.
-  *Accept:* a downloaded installer raises no warning on either OS, and a macOS
-  copy installed from it takes an auto-update without being killed for a
-  signature mismatch.
+- ✅ **T-703 · Server image publish** — effort: **low** — landed 2026-08-27
+
+  **Landing note.** `.github/workflows/image.yml` publishes the server to
+  `ghcr.io/matthewguenther/linger`, which is the name `deploy/compose.yaml`
+  already asked for. It is release.yml's shape on purpose: **only a tag
+  publishes.** A tag pushes `0.2.0`, `0.2` and `latest`; a manual run from the
+  Actions tab builds both architectures and pushes nothing; a pull request that
+  touches `deploy/`, `crates/`, `Cargo.toml` or `Cargo.lock` builds amd64 only
+  and pushes nothing, so a Dockerfile that stops working is caught before a
+  release rather than during one. Moving `latest` is what makes a host's
+  `docker compose pull` find a new server — nothing updates on its own, which
+  is the right default for somebody else's box.
+
+  **x86-64 and ARM64.** A friend-group server on a Raspberry Pi is a normal
+  thing to want, and without an arm64 manifest those hosts get "no matching
+  manifest" from `docker compose up`. arm64 is built under emulation and is
+  slow — the better part of an hour for a Rust release build — which is
+  affordable because only tags and manual runs do it. **Not yet proven:** no
+  arm64 image has been built. Run the workflow manually once before the first
+  tag. If emulation turns out to be the problem, the fix is a second job on a
+  native `ubuntu-24.04-arm` runner pushing by digest.
+
+  **The version number lives in four files now, not three.** The root
+  `Cargo.toml` joined the other three, because the server's `GET /health`
+  reports `CARGO_PKG_VERSION` and a tag now publishes an image under that same
+  number. An image tagged 0.2.0 whose `/health` says 0.1.0 is the same class of
+  lie T-701's check exists to prevent, so `scripts/version-check.sh` covers it.
+
+  **CI has ffmpeg now.** The video-poster and duration tests skip themselves
+  when ffmpeg is missing, and it was missing on the runner, so they have never
+  actually run anywhere. They run now. (The image has had ffmpeg since T-501;
+  this was only ever the runner.)
+
+  **One human step, once ever:** the first push creates the ghcr package as
+  *private*, and a private package means `docker compose up` fails with
+  `unauthorized` for everyone who is not Matt. It has to be set public by hand
+  in the package settings. No flag in the workflow can do it.
+
+  **Also fixed in passing:** `release.yml`'s release body said installers for
+  macOS were attached. They are not.
+
+*(T-705, signing and notarization, moved to the* **Backburner** *on 2026-08-27.
+It is blocked on two paid certificates and nothing in M7 waits on it, so it
+does not belong in the middle of the queue.)*
+
+**M7 has no open tasks left — only its check, which is a person's job.** Cut a
+tag, publish the draft release, install the bundle on a machine that did not
+build it, then publish the next tag and watch that machine take the update.
+Doing that also closes the Linux and Windows two thirds of the T-002/T-003
+sign-off, and pulling `ghcr.io/matthewguenther/linger` on a real box is the
+first half of M5's check.
 
 ## M8 — export
 
@@ -338,8 +373,30 @@ auto-update, installed, on a machine that did not build it.***
 
 ## Backburner — later, not the next thing
 
-Two V1 pieces live here. They are still in the spec. They are not on the path to a
-usable product. Do not pull either "while you're in there."
+Three things live here: two V1 features that are still in the spec, and one
+release errand that is blocked on money. None of them is on the path to a
+usable product. Do not pull any of them "while you're in there."
+
+### Signing and notarization
+
+*Moved here 2026-08-27 by Matt, from M7. Nothing in the milestone waits on it:
+M7 closes on Linux and Windows, unsigned, by decision
+([`docs/decisions.md`](docs/decisions.md)). It comes off the backburner the day
+somebody buys the certificates, not before.*
+
+- ⬜ **T-705 · Windows signing + macOS notarization** — effort: **treacherous**
+  **Blocked on money, not on effort** — a Windows OV certificate (a few hundred
+  a year) and an Apple Developer Program membership ($99/year). Do not start
+  without both; there is nothing to test against.
+  Windows: certificate into a repository secret, signing wired into the bundler,
+  the workflow refusing to publish an unsigned installer. macOS: Developer ID
+  signing plus `notarytool` and a stapled ticket, then uncomment the two macOS
+  entries in `release.yml` — **in the same pass, never before**. Follow current
+  vendor docs, not memory; this is the version-sensitive slog AGENTS.md warns
+  about.
+  *Accept:* a downloaded installer raises no warning on either OS, and a macOS
+  copy installed from it takes an auto-update without being killed for a
+  signature mismatch.
 
 ### Entrance sounds
 
@@ -408,6 +465,13 @@ Plasma 6 Wayland and Windows.*
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
+- **Nothing in the client can pin a message.** The server has
+  `POST /messages/{id}/pin`, the media grid has a `pinned` filter, and file
+  expiry spares "starred or pinned" files — but there is no pin control
+  anywhere in the app and no `pinMessage` in `client/src/lib/api.ts`. So the
+  filter is always empty and half of the expiry promise is unreachable. Add a
+  control, or drop the filter and the half-promise. Found while writing the
+  guides, 2026-08-27.
 - Link-preview fetching is host-side (privacy: the host's IP fetches, not each
   member's). **Built that way in T-504** — the favicon is inlined as a `data:`
   URI so a reader's machine never touches the linked site either. Matt has not

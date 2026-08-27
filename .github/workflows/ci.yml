@@ -18,6 +18,15 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: ffmpeg
+        # Video posters and durations shell out to ffmpeg, and the tests for
+        # them skip themselves when it is missing rather than failing (a server
+        # without ffmpeg is a supported thing — ARCHITECTURE §8). A skipped test
+        # is a test nobody is running, so the runner gets ffmpeg. The published
+        # image has had it since T-501.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
@@ -129,7 +138,7 @@ jobs:
           fetch-depth: 0
       - name: rules lint
         run: scripts/lint-rules.sh "${{ github.event.pull_request.base.sha || '' }}"
-      - name: one version number in three files
+      - name: one version number in four files
         # An updater that compares the wrong version is a release that installs
         # nothing and reports success (T-701).
         run: scripts/version-check.sh
