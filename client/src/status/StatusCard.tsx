@@ -11,7 +11,7 @@
  * mechanism, and half of that was the font it arrived in.
  */
 import type { User } from "../generated/User";
-import { nameStyle } from "../lib/names";
+import { nameProps } from "../lib/names";
 import "./status.css";
 
 /**
@@ -56,7 +56,7 @@ export default function StatusCard({
   return (
     <div className="person-status">
       {hasLine ? (
-        <p className="status-line" style={nameStyle(user)}>
+        <p {...nameProps(user, "status-line")}>
           {line}
         </p>
       ) : null}

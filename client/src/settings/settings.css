@@ -125,6 +125,14 @@
   color: var(--text-primary);
 }
 
+/* On. The same quiet raise the density picker uses for its chosen mode — no
+   accent, which SPEC §5.3 spends on exactly four things and this is not one. */
+.settings-mini[aria-pressed="true"] {
+  background: var(--surface-2);
+  border-color: var(--hairline-strong);
+  color: var(--text-primary);
+}
+
 .settings-mini:disabled {
   color: var(--text-faint);
   cursor: default;

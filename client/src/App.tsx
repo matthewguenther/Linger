@@ -40,6 +40,7 @@ import MediaPanel from "./media/MediaPanel";
 import { storageDetail, storageLine } from "./media/media";
 import { useNow } from "./lib/clock";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
+import { applyNormalize, loadNormalize } from "./lib/normalize";
 import SettingsPanel from "./settings/SettingsPanel";
 import { noRoomsBody, noRoomsRail } from "./settings/copy";
 import {
@@ -191,6 +192,10 @@ function Console({
   // to where you were rather than to the top of its list.
   const [openRoomIds, setOpenRoomIds] = useState<Record<string, RoomId>>({});
   const [density, setDensity] = useState<Density>(loadDensity);
+  // "Normalize everyone" (SPEC §4.5): the reader's answer to other people's
+  // name styling. It is one attribute on `<html>`, so it lives beside density
+  // rather than anywhere near the components that draw a name.
+  const [normalize, setNormalize] = useState<boolean>(loadNormalize);
   // Which host surface is open over the stream, if any (T-410).
   const [hostSection, setHostSection] = useState<HostSection | null>(null);
   // The member's own settings (T-411). Mutually exclusive with the host panel:
@@ -255,6 +260,10 @@ function Console({
   useEffect(() => {
     applyDensity(density);
   }, [density]);
+
+  useEffect(() => {
+    applyNormalize(normalize);
+  }, [normalize]);
 
   // One watcher for the window, however many servers there are. The per-server
   // records live inside it and are added and dropped by `ServerLink`.
@@ -475,6 +484,8 @@ function Console({
           user={you}
           density={density}
           onDensityChange={setDensity}
+          normalize={normalize}
+          onNormalizeChange={setNormalize}
           onSignOut={() => onSignOut(active.baseUrl)}
           onReauthenticated={(auth) => onAddServer(api.baseUrl, auth)}
           onClose={() => setSettingsOpen(false)}

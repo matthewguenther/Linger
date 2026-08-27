@@ -25,6 +25,7 @@ import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
 import { useGateway } from "../lib/gateway";
+import { nameProps } from "../lib/names";
 import { colorVar, PALETTE_KEYS } from "../lib/palette";
 import { deadWords, expiryWords, inviteUrl, moveRoom, useWords } from "./host";
 import "./host.css";
@@ -679,7 +680,7 @@ function PeopleSection({ api }: { api: AuthedApi }) {
         <ul className="host-list">
           {removed.map((person) => (
             <li className="host-person" key={person.id}>
-              <span className="host-person-name">{person.display_name}</span>
+              <span {...nameProps(person, "host-person-name")}>{person.display_name}</span>
               <span className="host-person-username meta">@{person.username}</span>
               <button
                 type="button"

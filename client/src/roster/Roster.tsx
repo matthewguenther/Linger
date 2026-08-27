@@ -29,7 +29,7 @@ import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
 import { useGateway } from "../lib/gateway";
-import { nameStyle, personStyle } from "../lib/names";
+import { nameProps, personStyle } from "../lib/names";
 import NotifyRules from "../notify/NotifyRules";
 import StatusCard from "../status/StatusCard";
 import StatusEditor from "../status/StatusEditor";
@@ -180,7 +180,7 @@ function PersonCard({
       {/* The dot is decoration; the word beside it is what a screen reader
           reads, so presence is never carried by color alone. */}
       <span className="person-dot" data-state={state} aria-hidden="true" />
-      <span className="person-name" style={nameStyle(user)}>
+      <span {...nameProps(user, "person-name")}>
         {user.display_name}
       </span>
       <span className="sr-only">{stateWord(state)}</span>

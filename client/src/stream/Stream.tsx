@@ -918,13 +918,19 @@ function ReplyLine({
       </p>
     );
   }
-  const who = people.get(target.author_id)?.display_name ?? "someone";
+  const author = people.get(target.author_id);
+  const who = author?.display_name ?? "someone";
   const excerpt =
     target.deleted_at !== null ? "deleted" : shorten(plainText(target.body), REPLY_EXCERPT_CHARS);
   return (
     <button type="button" className="msg-reply meta" onClick={() => onJump(target.id)}>
       <span className="reply-mark">↩</span>
-      <span className="reply-author">{who}</span>
+      {/* The quoted author's color, not the row's — the row belongs to whoever
+          is replying. This line is mono metadata, so it takes the color and
+          stops there: a shimmering name inside a one-line quote is noise. */}
+      <span className="reply-author name-color" style={personStyle(author)}>
+        {who}
+      </span>
       <span className="reply-excerpt">{excerpt}</span>
     </button>
   );
