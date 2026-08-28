@@ -189,6 +189,19 @@ behind it, not by a platform team. Do not write to them as if they were reviewin
 design doc. **Dense, jargon-packed writing is a defect here, the same as a failing
 test.**
 
+**Assume less than you think.** The people running this have worked in tech for a
+long time and have shipped web applications before. They have not built a desktop
+app, a Rust server, or anything real-time — so Rust idioms, WebRTC, SQLite's
+concurrency model, code signing, and container plumbing are all genuinely new, and
+"you know how this goes" is not true here. Explain the thing, briefly, the first
+time it comes up. Nobody is offended by a sentence they did not need; everybody
+loses an afternoon to one that was missing.
+
+Be **clear, concise and direct**. Say what happened, what it means, and what is
+left. Skip the preamble, skip the hedging, and do not pad a small change into a
+report. Being brief is not the same as being vague: if something is broken,
+unproven, or you are guessing, say so in plain words rather than softening it.
+
 Write the chat summary like you are explaining it to a smart friend who did not read
 the code:
 
