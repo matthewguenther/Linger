@@ -31,8 +31,12 @@ pass.
    applies to every agent and every vendor — whatever tool you run, turn off its
    attribution trailers and PR footers. No exceptions, ever. CI rejects commits
    that carry attribution (`scripts/lint-rules.sh`).
-2. **Never report or transmit window titles.** `ProcessIdent` has no title field. Do not
-   add one. Do not log one. Do not add one "temporarily for debugging."
+2. **Never report or transmit window titles, or what application anybody has open.**
+   Activity detection was cut on 2026-08-28 (`docs/decisions.md`): the crate, the
+   registry and the wire field are gone, and no type has a field that could carry
+   either. Do not add one back — not for a feature, not for a log line, not
+   "temporarily for debugging". If somebody wants people to know what they are
+   doing, they type it into their status (SPEC §4.3, §4.6).
 3. **No unread counts.** No count field on any endpoint, no badge in any component. If a
    count is needed for an accessibility label, compute it client-side and never render it
    as a number in the UI.
@@ -94,8 +98,6 @@ pass.
   resume replays with no gaps and no duplicates.
 - The 16-color palette gets a property test asserting ≥4.5:1 against both theme
   backgrounds for all 16 keys × 2 themes. It must run in CI.
-- Activity backends get a smoke test that asserts they return cleanly (possibly `None`)
-  and never panic on an unsupported session type.
 
 **Commits**
 - Conventional-ish: `feat(gateway): resume with sequence replay`
@@ -138,7 +140,7 @@ typecheck + tests, and the desktop-shell pass. Green here should mean green
 there. The pieces:
 
 ```bash
-cargo test --workspace          # core + server + activity; also regenerates TS bindings
+cargo test --workspace          # core + server; also regenerates TS bindings
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings
 cd client && pnpm check         # typecheck frontend
 cd client && pnpm tauri dev     # needs the GUI system deps listed in the README
@@ -234,7 +236,6 @@ compiles is frequently still broken.
 | Area | Failure mode |
 |---|---|
 | **WebRTC signaling / ICE (V2)** | Generated code works on localhost and fails behind CGNAT or symmetric NAT. Always test across two real networks before declaring it done. |
-| **Wayland compositor backends** | Thin, fragmented, poorly documented. Read KWin source rather than guessing at the D-Bus interface. Verify against a live Plasma 6 Wayland session. |
 | **Gateway resume** | Off-by-one on sequence numbers produces duplicate or dropped messages that only appear under real reconnects. Test with forced disconnects, not mocks. |
 | **Audio device handling (V2)** | Hotplug, default-device changes, and sample-rate mismatch. |
 | **Code signing / notarization** | Version-sensitive and changes between toolchain releases. Follow current vendor docs, not memory. |
@@ -253,17 +254,15 @@ Do not start a milestone until the previous one passes its check in
 `ARCHITECTURE.md` §10.
 
 ```
-SPIKE → M0 scaffold → M1 server REST → M2 gateway → M3 client shell
-      → M4 presence/roster → M4.5 host controls + server list
-      → M5 uploads/media → M6 styling/themes → M7 packaging → M8 export
-      → backburner: entrance sounds (T-901, T-902, T-903);
-                    activity detection (T-911…T-917)
+M0 scaffold → M1 server REST → M2 gateway → M3 client shell
+  → M4 presence/roster → M4.5 host controls + server list
+  → M5 uploads/media → M6 styling/themes → M7 packaging → M8 export   ← V1, built
+  → M9 knock → M10 search → M11 DMs → M12 voice → M13 ambient voice   ← V2, planned
+  → backburner: entrance sounds (T-901…T-903), mobile (T-16xx)
 ```
 
-**The spike comes first and is throwaway:** a standalone Rust binary that prints the
-foreground application name every second, on Kubuntu/Plasma 6 Wayland and on Windows.
-Do not scaffold the workspace until this works. It is the highest-risk unknown in the
-project and it costs one evening to retire.
+V1 is built. What is left of it is five things a person has to do by hand — see
+`TASKS.md`, *Human checks*. V2 is planned and not started.
 
 ---
 

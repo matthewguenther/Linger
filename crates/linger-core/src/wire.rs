@@ -556,26 +556,19 @@ pub enum PresenceState {
     Offline,
 }
 
-/// A resolved, registry-listed activity. There is no field for a window title
-/// and one must never be added — the type system enforces the privacy rule.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub struct ActivityInfo {
-    pub registry_id: String,
-    pub label: String,
-    /// Registry `kind` (game | browser | creative | …); drives roster iconography.
-    pub kind: String,
-    #[ts(type = "number")]
-    pub since: i64,
-}
-
+/// Where somebody is, and nothing about what they are doing.
+///
+/// There was an `activity` field here that carried a resolved foreground
+/// application. It is gone (Matt, 2026-08-28 — `docs/decisions.md`): a status
+/// is the place to say what you are doing, and it is the place because a person
+/// chose to type it. Do not add this field back, and do not add one for a
+/// window title — that was never in this type and never will be.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct PresenceEntry {
     pub user_id: UserId,
     pub state: PresenceState,
     pub room_id: Option<RoomId>,
-    pub activity: Option<ActivityInfo>,
     pub away_message: Option<String>,
 }
 

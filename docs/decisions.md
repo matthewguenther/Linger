@@ -108,3 +108,65 @@ release CSP hardening, and documenting the warning honestly. The signing itself
 becomes **T-705**, parked until there is a certificate and an account. Note that
 M7's milestone check says *a signed installer per OS*, so M7 closes on two
 operating systems and unsigned; that is the decision, not an oversight.
+
+---
+
+## Decided — activity detection is cut, and mobile waits
+
+**Matt, 2026-08-28.** Two calls on the same day, both about not building things.
+
+### Activity detection is gone
+
+It was V1 item 8 and SPEC §4.3: the client would watch which application you had
+in front of you, resolve it against a bundled registry of ~200 apps, and show
+the room "playing Factorio" or "♪ Bill Evans". It was parked on 2026-08-23 as
+off the critical path. Five days later it is **deleted**, not parked.
+
+**The reason is that a status already does it, and does it better.** If you want
+people to know what you are playing, you type it. That is one line of effort,
+once, and it is always right — it says what you meant rather than what a process
+name implies. A status cannot mislabel your work project as a game, cannot
+announce something you would rather not announce, and cannot leak on a day the
+hide-list has a gap in it.
+
+**Against that, the cost was enormous.** Four operating-system backends (KWin
+over D-Bus, X11, Win32, `NSWorkspace`), a poller with a debounce, a curated
+registry that somebody has to maintain forever, a local override file, and five
+separate privacy controls — a global off switch, a per-server off switch, a
+per-app hide list, an idle-only mode, and a persistent indicator — every one of
+which exists only to make the feature safe enough to ship. When a feature needs
+five controls to be safe and a typed sentence does the same job, the sentence
+wins.
+
+**What was deleted:** `crates/linger-activity/`, `registry/apps.json`, the
+`ActivityInfo` wire type, the `activity` field on `PresenceEntry` and on
+`presence.update`, the server's registry resolution, the Tauri `activity_probe`
+command, the roster's activity line, and tasks T-911…T-917. SPEC §4.3 is now
+just presence. ARCHITECTURE §6 keeps a short note about why it was hard, because
+the reason (Wayland has no cross-compositor way to ask what window is in front)
+is still true of anything else that reaches into the desktop.
+
+**The rule that outlives it:** never report or transmit window titles, or what
+application anybody has open. There is no code left that could, and no type with
+a field that could carry it. AGENTS rule 2 is the enforceable version. Building
+any of this back is Matt's call, not a maintenance decision — and the answer is
+currently no, "if ever".
+
+### Mobile moves to the backburner
+
+It was going to be M14, the last V2 milestone. It is now on the backburner with
+no milestone at all.
+
+**Desktop first.** V1 is built and has not been through a single human check —
+nobody has installed a release, watched an update land, uploaded a real video,
+or pressed the export button. A mobile client doubles the surface of every bug
+still in the desktop app, and it is a second set of stores, signing accounts,
+review processes and release paths to keep green.
+
+The unanswered question in front of it has not gone away and is recorded in the
+parking lot: **push notifications go through Apple and Google, or they do not
+exist.** There is no third way to wake a phone app, and the README's privacy
+section does not currently allow for it. That has to be answered before any
+mobile code is written, not during.
+
+This is a "when the desktop app is boring" item, not a "next quarter" item.

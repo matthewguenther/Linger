@@ -274,7 +274,6 @@ describe("the gateway store, with two servers", () => {
         user_id: callie.id,
         state: "around",
         room_id: null,
-        activity: null,
         away_message: null,
       },
     });

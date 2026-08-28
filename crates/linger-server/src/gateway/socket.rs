@@ -258,15 +258,11 @@ async fn handle_client_frame(
         }
         ClientFrame::PresenceUpdate {
             state: presence_state,
-            activity,
             away_message,
         } => {
-            let entry = state.gateway.apply_presence(
-                user_id,
-                presence_state,
-                activity.as_deref(),
-                away_message,
-            );
+            let entry = state
+                .gateway
+                .apply_presence(user_id, presence_state, away_message);
             state.gateway.publish(ServerEvent::PresenceUpdate(entry));
         }
         ClientFrame::RoomFocus { room_id } => {

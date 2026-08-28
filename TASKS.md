@@ -11,9 +11,10 @@ at a glance while scrolling. Use the same characters when you add or move a task
 
 Task numbers match the milestone: T-5xx is M5, T-6xx is M6, and so on. Work that
 is still V1 but not on the critical path lives at the end as T-9xx (sounds) and
-T-91x (activity detection). A 2026-08-23 renumber, after activity detection left
-the main sequence: old M6–M9 are M5–M8; entrance sounds T-403/404/408 are
-T-901/902/903; activity T-501…T-507 are T-911…T-917.
+T-90x (entrance sounds). A 2026-08-23 renumber moved old M6–M9 to M5–M8 and
+entrance sounds T-403/404/408 to T-901/902/903. The T-911…T-917 band was
+activity detection; it was cut on 2026-08-28 and those numbers are retired
+rather than reused.
 
 **This file stays small on purpose.** Every fresh session reads it, so finished
 history does not live here: when a milestone passes its check, the architect
@@ -62,7 +63,7 @@ works in every tool:
 | **medium** | A frontier model at its normal setting. Real features with judgment in the details. |
 | **high** | A frontier model at a high-reasoning setting. Cross-cutting, but the architecture docs carry a lot of the load. |
 | **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. AGENTS.md §"Where you will be wrong" territory: T-705 (signing,
-blocked on certificates), T-911 (Wayland/KWin), T-1402 (real-time audio) and T-1604 (app stores). |
+blocked on certificates), T-1402 (real-time audio) and T-1604 (app stores). |
 
 **If you are running Claude specifically**, this is the mapping. The label on
 the task is still the source of truth — it is vendor-neutral so that any agent
@@ -126,10 +127,8 @@ single response. The allowed origins are a fixed list in
 to CORS and T-302 confirmed that — but if a future browser-side call mysteriously
 "can't reach the server", that list is the first place to look.
 
-Two decisions styling and the activity backends no longer have to make: **use
-`oklch()` directly** (WebKitGTK 2.52.3 supports it, T-002), and **T-913's Win32
-backend is a known quantity** (T-004). Both recipes are recorded next to the
-code that will need them.
+One decision styling no longer has to make: **use `oklch()` directly** —
+WebKitGTK 2.52.3 supports it (T-002).
 
 What already exists (do not rebuild): workspace + CI; `linger-core` with typed
 UUIDv7 ids, the full REST + gateway wire contract, palette/fonts/reactions/limits,
@@ -138,8 +137,7 @@ ts-rs export to `client/src/generated/` (committed, drift-checked in CI);
 (`db.write` is a 1-connection pool — keep it that way), migrations (full §5 schema),
 error envelope, health route, integration-test harness pattern
 (`crates/linger-server/tests/health.rs` — copy its `spawn_server` shape);
-`linger-activity` with the resolution pipeline, registry loader (+41 seed entries),
-backend classifier; Tauri 2 shell with the Console-token M0 frame; deploy files.
+Tauri 2 shell with the Console-token M0 frame; deploy files.
 M5 adds the whole of uploads (see [m5.md](docs/tasks/m5.md)): the `ObjectStore`
 trait with a local and an S3 backend, resumable part uploads, the complete step
 that re-encodes and sniffs, `GET /media` with keyset paging, link cards behind
@@ -169,9 +167,15 @@ at all until T-705.
 
 ## Backburner — later, not the next thing
 
-Three things live here: two V1 features that are still in the spec, and one
-release errand that is blocked on money. None of them is on the path to a
-usable product. Do not pull any of them "while you're in there."
+Three things live here: one V1 feature that is still in the spec, one release
+errand blocked on money, and the mobile client. None of them is on the path to a
+usable desktop product. Do not pull any of them "while you're in there".
+
+**Activity detection used to be here and is gone** (Matt, 2026-08-28 —
+[`docs/decisions.md`](docs/decisions.md)). T-911…T-917 are deleted, along with
+the `linger-activity` crate, the bundled app registry, and the `activity` field
+on presence. A status is where somebody says what they are doing, because they
+typed it. Do not build it back.
 
 ### Signing and notarization
 
@@ -213,50 +217,61 @@ middle of it. Anything that lands before them must not break the frames they rel
   12–16 sounds per `assets/sounds/README.md` rules; `ffmpeg -af loudnorm=I=-16`
   for normalization; fill the source/license table.
 
-### Activity detection
 
-*Moved here 2026-08-23 by Matt. These used to be M5 / T-501…T-507; they are
-**T-911…T-917** now, so they never collided with M5's own tasks (archived in
-[`docs/tasks/m5.md`](docs/tasks/m5.md)). Still V1 (SPEC §6,
-item 8). The Linux and Windows spikes are already retired, `linger-activity`
-already compiles, and the Null backend already reports nothing — which is the
-correct product until this comes back. It is not needed for a usable chat app,
-and it is large: four OS backends, a poller, a registry, and a sharing-controls
-UI. **Do not start T-911.** M5 and M6 are closed; M7 (packaging) is the current
-milestone.*
 
-*Milestone check, when this comes back: foreground app appears in the roster on
-Plasma 6 Wayland and Windows.*
+### Mobile
 
-- ⬜ **T-911 · KWin backend + poller wiring** — effort: **high**
-  The spike-verified recipe is in `crates/linger-activity/src/backend.rs` docs —
-  follow it exactly (zbus; own D-Bus service; KWin script via
-  `loadScript`/`run`/`unloadScript`; `resourceClass` + pid → `/proc/exe`).
-  Event-driven cache behind the pull `ActivityBackend` API. Then the shared
-  poller: 3s focused / 15s unfocused, 20s continuous-foreground debounce,
-  hide-list, registry resolution, `presence.update` upstream. Client never sends
-  raw process identity — resolution happens client-side in Rust, registry id only.
-  *Accept:* on Plasma 6 Wayland: switch apps, roster follows within ~25s
-  (debounce); unknown app shows nothing; hide-listed app shows nothing.
-- ⬜ **T-912 · X11 backend** — effort: **medium** — `x11rb`: `_NET_ACTIVE_WINDOW`
-  → `_NET_WM_PID` → `/proc`. Covers GNOME-on-X11 too.
-- ⬜ **T-913 · Windows backend** — effort: **medium** — `windows` crate, per T-004
-  spike learnings.
-- ⬜ **T-914 · macOS backend** — effort: **medium** — `objc2` +
-  `NSWorkspace.frontmostApplication.bundleIdentifier`. No special permission
-  needed *because* we don't read titles — keep it that way.
-- ⬜ **T-915 · Hyprland + sway backends** — effort: **low** — their IPC sockets;
-  both are simple JSON/i3-IPC queries.
-- ⬜ **T-916 · Registry to ~200 entries + local overrides** — effort: **medium**
-  Top games (Steam appids), browsers, creative, editors, media. Local override
-  file in the client config dir; **never synced to the server**.
-- ⬜ **T-917 · Sharing controls UI** — effort: **medium**
-  SPEC §4.3: global one-click off (roster), per-server off, per-app hide,
-  idle-only mode, **persistent visible indicator** + status bar `sharing: <app>`.
-  Default off overall.
+*Moved here 2026-08-28 by Matt, out of V2.* **Desktop first.** The app has to be
+finished, installed by real people, and lived with for a while before a second
+platform is worth starting. A mobile client doubles the surface of every bug
+still in the desktop one, and V1 has not been through a single human check yet.
+This is not a "next quarter" item, it is a "when the desktop app is boring"
+item.
+
+*Check, when it comes back: sign in, read a room, send a message and a photo,
+from a phone.*
+
+**Start with the decision, not the code.** Mobile has one question in it that is
+Matt's and is not a technical one:
+
+> **Push notifications go through Apple and Google.** There is no other way to
+> wake a phone app. That means a message's *existence* — and whatever the
+> notification says — passes through a third party, which is a different promise
+> from the one the README makes today.
+
+Three honest answers, and one has to be picked before T-1602: ship without push
+and let the app only notify while open; ship with push and **change the README
+to say exactly what leaves the server**; or run a self-hosted push relay, which
+is a second piece of infrastructure for every host and probably kills it.
+Recorded in the *Parking lot* too.
+
+- ⬜ **T-1601 · Decide what mobile means** — *not a task; a decision.* Matt.
+  The push question above, plus: does mobile get uploads, does it get voice, and
+  is it iOS-and-Android or one of them. Write the answers into SPEC before
+  anything else starts.
+
+- ⬜ **T-1602 · The mobile shell** — effort: **high**
+  Tauri 2 builds for iOS and Android from the same crate. What does not carry
+  over: the OS keyring (mobile has its own secure storage) and the tray. Expect
+  the gateway to
+  need reconnect behaviour for a network that changes every time somebody walks
+  out of a building.
+  *Accept:* the app opens on a real phone, signs in, and stays connected across
+  a wifi-to-mobile-data switch.
+
+- ⬜ **T-1603 · The layout at phone width** — effort: **medium**
+  The roster already collapses under 880px (`client/src/lib/layout.ts`), which
+  is a head start. What is missing is one-hand reach, a composer above a
+  software keyboard, and the rail as something other than a fixed column.
+  *Accept:* usable one-handed on a phone somebody actually owns.
+
+- ⬜ **T-1604 · Getting it onto a phone that is not yours** — effort: **treacherous**
+  Apple Developer Program, Google Play, review, and store listings. This is the
+  same money-and-paperwork wall as T-705, doubled. **Do not start without both
+  accounts.** Follow current vendor docs, not memory — this changes every year.
+  *Accept:* somebody who has never met you installs it from a store.
 
 ---
-
 
 ## V2 — planned, not started
 
@@ -266,27 +281,31 @@ section exists so the shape of V2 is written down while it is fresh, not so
 somebody starts it.
 
 **Read this before touching any of it:** SPEC §6 lists what V2 is; anything not
-on that list is not V2, it is scope creep. Voice, DMs and mobile each add a
-whole category of thing this product does not currently have, and each one has
-at least one decision in it that is **Matt's, not an implementing session's**.
+on that list is not V2, it is scope creep. Voice and DMs each add a whole
+category of thing this product does not currently have, and each one has at
+least one decision in it that is **Matt's, not an implementing session's**.
 Those are called out per milestone and repeated in the *Parking lot*.
 
 **Numbering.** V1 used `T-1xx`–`T-8xx` for milestones M1–M8, plus `T-9xx` for
 the V1 work that came off the critical path. V2 starts a new band at **`T-1xxx`,
 where the hundreds digit is the area** — `T-11xx` knock, `T-12xx` search,
-`T-13xx` DMs, `T-14xx` voice, `T-15xx` ambient voice, `T-16xx` mobile. It does
-not continue the milestone-matches-number rule, because `T-9xx` is already
-spoken for.
+`T-13xx` DMs, `T-14xx` voice, `T-15xx` ambient voice — and `T-16xx` mobile,
+which is on the backburner rather than in V2. It does not continue the
+milestone-matches-number rule, because `T-9xx` is already spoken for.
 
 **The order is not SPEC §6's order, on purpose.** SPEC lists voice first because
-it is the headline. It is sequenced last-but-one here because it is the largest
-and riskiest thing in the project, and because knock and search are small,
+it is the headline. It is sequenced last here because it is the largest and
+riskiest thing in the project, and because knock and search are small,
 self-contained, and make the app better next week rather than next quarter.
 Build order, cheapest and safest first:
 
 ```
-M9 knock → M10 search → M11 DMs → M12 voice rooms → M13 ambient voice → M14 mobile
+M9 knock → M10 search → M11 DMs → M12 voice rooms → M13 ambient voice
 ```
+
+**Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
+it is on the *Backburner* instead. Desktop has to be finished and used by real
+people first.
 
 ---
 
@@ -495,53 +514,6 @@ visible indicator whenever it is on, and one obvious way to kill it.**
 
 ---
 
-### M14 — mobile
-
-*Milestone check: sign in, read a room, send a message and a photo, from a
-phone.*
-
-**Start with the decision, not the code.** Mobile has one question in it that is
-Matt's and is not a technical one:
-
-> **Push notifications go through Apple and Google.** There is no other way to
-> wake a phone app. That means a message's *existence* — and whatever the
-> notification says — passes through a third party, which is a different promise
-> from the one the README makes today.
-
-Three honest answers, and one has to be picked before T-1602: ship without push
-and let the app only notify while open; ship with push and **change the README
-to say exactly what leaves the server**; or run a self-hosted push relay, which
-is a second piece of infrastructure for every host and probably kills it.
-Recorded in the *Parking lot* too.
-
-- ⬜ **T-1601 · Decide what mobile means** — *not a task; a decision.* Matt.
-  The push question above, plus: does mobile get uploads, does it get voice, and
-  is it iOS-and-Android or one of them. Write the answers into SPEC before
-  anything else starts.
-
-- ⬜ **T-1602 · The mobile shell** — effort: **high**
-  Tauri 2 builds for iOS and Android from the same crate. What does not carry
-  over: the OS keyring (mobile has its own secure storage), activity detection
-  (desktop only, and it stays that way), and the tray. Expect the gateway to
-  need reconnect behaviour for a network that changes every time somebody walks
-  out of a building.
-  *Accept:* the app opens on a real phone, signs in, and stays connected across
-  a wifi-to-mobile-data switch.
-
-- ⬜ **T-1603 · The layout at phone width** — effort: **medium**
-  The roster already collapses under 880px (`client/src/lib/layout.ts`), which
-  is a head start. What is missing is one-hand reach, a composer above a
-  software keyboard, and the rail as something other than a fixed column.
-  *Accept:* usable one-handed on a phone somebody actually owns.
-
-- ⬜ **T-1604 · Getting it onto a phone that is not yours** — effort: **treacherous**
-  Apple Developer Program, Google Play, review, and store listings. This is the
-  same money-and-paperwork wall as T-705, doubled. **Do not start without both
-  accounts.** Follow current vendor docs, not memory — this changes every year.
-  *Accept:* somebody who has never met you installs it from a store.
-
----
-
 ## Human checks — things only you can do
 
 Five things are built, tested, and **never once used by a person**. Automated
@@ -710,7 +682,7 @@ you. That is the whole promise of the feature.
   (the app only notifies while it is open), push with the README changed to say
   exactly what leaves the server, or a self-hosted relay — which is a second
   piece of infrastructure for every host and probably ends the idea. **This
-  blocks M14** and nothing else. Raised 2026-08-28 while planning V2.
+  blocks mobile** and nothing else. Raised 2026-08-28 while planning V2.
 - **Where does search live, and what does it cover?** SPEC §3's layout has no
   search box. A destination in the rail next to `media` matches how media
   works; a keyboard shortcut over the stream is the other option. And: does it

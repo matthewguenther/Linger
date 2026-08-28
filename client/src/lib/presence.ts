@@ -137,11 +137,11 @@ export function frameFor(action: PresenceAction): ClientFrame {
     // outlives the session is saved separately, on the status (SPEC §4.6).
     return {
       op: "presence.update",
-      d: { state: "away", activity: null, away_message: action.message },
+      d: { state: "away", away_message: action.message },
     };
   }
   return {
     op: "presence.update",
-    d: { state: action.state, activity: null, away_message: null },
+    d: { state: action.state, away_message: null },
   };
 }

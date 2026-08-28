@@ -100,7 +100,9 @@ These terms are used everywhere — UI, code, docs, error messages:
 XP, levels, streaks, or engagement metrics. Federation. A bot marketplace. A
 role/permission matrix. Threads. `@everyone`. Algorithmic ordering. Unread badges.
 **Telemetry or analytics of any kind.** A paid tier, a store, or anything else to sell
-you.
+you. **Anything that watches which applications you have open** — that was planned
+once and [cut](docs/decisions.md) on 2026-08-28; your status is where you say what
+you are doing, because you typed it.
 
 The scope discipline is the product.
 
@@ -115,9 +117,10 @@ Stated plainly:
 
 Other privacy properties that *are* guaranteed:
 
-- Activity sharing is **default off**, resolves only against a bundled app registry,
-  and **never reports window titles** — the type system has no field for them
-- Browsers report as the browser ("Firefox"), never the site or tab
+- **Nothing watches what applications you have open.** There is no activity
+  detection in Linger and there is no code that could read a window title. If you
+  want people to know what you are playing or listening to, you type it into your
+  status — see [the decision](docs/decisions.md), 2026-08-28
 - EXIF (including GPS) is stripped from every uploaded image, no toggle
 - Zero telemetry, zero crash reporting, zero phone-home — not even opt-in
 
@@ -378,9 +381,7 @@ account.
 ```
 crates/linger-core/       shared types, IDs, palette — the wire contract
 crates/linger-server/     axum REST + WS gateway, SQLite (WAL), object store
-crates/linger-activity/   foreground-app detection, per-OS backends
 client/                   Tauri 2 shell + React/TypeScript frontend
-registry/apps.json        bundled app registry for activity detection
 deploy/                   Dockerfile, compose, Caddyfile
 docs/                     host-guide.md and user-guide.md (the two
                           plain-language guides), screenshots; docs/tasks/
@@ -400,7 +401,7 @@ Contributing — with any coding agent, or none — starts at
 [CONTRIBUTING.md](CONTRIBUTING.md); the work queue is [TASKS.md](TASKS.md).
 
 ```bash
-# server + core + activity (no GUI deps needed)
+# server + core (no GUI deps needed)
 # optional: `ffmpeg` on PATH makes the video-poster test run instead of skipping
 cargo test --workspace
 
@@ -640,11 +641,12 @@ Current work queue lives in [TASKS.md](TASKS.md).
 
 - **V1** — replaces the text half of a big chat platform for one friend group
   (see [SPEC.md §6](SPEC.md))
-- **Later (still V1, not on the critical path)** — entrance sounds (T-901…T-903);
-  **ambient activity detection** (T-911…T-917: opt-in, default off, bundled app
-  registry, window titles never read or transmitted). Both are in the spec.
-  Neither is next. See [TASKS.md](TASKS.md) *Backburner*.
-- **V2** — voice rooms, ambient voice, DMs, search, knock, mobile
+- **Later (still V1, not on the critical path)** — entrance sounds (T-901…T-903).
+  In the spec, not next. See [TASKS.md](TASKS.md) *Backburner*.
+- **V2** — knock, search, DMs, voice rooms, ambient voice. Planned, not started;
+  V1 has to be installed and used by real people first.
+- **Backburner** — a mobile client. Desktop comes first and has to be solid
+  before anything else starts.
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
 
 There is no AI phase. It was on this list once; it was cut

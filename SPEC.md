@@ -119,8 +119,8 @@ inverts the priority. **People are the primary surface, not a gutter.**
 ```
 
 **The roster (right) is a card stack, not a name list.** Each card shows: name in the
-user's own styling, presence dot, which room they are in, their current activity
-(if shared), and their status. Offline users show last-seen and their away message.
+user's own styling, presence dot, which room they are in, and their status. Offline
+users show last-seen and their away message.
 This panel is what makes an empty server feel like a house with the lights on.
 
 On narrow windows the roster collapses to a horizontal strip above the composer, not
@@ -173,30 +173,34 @@ keyword-based system delivers it.
 Expect pushback on removing counts from people conditioned by ten years of them. Hold
 the line for at least one month of real use before revisiting.
 
-### 4.3 Presence and activity
-
-Detection implementation is in `ARCHITECTURE.md` §6. Product rules:
-
-**Default deny.** The client detects the foreground process, resolves it against a
-bundled app registry, and reports only a resolved app identity. An unrecognized process
-reports nothing at all.
-
-**Never report window titles.** Not to the server, not to other clients, not in logs.
-This kills the entire class of leak where `Re: settlement offer — Gmail` shows up in
-someone's friend list.
-
-**Browsers report as the browser.** "Firefox", never the site or tab title. Site-level
-detection requires a browser extension and is out of scope, permanently.
-
-Controls, all client-side (the server never receives what it is not allowed to show):
-- Global off switch, one click from the roster
-- Per-server off switch
-- Per-app hide list ("never show that I'm in X")
-- Idle-only mode (share presence but not activity)
-- A persistent visible indicator whenever activity sharing is on
+### 4.3 Presence
 
 Presence states: `in_room`, `around` (app focused, no room), `idle` (no
 input >10 min), `away` (explicit, with message), `offline`.
+
+That is the whole of it. Where somebody is, and nothing about what they are doing.
+
+**Activity detection was cut on 2026-08-28** (Matt — `docs/decisions.md`). This
+section used to specify a feature that watched which application you had in front
+of you, resolved it against a bundled registry, and showed it to the room. It is
+gone: the crate, the registry, the wire field, and the seven tasks that would have
+built it.
+
+**What replaces it is the status** (§4.6). If you want people to know you are
+playing something or listening to something, you type it. That is one line of
+effort, it is always accurate, it says what you meant rather than what a process
+name implies, and it cannot leak anything you did not choose to say. The feature
+it replaces needed four operating-system backends, a poller, a curated app
+registry, and five separate privacy controls to be safe — and the best case was
+still a worse version of a sentence somebody could have written themselves.
+
+**Do not build it back.** Not as an opt-in, not as a small version, not as "just
+the game you're playing". The reasoning is in `docs/decisions.md` and reversing it
+is Matt's call, not a maintenance decision.
+
+**And the rule that outlives it: never report or transmit window titles.** There is
+no code left that reads one, and there is no field on any type that could carry one.
+Keep it that way.
 
 ### 4.4 Media
 
@@ -439,9 +443,8 @@ radius                     4px controls / 6px media / 0 panels
   Steps: <1h 100%, <1d 88%, older 78%. Floor at 78%; do not go lower.
 - **System messages** (joins, leaves, pins, "dave stood up") are hairline rules with
   centered mono small-caps text. Never chat lines.
-- **Status bar** is permanent, mono, 11px: connection state, latency in ms, storage used,
-  and `sharing: <app>` whenever activity sharing is on. This is the cheapest "real tool"
-  signal available and no competitor has it.
+- **Status bar** is permanent, mono, 11px: connection state, latency in ms, storage
+  used. This is the cheapest "real tool" signal available and no competitor has it.
 - **Connection states show protocol text, not spinners:**
   `connecting… tls ok… identify… ready (28ms)`
 - **Motion:** 120–160ms, ease-out. No spring, no bounce. The only slow animation in the
@@ -473,7 +476,6 @@ first two are the system defaults.
 | 5 | Text: markdown, edit, delete, reply | §4.7 |
 | 6 | No unread counts; "left off here" line | §4.2 |
 | 7 | Roster-forward layout | §3 |
-| 8 | Activity detection, default off, app-registry only | §4.3 |
 | 9 | Name styling + message accent color | §4.5 |
 | 10 | Statuses and away messages | §4.6 |
 | 11 | Reactions by weight | §4.8 |
@@ -484,11 +486,12 @@ first two are the system defaults.
 | 16 | Desktop client: Linux, Windows, macOS | ARCHITECTURE |
 | 17 | Multi-server list in the client | §3 |
 
-Two V1 items are parked and do not block the rest of the build. **Entrance sounds**
-(item 4) and **activity detection** (item 8) are still in this list. They go after
-M8 (export). See `TASKS.md` *Backburner* (T-901…T-903 and T-911…T-917). Activity
-detection in particular is large — four OS backends, a poller, a registry, sharing
-controls — and it is not needed for a usable chat app. Matt parked it on 2026-08-23.
+One V1 item is parked and does not block the rest of the build: **entrance sounds**
+(item 4). They go after M8 (export) — see `TASKS.md` *Backburner* (T-901…T-903).
+
+**Activity detection used to be item 8 and is gone** (Matt, 2026-08-28 —
+`docs/decisions.md`). It was parked on 2026-08-23 and cut five days later. §4.3
+says what replaced it: a status somebody typed.
 
 ### V2
 
@@ -526,9 +529,13 @@ the next two years.
 of the thing you left has begun. When someone requests a feature, the question is not
 "is this good?" but "does this belong at a dinner party?"
 
-**The hardest parts are not chat.** They are cross-platform activity detection and
-code-signed multi-platform distribution. Both are in `ARCHITECTURE.md`. Neither is
-interesting. Both will consume more time than the entire message pipeline.
+**The hardest parts are not chat.** Code-signed multi-platform distribution was one,
+and it took M7 plus a decision to ship two operating systems instead of three. Voice
+is the other and it is still ahead. Neither is interesting; both consume more time
+than the entire message pipeline.
+
+*(This used to name cross-platform activity detection as the other one. It was cut
+on 2026-08-28 rather than built — §4.3.)*
 
 **Do not claim end-to-end encryption.** The threat model is stated plainly in
 `ARCHITECTURE.md` §7 and must be stated plainly to users too. Half-implemented E2EE is

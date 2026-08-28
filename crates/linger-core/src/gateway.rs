@@ -37,11 +37,12 @@ pub enum ClientFrame {
         #[ts(type = "number | null")]
         s: Option<u64>,
     },
-    /// `activity` is a resolved registry id or `None`. **Never a window title.**
+    /// What a person is telling the server about themselves: in a room, around,
+    /// idle, away — and an away message if they set one. Nothing about what
+    /// application they have open (`docs/decisions.md`, 2026-08-28).
     #[serde(rename = "presence.update")]
     PresenceUpdate {
         state: PresenceState,
-        activity: Option<String>,
         away_message: Option<String>,
     },
     /// Fired when the client focuses a room. `room_id: None` means the user

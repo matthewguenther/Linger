@@ -265,7 +265,7 @@ describe("going away and coming back", () => {
   it("puts the message on the frame so everyone sees it now", () => {
     expect(frameFor({ kind: "away", message: "back at six" })).toEqual({
       op: "presence.update",
-      d: { state: "away", activity: null, away_message: "back at six" },
+      d: { state: "away", away_message: "back at six" },
     });
   });
 
@@ -344,7 +344,7 @@ describe("frameFor", () => {
     });
     expect(frameFor({ kind: "state", state: "idle" })).toEqual({
       op: "presence.update",
-      d: { state: "idle", activity: null, away_message: null },
+      d: { state: "idle", away_message: null },
     });
   });
 });
