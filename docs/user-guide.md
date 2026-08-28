@@ -205,7 +205,3 @@ different promise from Signal, and you should know which one you are getting.
 
 **Nothing is collected about you.** No telemetry, no analytics, no crash
 reports. Not anonymous ones either. There is nothing to opt out of.
-
-**There is no AI in Linger.** No suggested replies, no summaries, no assistant
-in the room. A reply means a person chose to spend a minute on you, and that is
-the point.

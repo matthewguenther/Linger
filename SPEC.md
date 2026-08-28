@@ -84,8 +84,7 @@ Every feature decision resolves against these, in order.
 - Any algorithmic ordering
 - Analytics or telemetry of any kind, opt-in or otherwise
 - Ephemeral-by-default messaging (fights principle 3)
-- **AI features of any kind** — no participants, no suggested replies or drafting, no
-  sentiment analysis, no summaries, no embeddings, no local model endpoint. See §8.
+- AI features of any kind
 - A paid tier, a storefront, cosmetics for sale, or any payment surface at all
 
 ---
@@ -509,11 +508,6 @@ says what replaced it: a status somebody typed.
   surface)
 - Custom emoji
 
-### Not on the roadmap — AI (§8)
-
-There is no AI phase. It was on this list once, sequenced last; **as of 2026-08-19 it
-is off the list entirely.** §8 records the decision and the reasoning.
-
 ---
 
 ## 7. The honesty section
@@ -546,43 +540,3 @@ worse than none, because it launders a false promise.
 backend. Read their schema and gateway protocol before designing yours. What they do not
 have is the presence model, the AIM-style personalization, or a Tauri-weight client;
 that is the differentiation. Do not fork them, but do not re-derive solved problems.
-
----
-
-## 8. AI — decided against
-
-**Position: Linger has no AI features. Not in the conversation, not around it.**
-
-An earlier version of this spec argued for a set of local-only, opt-in features —
-semantic search, catch-up summaries, transcription — and for an agent surface, all
-sequenced behind V1. **Matt cut all of it on 2026-08-19.** The reasoning, kept here so
-the decision does not get re-made by accident:
-
-- **Running a model alongside a chat app for eight people does not make sense.** The
-  honest version of those features needs a second daemon, a model download, and a
-  machine big enough to serve it. That is a real operational cost pushed onto whoever
-  is hosting for their friends, in exchange for features nobody has asked for.
-- **The dishonest version is worse.** The moment a local endpoint is not configured,
-  the pressure to "just fall back to an API" starts, and that is conversation content
-  leaving the host's box. Not having the feature is the only design that cannot decay
-  into that.
-- **The thesis argues against it anyway.** Presence over messages and remove
-  obligation. The entire value of a friend replying is that a person chose to spend
-  attention on you; introduce a thing that also replies and every reply gets cheaper,
-  because you can no longer tell what was chosen. Suggested replies are worse — they
-  turn a friendship into autocomplete.
-
-The anti-goals in §2 are the enforceable form of this and they are permanent within
-V1: no AI participants, no suggested replies or drafting, no sentiment or tone
-analysis, no summaries, no embeddings, no model endpoint of any kind, and no network
-call carrying message content to anywhere the host did not explicitly configure.
-
-**If it is ever revisited** — and that is Matt's call, not a maintenance decision —
-two constraints from the cut version survive and must come back with it: everything
-runs against a host-configured local endpoint with no cloud default and no cloud
-fallback, and any action taken by an agent is attributed to the delegating human and
-visibly marked (`matt (via agent)`) in a style that cannot be turned off. An agent must
-never be renderable as indistinguishable from a person.
-
-None of this touches `AGENTS.md` rule 1: no AI attribution anywhere in this repo. That
-rule is about who wrote the code, and it stands regardless.

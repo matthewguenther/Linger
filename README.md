@@ -100,9 +100,8 @@ These terms are used everywhere — UI, code, docs, error messages:
 XP, levels, streaks, or engagement metrics. Federation. A bot marketplace. A
 role/permission matrix. Threads. `@everyone`. Algorithmic ordering. Unread badges.
 **Telemetry or analytics of any kind.** A paid tier, a store, or anything else to sell
-you. **Anything that watches which applications you have open** — that was planned
-once and [cut](docs/decisions.md) on 2026-08-28; your status is where you say what
-you are doing, because you typed it.
+you. AI features. Anything that watches which applications you have open — your status
+is where you say what you are doing, because you typed it.
 
 The scope discipline is the product.
 
@@ -123,26 +122,6 @@ Other privacy properties that *are* guaranteed:
   status — see [the decision](docs/decisions.md), 2026-08-28
 - EXIF (including GPS) is stripped from every uploaded image, no toggle
 - Zero telemetry, zero crash reporting, zero phone-home — not even opt-in
-
-## 🤖 The AI stance
-
-**None. No AI features anywhere in Linger.** No participants, no suggested replies, no
-drafting, no sentiment analysis, no summaries, no semantic search, no transcription, and
-no model endpoint — not even a local one.
-
-An earlier draft of the spec planned a set of local-only, opt-in features for after V1
-shipped. That's cut. Standing up a model alongside a chat app for eight friends is a real
-cost pushed onto whoever is hosting, for something nobody asked for — and a "local only"
-promise is one bad afternoon away from becoming an API key and your friends' messages
-leaving the box. Not having the feature is the only version of that promise that can't
-rot.
-
-There's also a simpler reason. The value of a friend replying is that a person chose to
-spend attention on you. Put something in the room that also replies and every reply gets
-cheaper, because you can no longer tell what was chosen.
-
-If it's ever revisited it'll be a deliberate decision, written down in
-[SPEC.md §8](SPEC.md) with the reasoning, not a thing that quietly appears in a release.
 
 ## 📦 Installing the client
 
@@ -648,9 +627,6 @@ Current work queue lives in [TASKS.md](TASKS.md).
 - **Backburner** — a mobile client. Desktop comes first and has to be solid
   before anything else starts.
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji
-
-There is no AI phase. It was on this list once; it was cut
-([SPEC.md §8](SPEC.md)).
 
 ## 📜 License
 

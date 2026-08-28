@@ -116,10 +116,6 @@ file.** Five of them, all left over from closed milestones. They are not
 optional and they are not tasks an agent can take — each one needs somebody
 sitting in front of a real computer.
 
-- 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
-  agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
-  rule 13 is the enforceable version. Do not build any of it back.
-
 **The one thing that bit us in T-301:** a webview page is a cross-origin caller,
 so the server had to start sending CORS headers before the client could read a
 single response. The allowed origins are a fixed list in

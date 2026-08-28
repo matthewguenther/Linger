@@ -59,12 +59,11 @@ pass.
     squares in the rail. Monospace is metadata-only — mono in a message body is a defect.
 12. **Colors are palette keys, never hex or OKLCH literals**, on the wire and in the
     database. The 16-color palette is defined once in `linger-core::PALETTE`.
-13. **No AI features, anywhere in the product.** No participants, no suggested replies,
-    no drafting, no sentiment analysis, no summaries, no embeddings, no semantic search,
-    no model endpoint — local or otherwise. Cut on 2026-08-19; SPEC §8 records the
-    decision and what would have to come back with it if Matt ever revisits. Reversing
-    this is his call, not a maintenance decision. (Rule 1 is a different rule and still
-    applies: no AI attribution in this repo, ever.)
+13. **The product has no AI features.** Nothing to build here — no participants, no
+    suggested replies, no summaries, no semantic search, no model endpoint. It is a
+    scope line like the rest of SPEC §2's anti-goals, not a position the project
+    argues for; adding one is Matt's call. (Rule 1 is separate and still applies:
+    no AI attribution in this repo, ever.)
 14. **No payment surface.** No paid tier, no store, no cosmetics for sale, nothing held
     back to sell later. The scope discipline is the product, and a price list is how
     that discipline dies.
