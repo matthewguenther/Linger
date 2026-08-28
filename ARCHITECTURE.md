@@ -655,6 +655,25 @@ passes its check.
 | **M7** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
 | **M8** | Export | One archive contains every message and file, and it opens | 1 day |
 
+**V2 starts here.** Planned 2026-08-28, not started, and not next — V1's
+remaining work is five things a person has to do by hand (`TASKS.md`, *Human
+checks*). The order below is not SPEC §6's listing order: knock and search are
+small and self-contained, voice is the largest and riskiest thing in the
+project, and mobile has an unanswered privacy question in front of it.
+
+| # | Milestone | Done when | Estimate |
+|---|---|---|---|
+| **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days |
+| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days |
+| **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
+| **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
+| **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
+| **M14** | Mobile client | Sign in, read, send a message and a photo, from a phone | 2+ weeks |
+
+Two of these carry decisions that are Matt's and block their first task: where
+search lives in the layout (M10), and whether mobile push through Apple and
+Google is acceptable at all (M14). Both are in `TASKS.md`'s parking lot.
+
 **Do the activity-detection spike first, before M0.** Spend one evening writing a
 throwaway Rust binary that prints the foreground app every second on
 Kubuntu/Plasma 6 Wayland, then on Windows. If that is pleasant, the project is

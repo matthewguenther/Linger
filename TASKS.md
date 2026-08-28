@@ -61,8 +61,26 @@ works in every tool:
 | **low** | Any capable model at its default setting. Mechanical and tightly specified — a frontier model at max effort just burns money re-deriving what the task text already decides. |
 | **medium** | A frontier model at its normal setting. Real features with judgment in the details. |
 | **high** | A frontier model at a high-reasoning setting. Cross-cutting, but the architecture docs carry a lot of the load. |
-| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. Both are on the backburner: T-705 (signing/notarization, blocked on
-certificates) and T-911 (Wayland/KWin). AGENTS.md §"Where you will be wrong" territory. |
+| **treacherous** | The strongest model and highest reasoning setting available to you, and coordinate with Matt before claiming. AGENTS.md §"Where you will be wrong" territory: T-705 (signing,
+blocked on certificates), T-911 (Wayland/KWin), T-1402 (real-time audio) and T-1604 (app stores). |
+
+**If you are running Claude specifically**, this is the mapping. The label on
+the task is still the source of truth — it is vendor-neutral so that any agent
+can run this queue — and this table is just how to read it with today's Claude
+models:
+
+| Task label | Claude model | Thinking effort |
+|---|---|---|
+| **low** | Haiku 4.5 | default |
+| **medium** | Sonnet 5 | normal |
+| **high** | Opus 5 | high |
+| **treacherous** | Opus 5 | maximum |
+
+Two ways to waste money here, and they cost about the same. Running a **low**
+task on Opus at maximum effort burns tokens re-deriving decisions the task text
+already made. Running a **high** task on Haiku produces something that compiles,
+passes the tests it was told to write, and is wrong in the way that only shows
+up with four clients on three networks. Match the label.
 
 Running everything at maximum is not better — it is slower, pricier, and prone
 to overbuilding simple tasks. Match the effort to the label and escalate only if
@@ -88,42 +106,14 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M4.5 — the shell's missing surfaces | 2026-08-25 | Host controls, invites, member settings, server list, remove + re-admit, password reset, live member announce | [m4-5.md](docs/tasks/m4-5.md) |
 | M5 — uploads, media, the grid | 2026-08-26 | Resumable uploads on local or S3, files served from their own origin, the media grid with stars and link cards, expiry + a storage ceiling, the status image | [m5.md](docs/tasks/m5.md) |
 | M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
-| M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see below | [m7.md](docs/tasks/m7.md) |
+| M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see *Human checks* | [m7.md](docs/tasks/m7.md) |
+| M8 — export | tasks 2026-08-28 | Any member can take a zip of the whole server — a file per room, every upload, an index — built in the background and downloaded from the media origin. **One human check is still open** — see *Human checks* | [m8.md](docs/tasks/m8.md) |
 
-**Still open from closed milestones — four human errands, all outstanding, and
-one tag knocks out most of them.** `release.yml` builds Linux and Windows
-installers, `image.yml` publishes the server, and T-701's updater is already
-proven end to end against a throwaway manifest:
-
-- **M7's own check** (`docs/tasks/m7.md`): *one auto-update, installed, on a
-  machine that did not build it.* Every M7 task is done and archived; this is
-  the part no test can do. Cut a tag, publish the draft release, install the
-  bundle somewhere else, then cut the next tag and watch that machine take the
-  update. **The first tag is also the first time `image.yml` builds arm64 and
-  the first time a `docker compose pull` has anything to pull** — worth a
-  manual run of that workflow from the Actions tab first, and remember the ghcr
-  package starts private and has to be made public by hand once.
-
-- The visual "a window opens" sign-off on Linux, Windows and macOS
-  (T-002/T-003 in `docs/tasks/m0.md`). Was meant to close before M7. Installing
-  the bundles from a `v0.1.0` draft release closes **the Linux and Windows two
-  thirds** of it and exercises the release path at the same time; the Windows one
-  carries a SmartScreen warning, which is expected (see
-  [`docs/decisions.md`](docs/decisions.md)) and not a reason to wait. The macOS
-  third stays open, because v0.1.0 does not build a macOS bundle — it needs
-  somebody with a Mac and a `cargo tauri build` from a checkout.
-- **M5's milestone check itself** (`docs/tasks/m5.md`): a real 400 MB video,
-  over a real network, from a server with real DNS for both names. Every piece
-  of it is covered by tests, but nobody has clicked `+ file` in a running app —
-  which also leaves the media grid, the storage figure in the status bar, and
-  the status image at 400×200 on a second client unseen by a person. T-504,
-  T-505 and T-506 each deferred it and each said so.
-- **A styled name in the message stream** (`docs/tasks/m6.md`). The roster, the
-  style picker, themes and warmth were all driven live, but the gateway is a
-  Tauri IPC channel, so the browser sessions that verified them had no rooms and
-  no messages. The stream's names and the per-person message font have only ever
-  been checked as computed styles. Same code path as what was verified; still
-  nobody has watched a styled name go past in a room.
+**Everything a person still has to do by hand lives in one place now:
+[Human checks](#human-checks--things-only-you-can-do), at the bottom of this
+file.** Five of them, all left over from closed milestones. They are not
+optional and they are not tasks an agent can take — each one needs somebody
+sitting in front of a real computer.
 
 - 🚫 **AI is off the roadmap** (Matt, 2026-08-19). The local-model features and the
   agent surface that used to sit behind V1 are cut — SPEC §8 records why, AGENTS
@@ -176,100 +166,6 @@ at all until T-705.
 
 ---
 
-
-## M8 — export
-
-*Milestone check: one archive contains every message and file, and it opens.*
-
-- ✅ **T-801 · Full export** — effort: **medium** — landed 2026-08-27
-
-  **Landing note.** `POST /export` writes a row, spawns a task and hands back an
-  id; `GET /export/:job_id` says how far along and, when there is one, where to
-  download it. The archive is served from `/objects/...` on the **media
-  origin** — the same host uploads come from — because the whole server in one
-  file has no more business being same-origin with the app than a photo does.
-  The origin split is tested, not assumed: on a named server the archive
-  answers on `cdn.` and 404s on the app's own name.
-
-  **What is in the zip**, under one top-level folder so unzipping it does not
-  scatter files across somebody's downloads: `rooms/<slug>.md` per room in the
-  order things were said, with a divider and a heading per day and every
-  message as `**HH:MM** — Display Name (@username)`; a reply quoting what it
-  answered, because a transcript where replies point at nothing is the least
-  readable kind there is; `media/` with every file
-  under its own name; `media.md` indexing who shared what, when and in which
-  room; and a `README.md` that says what the archive is and that it needs
-  nothing from this project to read. Times are UTC and the archive says so —
-  the server does not know what timezone a reader is in, and quietly writing
-  its own would be worse than naming the one it used.
-
-  **Three decisions worth knowing.**
-  *Deleted messages stay deleted.* A tombstone is skipped; an archive that
-  resurrects what somebody deleted would be a worse product.
-  *One archive per member.* Asking again deletes the previous one's bytes
-  first, so a member with a button cannot fill a host's disk with copies of
-  their own server. An old `url` stops working, and there is a test for that.
-  *Archives are not attachments.* They are not `attachments` rows, do not count
-  against `LINGER_POOL_BYTES`, and never appear in the media grid. Their keys
-  (`exports/<id>.zip`) cannot be mistaken for an attachment key by
-  `storage::key_owner`.
-
-  **The zip is written on a blocking thread.** `zip` is synchronous and an
-  archive is hundreds of megabytes; doing it on the reactor would stall every
-  other connection. Media entries are `Stored` rather than deflated — a JPEG is
-  already compressed, and running deflate over one spends the CPU of the whole
-  export to save a fraction of a percent.
-
-  **Uploaded filenames are somebody else's text**, so `archive_filename` is
-  also the zip-slip guard: no directories, no `..`, nothing that can climb out
-  of `media/` when an unzipper puts it back on a disk. Two people who both
-  shared `IMG_0001.jpg` both keep their name (` (2)`).
-
-  **Dates are hand-written rather than a dependency.** One format in one file
-  did not justify a date crate; `civil_date` is Hinnant's algorithm with tests
-  for the leap day, the 1900/2000 century rule and a pre-epoch date.
-
-  **What is not proven here.** The S3 path — an export on a bucket has to pull
-  every file back out through a presigned URL, which the local backend never
-  does — has a test in `tests/s3.rs`, and that file skips itself without a
-  bucket. It has only run in CI's `s3` job, never on this machine. And nobody
-  has exported a server with a year of real video in it; the tests use small
-  files.
-
-  **Also added:** `repo::messages::batch_ascending`. `page` is newest-first
-  because the stream reads that way, and its `after` still orders `DESC` — the
-  newest messages after a point rather than the next ones. An archive reads
-  forwards, so it gets its own query rather than a flag on that one.
-- ✅ **T-802 · The export button** — effort: **low** — landed 2026-08-28
-
-  **Landing note.** Settings, under *take everything with you*: one button that
-  starts an export, a line that says what is happening, and a second button
-  that hands the finished archive to the system browser once there is one.
-
-  **The download goes out of the app, not into it.** `openExternal`, the same
-  path a link in a message takes — a WebView that navigates itself to a zip has
-  left the application, taking the signed-in session with it.
-
-  **A refusal is a sentence, not an error.** A second export inside the hour
-  comes back `RATE_LIMITED` with `retry_after_ms`, which the panel says as "you
-  can ask again in about 50 minutes". Rounded up and vague on purpose. A server
-  that refuses without saying when falls back to the documented hour.
-
-  **Polling, not a gateway frame.** A job belongs to the one person who asked
-  for it; putting progress on the socket every member shares would tell the
-  whole server whenever anybody takes a copy. Closing the panel stops the
-  asking and leaves the job running — it is being built for a person, not for a
-  window.
-
-  Twelve tests in `client/src/settings/export.test.ts` cover the wording, the
-  refusal, the poll-to-completion, and that nothing is said after the panel
-  closes. The logic is in `settings/export.ts` so it is testable without
-  rendering; the component is the thin part.
-
-  **Not done here:** nobody has clicked it in a running app. It is on the
-  human-checks list.
-
----
 
 ## Backburner — later, not the next thing
 
@@ -362,9 +258,465 @@ Plasma 6 Wayland and Windows.*
 ---
 
 
+## V2 — planned, not started
+
+**Nothing here is next.** V1 is done except the five things in *Human checks*,
+and those come first — a release nobody has installed is not a finished V1. This
+section exists so the shape of V2 is written down while it is fresh, not so
+somebody starts it.
+
+**Read this before touching any of it:** SPEC §6 lists what V2 is; anything not
+on that list is not V2, it is scope creep. Voice, DMs and mobile each add a
+whole category of thing this product does not currently have, and each one has
+at least one decision in it that is **Matt's, not an implementing session's**.
+Those are called out per milestone and repeated in the *Parking lot*.
+
+**Numbering.** V1 used `T-1xx`–`T-8xx` for milestones M1–M8, plus `T-9xx` for
+the V1 work that came off the critical path. V2 starts a new band at **`T-1xxx`,
+where the hundreds digit is the area** — `T-11xx` knock, `T-12xx` search,
+`T-13xx` DMs, `T-14xx` voice, `T-15xx` ambient voice, `T-16xx` mobile. It does
+not continue the milestone-matches-number rule, because `T-9xx` is already
+spoken for.
+
+**The order is not SPEC §6's order, on purpose.** SPEC lists voice first because
+it is the headline. It is sequenced last-but-one here because it is the largest
+and riskiest thing in the project, and because knock and search are small,
+self-contained, and make the app better next week rather than next quarter.
+Build order, cheapest and safest first:
+
+```
+M9 knock → M10 search → M11 DMs → M12 voice rooms → M13 ambient voice → M14 mobile
+```
+
+---
+
+### M9 — knock
+
+*Milestone check: a knock crosses two machines, shows up as something that
+fades on its own, and leaves nothing behind.*
+
+The smallest thing in V2 and the most already-built: `POST /knock` is in
+PROTOCOL §7, the `knock` frame is already in `linger_core::gateway::ServerFrame`,
+and `RATE_KNOCK_PER_TARGET` is already in `linger_core::limits`. What is missing
+is the two ends.
+
+SPEC §4.9 is the whole spec and the hard part is what it *refuses*: no message,
+no thread, no unread state, nothing to dismiss. A knock that leaves a notification
+sitting there has become a message, and the feature is gone.
+
+- ⬜ **T-1101 · Knock, server side** — effort: **low**
+  Implement `POST /knock`: the target has to be a member of this server, the
+  rate limit is `RATE_KNOCK_PER_TARGET` (3 per hour **per target**, so knocking
+  five different people is fine), and the `knock` frame goes to that one
+  person's sessions and nobody else's. Nothing is stored — a knock is not a row.
+  *Accept:* an integration test where a knock arrives on the target's socket and
+  not on a third member's; the fourth knock inside an hour gets `RATE_LIMITED`;
+  knocking somebody who was removed is `NOT_FOUND`.
+
+- ⬜ **T-1102 · Knock, client side** — effort: **medium**
+  Where you knock from: the person's card in the roster, one control. What
+  arrives: a card that appears, does not steal focus, and fades by itself. No
+  buttons on it. No history of it anywhere.
+  **Depends on a sound**, and the sound plumbing is T-901 (entrance sounds,
+  backburner). Either land T-901 first and use its player, or build the smallest
+  possible one here and let T-901 adopt it — **do not build a second sound
+  system**. Whichever way, the mute and the quiet-hours rule from T-901's spec
+  apply to knocks too.
+  *Accept:* two clients on two machines; a knock crosses, the card fades on its
+  own, and nothing is left in the stream, the roster, or any list.
+
+---
+
+### M10 — search
+
+*Milestone check: type a word, get the messages that contain it, click one, land
+on it in the room it was said in.*
+
+**A spec section has to be written first.** SPEC has no section for search — it
+is one word on the V2 list. The first commit of T-1201 writes **SPEC §4.12** and
+the PROTOCOL §6 entry, and the rest of the milestone implements what they say.
+Two questions that section has to answer, and they are Matt's:
+
+- **Where does search live in the layout?** SPEC §3 has no search box. A
+  destination in the left rail next to `media` is the obvious answer and matches
+  how media works. A keyboard shortcut over the stream is the other. Pick one.
+- **Does search cover file names and link titles, or only what people typed?**
+  Cheap either way; it changes what people expect from it.
+
+- ⬜ **T-1201 · The index** — effort: **high**
+  SQLite FTS5 over message bodies, kept in step by triggers on insert, edit and
+  delete, plus a one-time backfill migration for servers that already have
+  history. **Tombstones must not be searchable** — a deleted message is deleted,
+  the same rule the export follows. An edit must update the index, not add to
+  it. Write SPEC §4.12 and PROTOCOL §6 in the same commit.
+  *Accept:* integration tests — a word in an old message is findable after the
+  backfill; editing a message changes what it matches; deleting one makes it
+  unfindable; a message with 5,000 words does not slow an insert to a crawl.
+
+- ⬜ **T-1202 · The endpoint** — effort: **medium**
+  `GET /search?q=&room_id=&author_id=&before=`: keyset paging like `/media`, a
+  short snippet per hit with the matched words marked, and a rate limit
+  (FTS is cheap but not free, and it is the one endpoint somebody can hammer).
+  *Accept:* filters combine; paging never repeats or skips a hit; an empty query
+  is a validation error rather than every message on the server.
+
+- ⬜ **T-1203 · The search surface** — effort: **medium**
+  Whatever SPEC §4.12 decided. Results as a list of snippets with room, author
+  and time; clicking one opens that room **and scrolls to that message**. The
+  scroll is the hard part and the precedent is T-303's *go to where you left
+  off* — the stream is virtualized, so a row's height is a guess until it has
+  been drawn, and anything that jumps has to keep re-aiming as real heights
+  arrive.
+  *Accept:* search for a word from six months ago in a 10,000-message room,
+  click the hit, and land on the message with it on screen — not near it.
+
+---
+
+### M11 — DMs and group DMs
+
+*Milestone check: two people hold a conversation nobody else on the server can
+see, in any surface — stream, media, search, export, notifications.*
+
+**This is the first time Linger has a private space**, and that is a bigger
+change than it looks. Today every member can see every room, so the gateway fans
+every frame to everybody and nothing has to check. A DM breaks that assumption
+in every fan-out path at once, and **each surface that forgets the check is a
+leak**: the media grid showing a DM photo, search returning somebody else's
+words, an export containing a conversation you were not in.
+
+**Not a permission system.** AGENTS rule 10 stands. A DM has members; that is
+all. No roles, no per-room settings, no admin view of other people's DMs — the
+host is a member of a DM or they cannot see it, and there is no override.
+
+- ⬜ **T-1301 · The model and the endpoints** — effort: **high**
+  `rooms.kind` (`room` | `dm`), a `room_members` table, create-or-find a DM for
+  a set of people (asking twice for the same set gives the same DM), and listing
+  the ones you are in. Then the part that matters: **every gateway fan-out grows
+  a membership filter**, and the default for a new frame type must be "members
+  only" rather than "everybody".
+  *Accept:* integration tests where a third member's socket never receives a DM
+  frame, cannot fetch its messages by id, and cannot list it.
+
+- ⬜ **T-1302 · DMs in the client** — effort: **high**
+  A section of the rail under the rooms, started from a person's card in the
+  roster. Typing and presence work inside a DM the way they do in a room.
+  **No unread counts** — AGENTS rule 3 does not get an exception because a DM
+  feels more urgent. A DM with something new in it can be marked the same
+  quiet way a room is, and no number appears anywhere.
+  *Accept:* two clients hold a DM; a third client shows no sign it exists.
+
+- ⬜ **T-1303 · Everywhere else a DM can leak** — effort: **high**
+  Its own task because it is the security-critical half and it is the half that
+  gets forgotten. Media grid, search, export, notifications, link previews and
+  the media origin all have to respect membership. An export contains the DMs
+  you are in and no others.
+  *Accept:* a test per surface, each one asserting a non-member gets nothing —
+  and a test that a **removed** member stops seeing a DM they used to be in.
+
+---
+
+### M12 — voice rooms
+
+*Milestone check: four people talk to each other, on four different networks,
+for an hour, without anybody dropping.*
+
+**The riskiest thing in the project.** AGENTS.md §"Where you will be wrong"
+names two of these areas explicitly: WebRTC generated from memory works on
+localhost and dies behind real NAT, and audio device handling breaks on hotplug
+and sample-rate mismatch. Both warnings are load-bearing here.
+
+**The architecture is already decided** (ARCHITECTURE §2): audio lives in
+**Rust, not the WebView** — `webrtc-rs` for transport, `cpal` for devices. This
+is not a preference. WebKitGTK's WebRTC is the weakest of the three engines, and
+keeping audio out of the page removes it from the critical path entirely.
+
+**Do not test this on one machine.** Two processes on one laptop connect over
+loopback and prove nothing at all.
+
+- ⬜ **T-1401 · Signalling over the gateway** — effort: **high**
+  Offer, answer and ICE candidate frames; who is in voice in which room; join
+  and leave. No audio yet — this task ends with two clients having exchanged
+  everything they need and nothing playing.
+  *Accept:* two clients complete a full exchange across a forced reconnect
+  without the session ending up half-connected.
+
+- ⬜ **T-1402 · The audio path** — effort: **treacherous**
+  `webrtc-rs` peer connections in the Tauri core, `cpal` capture and playback, a
+  full mesh (V2 is eight people, so mesh is fine and an SFU is not needed).
+  **Coordinate with Matt before starting.**
+  *Accept:* four people, four networks, one hour, no drops. Anything less than
+  that is not evidence.
+
+- ⬜ **T-1403 · A TURN server in the deploy** — effort: **high**
+  coturn in `deploy/`, credentials that are not shared secrets in a compose
+  file, and the host guide updated. Without this, anybody behind a phone network
+  or a corporate router cannot connect at all — and it will look like a bug in
+  the app rather than missing infrastructure.
+  *Accept:* two clients connect where at least one is behind carrier-grade NAT.
+
+- ⬜ **T-1404 · The voice surface** — effort: **medium**
+  Join and leave, who is speaking, per-person volume, push-to-talk, a device
+  picker, mute. Console design system: no bubbles, no glow, no animated rings.
+  *Accept:* usable by somebody who has not read anything.
+
+- ⬜ **T-1405 · Devices that change under you** — effort: **high**
+  Its own task because AGENTS says so: headphones unplugged mid-call, the OS
+  default device changing, a device that wants a different sample rate.
+  *Accept:* unplug and replug headphones during a call; audio continues on the
+  new device without a restart.
+
+---
+
+### M13 — ambient voice
+
+*Milestone check: leave a room running for a working day; it costs almost no
+CPU and nobody had to "join" anything.*
+
+The differentiator, and it only makes sense on top of M12. "A room you leave
+running, not a call you join" — no ringing, no joining ceremony, no call that
+somebody has to end.
+
+**The privacy shape matters more than the code.** An always-on microphone is
+exactly the thing this product's whole pitch is against, so it needs the same
+treatment activity sharing got in SPEC §4.3: **off by default, a persistent
+visible indicator whenever it is on, and one obvious way to kill it.**
+
+- ⬜ **T-1501 · Ambient mode** — effort: **high**
+  Open mic with voice detection so silence costs nothing, no join step, idle
+  cost low enough to leave on all day.
+  *Accept:* eight hours in a room, CPU and battery measured, and a number
+  written down in the landing note.
+
+- ⬜ **T-1502 · The controls that make it safe** — effort: **medium**
+  Default off. A persistent indicator, visible without opening anything, any
+  time the mic is live. One-click kill from the roster. Quiet hours.
+  *Accept:* somebody who did not set it up can tell at a glance whether their
+  microphone is on.
+
+---
+
+### M14 — mobile
+
+*Milestone check: sign in, read a room, send a message and a photo, from a
+phone.*
+
+**Start with the decision, not the code.** Mobile has one question in it that is
+Matt's and is not a technical one:
+
+> **Push notifications go through Apple and Google.** There is no other way to
+> wake a phone app. That means a message's *existence* — and whatever the
+> notification says — passes through a third party, which is a different promise
+> from the one the README makes today.
+
+Three honest answers, and one has to be picked before T-1602: ship without push
+and let the app only notify while open; ship with push and **change the README
+to say exactly what leaves the server**; or run a self-hosted push relay, which
+is a second piece of infrastructure for every host and probably kills it.
+Recorded in the *Parking lot* too.
+
+- ⬜ **T-1601 · Decide what mobile means** — *not a task; a decision.* Matt.
+  The push question above, plus: does mobile get uploads, does it get voice, and
+  is it iOS-and-Android or one of them. Write the answers into SPEC before
+  anything else starts.
+
+- ⬜ **T-1602 · The mobile shell** — effort: **high**
+  Tauri 2 builds for iOS and Android from the same crate. What does not carry
+  over: the OS keyring (mobile has its own secure storage), activity detection
+  (desktop only, and it stays that way), and the tray. Expect the gateway to
+  need reconnect behaviour for a network that changes every time somebody walks
+  out of a building.
+  *Accept:* the app opens on a real phone, signs in, and stays connected across
+  a wifi-to-mobile-data switch.
+
+- ⬜ **T-1603 · The layout at phone width** — effort: **medium**
+  The roster already collapses under 880px (`client/src/lib/layout.ts`), which
+  is a head start. What is missing is one-hand reach, a composer above a
+  software keyboard, and the rail as something other than a fixed column.
+  *Accept:* usable one-handed on a phone somebody actually owns.
+
+- ⬜ **T-1604 · Getting it onto a phone that is not yours** — effort: **treacherous**
+  Apple Developer Program, Google Play, review, and store listings. This is the
+  same money-and-paperwork wall as T-705, doubled. **Do not start without both
+  accounts.** Follow current vendor docs, not memory — this changes every year.
+  *Accept:* somebody who has never met you installs it from a store.
+
+---
+
+## Human checks — things only you can do
+
+Five things are built, tested, and **never once used by a person**. Automated
+tests prove the code does what it says. They cannot prove that a window opens,
+that a 400 MB upload survives a real network, or that a button feels like
+anything. That is this list.
+
+None of these are agent tasks. Each one needs you, a real computer, and a few
+minutes. They are ordered so that **doing the first one knocks out most of the
+second and third at the same time.**
+
+---
+
+### HC-1 · Cut a release and watch a machine update itself
+
+*Closes M7's milestone check, and most of HC-2. The biggest one, and everything
+it needs is already built.*
+
+This is the one thing no test can do: prove that a copy of Linger installed on
+somebody else's computer can replace itself with a newer one.
+
+**Before the first tag, once ever — two things:**
+
+1. **Prove the container image builds on both chip types.** Go to the repo's
+   *Actions* tab → *image* → *Run workflow*. It builds for regular PCs and for
+   ARM (Raspberry Pi and similar) and pushes nothing. The ARM half has never
+   been built, so if it is going to fail, this is where you want to find out —
+   not on release day. It takes a while; ARM is built by emulation and is slow.
+2. **Check the four version numbers agree.** Run `scripts/version-check.sh`. If
+   it complains, bump all four files it names and commit that first.
+
+**Then, the release itself:**
+
+3. Tag it and push the tag:
+   ```bash
+   git tag v0.1.0 && git push origin v0.1.0
+   ```
+4. Wait for *Actions* to finish. It builds a Windows installer and a Linux one,
+   publishes the server image, and opens a **draft** release. Nothing is public
+   yet — a draft is invisible to everybody.
+5. **Make the container image public.** First time only. Go to
+   `github.com/users/<you>/packages/container/linger/settings` and set the
+   visibility to public. Skip this and every host's `docker compose up` fails
+   with `unauthorized`, including yours.
+6. Read the draft release, then press **Publish**. That is what makes it real.
+7. **Install it on a machine that did not build it.** A second laptop, a
+   virtual machine, a friend's PC — anything but your dev box. On Windows you
+   will see *"Windows protected your PC"*; that is expected, click *More info*
+   → *Run anyway* (see [`docs/decisions.md`](docs/decisions.md)).
+8. Bump the version in all four files, commit, tag `v0.1.1`, push, wait, and
+   publish that release too.
+9. On the machine from step 7, open Linger → **settings → updates**. It should
+   say a new version is waiting. Press install. It should download, replace
+   itself, and come back as 0.1.1.
+
+**Done when:** step 9 works. If it does not, the thing to look at first is
+whether the signing key in the repository secrets is the mate of the public key
+in `tauri.conf.json` — run the *release* workflow manually from the Actions tab
+and it checks exactly that, without releasing anything.
+
+---
+
+### HC-2 · Watch a window open on all three operating systems
+
+*Left over from T-002/T-003 (`docs/tasks/m0.md`). Was meant to close before M7.*
+
+Steps 7 and 9 of HC-1 cover **Linux and Windows** — if the app opened, this is
+two thirds done. What is left is **macOS**, and it cannot be done from a
+release, because Linger deliberately does not build a Mac version yet
+([`docs/decisions.md`](docs/decisions.md) says why).
+
+**For the macOS third**, on a Mac, from a checkout:
+
+```bash
+cd client && pnpm install && pnpm tauri build
+```
+
+Then open the app it produces in `client/src-tauri/target/release/bundle/`.
+macOS will complain that it cannot verify the developer — that is expected for
+an unsigned build.
+
+**Done when:** a window opens on all three, and you have seen it.
+
+---
+
+### HC-3 · Share a 400 MB video for real
+
+*Closes M5's milestone check (`docs/tasks/m5.md`). Every piece is tested;
+nobody has ever clicked `+ file` in a running app.*
+
+Needs a real server on a real domain (see
+[`docs/host-guide.md`](docs/host-guide.md)), not a local one — the point is the
+network and the two domain names, which is where uploads actually break.
+
+1. Sign in to your server from the desktop app.
+2. Drag a **400 MB or larger video** into the message box. Watch the progress
+   bar.
+3. **Kill the network halfway** — turn wifi off and back on. The upload should
+   pick up where it left off rather than starting again.
+4. When it lands, check the message shows a **poster frame** (a still from the
+   video), not a blank box.
+5. Open **media** in the left rail. The video should be there. Star it.
+6. Look at the **storage figure** in the status bar. It should have gone up by
+   roughly 400 MB.
+7. On a **second computer**, sign in as somebody else and check the video is
+   there and plays.
+8. Set a **status image** on one machine and check it appears on the other at a
+   sensible size.
+
+**Done when:** all eight work. If the upload fails but chat works, the `cdn.`
+name is the first thing to check — see the host guide's troubleshooting.
+
+---
+
+### HC-4 · Watch a styled name go past in a room
+
+*Left over from M6 (`docs/tasks/m6.md`).*
+
+The style picker, the themes and the evening warmth were all driven live in a
+browser — but a browser session has no rooms and no messages, because the live
+connection only exists inside the desktop app. So the names in the message
+stream have only ever been checked as computed values, never seen.
+
+1. Two computers (or one computer and a virtual machine), signed in as two
+   different people.
+2. On the first: **settings → how your name looks**. Set a gradient of two
+   colors, a different face, and turn on shimmer.
+3. Send a few messages.
+4. On the second machine, look at the stream. The name should be drawn the way
+   it was set, in colour, in that face.
+5. Turn on **normalize everyone** on the second machine. Every name should go
+   plain immediately, including in the stream.
+6. Switch **density** to compact, then to IRC. Effects should switch off.
+7. Wait until after 7pm local time (or change the clock) and check the
+   background goes slightly warmer, and that names are still readable.
+
+**Done when:** you have watched a styled name scroll past in a real room.
+
+---
+
+### HC-5 · Press the export button
+
+*Closes T-802 (`docs/tasks/m8.md`). The smallest one on this list.*
+
+1. In the app: **settings → take everything with you**.
+2. Press **export everything**. Watch the line underneath — it should count up.
+3. When it says the archive is ready, press **download it**. Your normal
+   browser should take the download.
+4. Unzip the file. Open `rooms/<something>.md` in any text editor and read it.
+   Open something in `media/`.
+5. Press **export everything** again straight away. It should tell you, in
+   words, roughly how long until you can ask again — not show an error.
+
+**Done when:** you have read a room out of a zip that Linger did not open for
+you. That is the whole promise of the feature.
+
+---
+
 ## Parking lot (decisions needed, not tasks yet)
 
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
+- **Mobile push goes through Apple and Google, or it does not exist.** There is
+  no third way to wake a phone app. Whatever a notification says, and the fact
+  that it happened, passes through a company that is not you. The README's
+  privacy section does not currently allow for that. Three answers: no push
+  (the app only notifies while it is open), push with the README changed to say
+  exactly what leaves the server, or a self-hosted relay — which is a second
+  piece of infrastructure for every host and probably ends the idea. **This
+  blocks M14** and nothing else. Raised 2026-08-28 while planning V2.
+- **Where does search live, and what does it cover?** SPEC §3's layout has no
+  search box. A destination in the rail next to `media` matches how media
+  works; a keyboard shortcut over the stream is the other option. And: does it
+  search file names and link titles, or only what people typed? Both are cheap;
+  they change what people expect. **This blocks M10's first task**, which
+  writes SPEC §4.12. Raised 2026-08-28.
 - **Nothing in the client can pin a message.** The server has
   `POST /messages/{id}/pin`, the media grid has a `pinned` filter, and file
   expiry spares "starred or pinned" files — but there is no pin control
