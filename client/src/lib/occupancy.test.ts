@@ -29,7 +29,6 @@ function here(userId: string, roomId: string | null = "room-garage"): PresenceEn
     user_id: userId,
     state: roomId === null ? "around" : "in_room",
     room_id: roomId,
-    activity: null,
     away_message: null,
   };
 }

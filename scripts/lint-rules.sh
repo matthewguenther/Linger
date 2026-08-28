@@ -28,7 +28,7 @@ if [ -n "${1:-}" ]; then
 fi
 
 # ---- tree checks ------------------------------------------------------------
-CODE_DIRS=(crates client/src client/src-tauri/src deploy registry)
+CODE_DIRS=(crates client/src client/src-tauri/src deploy)
 
 if grep -rniE "(co-authored-by|generated (with|by)).{0,60}(${AI_NAMES})" "${CODE_DIRS[@]}"; then
   echo "FAIL: AI attribution string in the tree (rule 1)."

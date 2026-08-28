@@ -11,7 +11,6 @@
  * turns moments into short labels; there is no quantity to render and no
  * endpoint that would answer if there were.
  */
-import type { ActivityInfo } from "../generated/ActivityInfo";
 import type { PresenceEntry } from "../generated/PresenceEntry";
 import type { PresenceState } from "../generated/PresenceState";
 import type { Room } from "../generated/Room";
@@ -23,8 +22,6 @@ export interface RosterEntry {
   state: PresenceState;
   /** The room they are in, when we hold it. Null unless they are in one. */
   room: Room | null;
-  /** Registry-resolved, never a window title (SPEC §4.3). */
-  activity: ActivityInfo | null;
   /**
    * The away message, which supersedes the status line when set (SPEC §4.6).
    * Null for somebody who is plainly here: an old one left on a status would
@@ -88,7 +85,6 @@ export function buildRoster(input: {
       user,
       state,
       room,
-      activity: here ? (entry?.activity ?? null) : null,
       awayMessage: entry?.away_message ?? (here && state !== "idle" ? null : kept),
       seenAt: here ? now : (offlineAt[user.id] ?? user.last_seen_at),
       isMe: user.id === meId,
@@ -118,18 +114,6 @@ export function stateWord(state: PresenceState): string {
     case "offline":
       return "offline";
   }
-}
-
-/**
- * The mark in front of an activity, by registry kind.
- *
- * Exactly one kind gets one, and it is the one SPEC §3 draws: `♪ Bill Evans`.
- * Music is the case where the app's name is not the interesting part, so the
- * mark says what sort of line it is. A glyph on every kind would be a row of
- * icons, and the roster is a place for names.
- */
-export function activityMark(kind: string): string | null {
-  return kind === "media" ? "♪" : null;
 }
 
 const MINUTE_MS = 60_000;

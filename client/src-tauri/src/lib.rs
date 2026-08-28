@@ -1,6 +1,6 @@
 //! Tauri shell. The WebView gets the minimum permission surface (ARCHITECTURE §7):
-//! activity detection is exposed as exactly one narrow command returning resolved
-//! data — the WebView can never enumerate processes or see raw identities.
+//! every native capability it has is one narrow command in this crate, and it
+//! has no others.
 
 pub mod gateway;
 mod secrets;
@@ -14,28 +14,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use secrets::{SessionWrite, SessionsLoad, StoredSession};
-
-/// What the status bar shows about activity detection. Resolved data only.
-#[derive(Serialize)]
-struct ActivityProbe {
-    /// Which platform backend was selected, e.g. "linux-kwin". `"null"` means
-    /// presence-only on this platform.
-    backend: String,
-    /// Resolved registry id of the current foreground app, if sharing is on and
-    /// the app is in the registry. Never a raw process name, never a title.
-    registry_id: Option<String>,
-}
-
-/// The one activity command (real backends and the poller land with T-911…T-917,
-/// on the backburner — until then this always reports `None`).
-#[tauri::command]
-fn activity_probe() -> ActivityProbe {
-    let (kind, _backend) = linger_activity::backend::select_backend();
-    ActivityProbe {
-        backend: format!("{kind:?}"),
-        registry_id: None,
-    }
-}
 
 /// Keyring calls talk to a system daemon and can block for as long as it takes
 /// the user to unlock a wallet, so they never run on a runtime thread. A task
@@ -252,7 +230,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Connections::default())
         .invoke_handler(tauri::generate_handler![
-            activity_probe,
             sessions_load,
             session_save,
             session_forget,

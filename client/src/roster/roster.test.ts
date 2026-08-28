@@ -4,7 +4,7 @@ import type { PresenceEntry } from "../generated/PresenceEntry";
 import type { Room } from "../generated/Room";
 import type { User } from "../generated/User";
 import type { UserStatus } from "../generated/UserStatus";
-import { activityMark, buildRoster, hasStatus, shortAgo, stateWord } from "./roster";
+import { buildRoster, hasStatus, shortAgo, stateWord } from "./roster";
 
 const NOW = 1_700_000_000_000;
 const MINUTE = 60_000;
@@ -51,7 +51,6 @@ function here(userId: string, extra: Partial<PresenceEntry> = {}): PresenceEntry
     user_id: userId,
     state: "around",
     room_id: null,
-    activity: null,
     away_message: null,
     ...extra,
   };
@@ -128,18 +127,11 @@ describe("buildRoster", () => {
     expect(entries[0]?.state).toBe("in_room");
   });
 
-  it("shows nothing an offline person was doing", () => {
+  it("shows no room for somebody who is offline", () => {
     const entries = roster({
       users: [person("u-1", "Dave")],
-      presence: [
-        here("u-1", {
-          state: "offline",
-          room_id: garage.id,
-          activity: { registry_id: "blender", label: "Blender", kind: "creative", since: NOW },
-        }),
-      ],
+      presence: [here("u-1", { state: "offline", room_id: garage.id })],
     });
-    expect(entries[0]?.activity).toBeNull();
     expect(entries[0]?.room).toBeNull();
   });
 
@@ -223,13 +215,6 @@ describe("shortAgo", () => {
 });
 
 describe("the small pieces", () => {
-  it("marks music and leaves every other kind alone", () => {
-    expect(activityMark("media")).toBe("♪");
-    for (const kind of ["game", "browser", "dev", "creative", "anything-else"]) {
-      expect(activityMark(kind)).toBeNull();
-    }
-  });
-
   it("says every state out loud", () => {
     expect(stateWord("in_room")).toBe("in a room");
     expect(stateWord("around")).toBe("around");

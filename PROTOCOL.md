@@ -540,7 +540,7 @@ Beyond that, the client must re-identify and refetch.
 
 | op | payload | notes |
 |---|---|---|
-| `presence.update` | `{ state, activity, away_message? }` | `activity` is the resolved registry id or `null`. **Never a window title.** |
+| `presence.update` | `{ state, away_message? }` | Where you are, and nothing about what you are doing (SPEC §4.3). |
 | `room.focus` | `{ room_id \| null }` | fires on focus; `null` = left the room |
 | `typing.start` | `{ room_id }` | server rate-limits to 1 per 4s per room |
 
@@ -567,7 +567,6 @@ type PresenceEntry = {
   user_id: string;
   state: "in_room" | "around" | "idle" | "away" | "offline";
   room_id: string | null;
-  activity: { registry_id: string; label: string; kind: string; since: number } | null;
   away_message: string | null;
 }
 ```

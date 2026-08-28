@@ -17,7 +17,6 @@ Companion to `SPEC.md`. Wire protocol is in `PROTOCOL.md`. Agent working rules a
 │                                            │
 │  Core — Rust                               │
 │    gateway client (WS, resume, backoff)    │
-│    activity detector (per-OS backends)     │
 │    token storage (OS keyring)              │
 │    local cache (SQLite)                    │
 └────────────────────────────────────────────┘
@@ -44,7 +43,7 @@ Deployment is one binary plus one data directory, or one Docker image.
 |---|---|---|
 | **Rust server (axum + tokio)** | A single static binary is a dramatically better self-host story than "install Node, install pnpm, run migrations." Also lets client and server share types. | Never for V1. |
 | **SQLite (WAL), not Postgres** | 20 friends, a few hundred messages a day. Postgres is ceremony at this scale. One file to back up. | Only if a server exceeds ~2k users or needs multi-node. A `Repository` trait keeps the swap cheap. |
-| **Tauri 2, not Electron** | ~5–15 MB bundle vs ~150 MB; ~100 MB idle RAM vs ~400 MB; first-class Rust for native OS access, which the activity detector requires. | Only if WebKitGTK rendering on Linux becomes untenable. |
+| **Tauri 2, not Electron** | ~5–15 MB bundle vs ~150 MB; ~100 MB idle RAM vs ~400 MB; first-class Rust, which is where the gateway, the keyring and (in V2) audio live. | Only if WebKitGTK rendering on Linux becomes untenable. |
 | **TypeScript + React frontend** | Largest ecosystem for virtualized lists and rich text; fastest to iterate. | — |
 | **Object store adapter, not blobs in DB** | 500 MB files must never traverse the app server. | — |
 
@@ -78,12 +77,9 @@ linger/
 ├─ crates/
 │  ├─ linger-core/             # shared types, ID generation, color palette
 │  ├─ linger-server/           # axum, SQLite, object store, gateway
-│  └─ linger-activity/         # activity detection, per-OS backends
 ├─ client/
 │  ├─ src-tauri/              # Tauri shell, commands, keyring, gateway client
 │  └─ src/                    # React frontend
-├─ registry/
-│  └─ apps.json               # bundled app registry (see §6)
 ├─ assets/
 │  ├─ fonts/                  # subset, bundled
 │  └─ sounds/                 # curated entrance sounds
@@ -281,90 +277,29 @@ persisted presence is worse than none.
 
 ---
 
-## 6. Activity detection — the hard part
+## 6. Presence
 
-Lives in `crates/linger-activity`. Single public API:
+Where somebody is: `in_room`, `around`, `idle` (no input for 10 minutes), `away`
+(explicit, with a message), `offline`. It lives in the gateway
+(`crates/linger-server/src/gateway/`), it is held in memory, and it is not stored.
 
-```rust
-pub enum Activity {
-    None,
-    App { registry_id: String, since: SystemTime },
-}
+**This section used to be "Activity detection — the hard part"** and it described a
+`linger-activity` crate with a per-OS backend for KWin, X11, Windows and macOS, a
+bundled registry of ~200 applications, a poller with a 20-second debounce, and five
+privacy controls to make it safe. All of it is cut (Matt, 2026-08-28 —
+`docs/decisions.md`). The crate is deleted, the registry is deleted, the wire field
+is deleted, and SPEC §4.3 says what replaced it: a status somebody typed.
 
-pub trait ActivityBackend: Send + Sync {
-    fn foreground_process(&self) -> Result<Option<ProcessIdent>>;
-}
+It is worth knowing why it was the hard part, because the reason is still true of
+anything that reaches into the desktop: Wayland deliberately has no equivalent of
+X11's `_NET_ACTIVE_WINDOW`, so there is no cross-compositor way to ask what window
+is in front. Every implementation is per-compositor, and KDE, GNOME, Hyprland and
+sway each need different code. If a future feature wants that kind of access, that
+is the wall it hits, and the answer is very likely still "ask the person instead".
 
-pub struct ProcessIdent {
-    pub exe_name: String,      // "firefox", "steam_app_730"
-    pub exe_path: Option<PathBuf>,
-    pub bundle_id: Option<String>,   // macOS only
-}
-```
-
-**No backend ever returns a window title.** The type system enforces the privacy rule —
-there is no field for it. Do not add one.
-
-### Per-platform reality
-
-| Platform | Approach | Difficulty |
-|---|---|---|
-| Windows | `GetForegroundWindow` → `GetWindowThreadProcessId` → `QueryFullProcessImageNameW` | Easy |
-| macOS | `NSWorkspace.frontmostApplication` → `bundleIdentifier` | Easy, **and needs no special permission** — this is precisely because we do not read titles |
-| Linux / X11 | `_NET_ACTIVE_WINDOW` → `_NET_WM_PID` | Easy |
-| **Linux / Wayland** | **Per-compositor. No unified API.** | **Hard** |
-
-Wayland deliberately has no `_NET_ACTIVE_WINDOW` equivalent, for security reasons. Every
-activity tracker implements a different solution per compositor:
-
-- **KDE / KWin** (the primary dev target): KWin scripting API over D-Bus
-  (`org.kde.KWin.Scripting`), or the `kde-plasma-window-management` Wayland protocol.
-  Works identically under X11 and Wayland sessions.
-- **Hyprland**: IPC socket at `$XDG_RUNTIME_DIR/hypr/$HIS/.socket.sock`
-- **sway**: i3 IPC
-- **GNOME**: no official API. Requires a shell extension exposing D-Bus. **Ship the X11
-  backend for GNOME and document that Wayland+GNOME reports presence only, not
-  activity.** Do not build a GNOME extension in V1.
-
-Select the backend by reading `$XDG_SESSION_TYPE` and `$XDG_CURRENT_DESKTOP` with
-substring matching. Fall back to `None` cleanly — never crash, never block startup.
-
-### Resolution pipeline
-
-```
-foreground process
-  → normalize (strip .exe, lowercase, resolve Steam appid from path)
-  → look up in registry/apps.json
-  → if MISS: report Activity::None        ← default deny
-  → if HIT:  check user's per-app hide list
-  → if hidden: report Activity::None
-  → else: report Activity::App { registry_id }
-```
-
-`registry/apps.json`:
-
-```json
-{
-  "version": 1,
-  "apps": [
-    { "id": "cs2",     "label": "Counter-Strike 2", "kind": "game",
-      "match": { "steam_appid": 730 } },
-    { "id": "firefox", "label": "Firefox", "kind": "browser",
-      "match": { "exe": ["firefox", "firefox-bin"], "bundle": ["org.mozilla.firefox"] } },
-    { "id": "blender", "label": "Blender", "kind": "creative",
-      "match": { "exe": ["blender"], "bundle": ["org.blenderfoundation.blender"] } }
-  ]
-}
-```
-
-Ship ~200 entries covering the top games, browsers, creative tools, editors, and media
-players. `kind` drives roster iconography. Users add unknown apps to a **local** override
-file; those entries never sync to the server.
-
-### Polling
-
-Poll at 3s while focused, 15s while unfocused. Debounce: an app must be foreground for
-20 continuous seconds before it is reported, which suppresses alt-tab noise.
+**No window titles.** Nothing in this codebase reads one, and no type has a field
+that could carry one. That was a hard rule when there was code that could have
+broken it, and it stays a hard rule now that there is not.
 
 ---
 
@@ -400,9 +335,10 @@ E2EE launders a false promise, which is worse than an honest limitation.
    `http(s)://tauri.localhost` on Windows) plus Vite's dev server. Reflecting any
    origin would let a website you happened to visit probe whether this server
    exists, which is worth avoiding for a product that is otherwise this private.
-7. **Tauri capabilities:** the WebView gets the minimum permission set. Activity
-   detection is exposed as exactly one narrow command returning a resolved
-   `Activity`. The WebView can never enumerate processes.
+7. **Tauri capabilities:** the WebView gets the minimum permission set. Every
+   native capability it has is one narrow command in `client/src-tauri/src/`, and
+   it has no others — not the updater plugin's own commands, not the keyring, not
+   the socket.
 8. **Signed auto-updates.** Tauri's updater, with one minisign key whose public half
    is committed in `client/src-tauri/tauri.conf.json` and whose private half is
    **generated once by `scripts/updater-key.sh` and backed up offline** (T-701).
@@ -658,8 +594,8 @@ passes its check.
 **V2 starts here.** Planned 2026-08-28, not started, and not next — V1's
 remaining work is five things a person has to do by hand (`TASKS.md`, *Human
 checks*). The order below is not SPEC §6's listing order: knock and search are
-small and self-contained, voice is the largest and riskiest thing in the
-project, and mobile has an unanswered privacy question in front of it.
+small and self-contained, and voice is the largest and riskiest thing in the
+project.
 
 | # | Milestone | Done when | Estimate |
 |---|---|---|---|
@@ -668,30 +604,34 @@ project, and mobile has an unanswered privacy question in front of it.
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
-| **M14** | Mobile client | Sign in, read, send a message and a photo, from a phone | 2+ weeks |
 
-Two of these carry decisions that are Matt's and block their first task: where
-search lives in the layout (M10), and whether mobile push through Apple and
-Google is acceptable at all (M14). Both are in `TASKS.md`'s parking lot.
+**A mobile client is not in this sequence** (Matt, 2026-08-28). It was going to
+be M14; it is on `TASKS.md`'s *Backburner* instead, because the desktop app has
+to be finished and used by real people before a second platform doubles the
+surface of every bug still in it.
 
-**Do the activity-detection spike first, before M0.** Spend one evening writing a
-throwaway Rust binary that prints the foreground app every second on
-Kubuntu/Plasma 6 Wayland, then on Windows. If that is pleasant, the project is
-real. If Wayland eats the whole evening, you have learned the most important
-thing about the timeline for the cost of one night. That spike is retired
-(2026-08-19). The real backends are on the backburner.
+Two decisions are Matt's and block the work they belong to: where search lives
+in the layout (M10), and whether mobile push through Apple and Google is
+acceptable at all (whenever mobile comes back). Both are in `TASKS.md`'s
+parking lot.
+
+**The activity-detection spike came before M0** and did its job. One evening,
+Kubuntu/Plasma 6 Wayland and Windows, a throwaway binary that printed the
+foreground app every second. It was retired on 2026-08-19 having answered the
+question it was for. The feature it was a spike for was cut on 2026-08-28
+(`docs/decisions.md`); the spike was still worth the evening, because finding
+out early what a thing costs is how you get to decide whether to build it.
 
 **Entrance sounds moved to the end of the queue** (Matt, 2026-08-21). They are still
 V1 (SPEC §6, item 4) — they are simply the last thing built, after M8, and M4's check
 no longer waits on them. `TASKS.md` holds them under *Backburner* as T-901…T-903
 (they were T-403, T-404, T-408).
 
-**Activity detection is off the critical path** (Matt, 2026-08-23). It is still
-V1 (SPEC §6, item 8). The spikes are retired and the crate is in the tree, but the
-real backends, poller, registry and sharing UI are not needed for a usable product
-and they are large. It used to occupy M5 / T-501…T-507; those tasks are
-**T-911…T-917** now. M5 (uploads) took that slot and closed on 2026-08-26. Do
-not start T-911 until Matt takes this off the backburner.
+**Activity detection is cut** (Matt, 2026-08-28 — `docs/decisions.md`). Parked on
+2026-08-23, deleted five days later: the crate, the registry, the wire field, and
+tasks T-911…T-917. It was V1 item 8; §4.3 of the spec now says what replaced it,
+which is a status somebody typed. Do not build it back — that is Matt's call, not
+a maintenance decision.
 
 **M4.5 was added on 2026-08-21**, after the client turned out to have no way to create
 a room, invite anybody, or edit the server — every endpoint for all three has existed

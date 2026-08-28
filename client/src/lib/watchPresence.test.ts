@@ -91,7 +91,7 @@ describe("the presence driver", () => {
     await settle();
     expect(sentTo(HOME)).toEqual([
       { op: "room.focus", d: { room_id: null } },
-      { op: "presence.update", d: { state: "away", activity: null, away_message: "back after work" } },
+      { op: "presence.update", d: { state: "away", away_message: "back after work" } },
     ]);
   });
 
@@ -118,7 +118,7 @@ describe("the presence driver", () => {
     setAway(HOME, null);
     await settle();
     expect(sentTo(HOME)).toEqual([
-      { op: "presence.update", d: { state: "around", activity: null, away_message: null } },
+      { op: "presence.update", d: { state: "around", away_message: null } },
       { op: "room.focus", d: { room_id: ROOM } },
     ]);
   });
@@ -145,7 +145,7 @@ describe("the presence driver", () => {
     setAway(HOME, "back at six");
     await settle();
     expect(sentTo(HOME)).toEqual([
-      { op: "presence.update", d: { state: "away", activity: null, away_message: "back at six" } },
+      { op: "presence.update", d: { state: "away", away_message: "back at six" } },
     ]);
   });
 
@@ -162,7 +162,7 @@ describe("the presence driver", () => {
     await settle();
     expect(sentTo(HOME)).toContainEqual({
       op: "presence.update",
-      d: { state: "away", activity: null, away_message: "back at six" },
+      d: { state: "away", away_message: "back at six" },
     });
   });
 
@@ -179,7 +179,7 @@ describe("the presence driver", () => {
     // Still owes the leave, because the join never landed either.
     expect(sentTo(HOME).at(-1)).toEqual({
       op: "presence.update",
-      d: { state: "away", activity: null, away_message: "brb" },
+      d: { state: "away", away_message: "brb" },
     });
   });
 
@@ -222,7 +222,7 @@ describe("the presence driver", () => {
     expect(sentTo(HOME)).toEqual([
       {
         op: "presence.update",
-        d: { state: "away", activity: null, away_message: "back after work" },
+        d: { state: "away", away_message: "back after work" },
       },
     ]);
     expect(sentTo(WORK)).toEqual([]);

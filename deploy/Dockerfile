@@ -6,7 +6,6 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
-COPY registry ./registry
 RUN cargo build --release -p linger-server
 
 FROM debian:bookworm-slim

@@ -18,13 +18,11 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use linger_core::gateway::{ServerEvent, ServerFrame};
 use linger_core::limits::{RESUME_BUFFER_FRAMES, RESUME_WINDOW_MS};
-use linger_core::wire::{ActivityInfo, PresenceEntry, PresenceState};
+use linger_core::wire::{PresenceEntry, PresenceState};
 use linger_core::{RoomId, UserId};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub use socket::ws_route;
-
-use crate::db::now_ms;
 
 /// Everything the fan-out layer holds. Lives in `AppState` as `Arc<Gateway>`;
 /// REST handlers publish mutation events through [`Gateway::publish`].
@@ -33,7 +31,6 @@ pub struct Gateway {
     sessions: DashMap<String, SessionHandle>,
     presence: DashMap<UserId, PresenceEntry>,
     conn_count: DashMap<UserId, u32>,
-    registry: linger_activity::registry::Registry,
 }
 
 struct SessionHandle {
@@ -69,17 +66,11 @@ impl Gateway {
     #[must_use]
     pub fn new() -> Self {
         let (bus, _) = broadcast::channel(1024);
-        let registry = linger_activity::registry::Registry::from_json(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../registry/apps.json"
-        )))
-        .expect("bundled registry parses (guarded by linger-activity tests)");
         Self {
             bus,
             sessions: DashMap::new(),
             presence: DashMap::new(),
             conn_count: DashMap::new(),
-            registry,
         }
     }
 
@@ -125,40 +116,20 @@ impl Gateway {
             .collect()
     }
 
-    /// Resolve a client-reported registry id. Unknown ids resolve to `None`:
-    /// default deny holds server-side too, and the label/kind shown to friends
-    /// always come from the bundled registry, never from client-supplied text.
-    fn resolve_activity(&self, registry_id: Option<&str>, since: i64) -> Option<ActivityInfo> {
-        let app = self.registry.get(registry_id?)?;
-        Some(ActivityInfo {
-            registry_id: app.id.clone(),
-            label: app.label.clone(),
-            kind: app.kind.clone(),
-            since,
-        })
-    }
-
     /// Apply a client `presence.update`. Room membership only changes via
     /// `room.focus`, so it is carried over from the existing entry.
     fn apply_presence(
         &self,
         user_id: UserId,
         state: PresenceState,
-        activity_id: Option<&str>,
         away_message: Option<String>,
     ) -> PresenceEntry {
         let prev = self.presence.get(&user_id).map(|e| e.value().clone());
         let room_id = prev.as_ref().and_then(|p| p.room_id);
-        // Keep `since` stable while the same app stays foreground.
-        let since = match (&prev.and_then(|p| p.activity), activity_id) {
-            (Some(old), Some(new_id)) if old.registry_id == new_id => old.since,
-            _ => now_ms(),
-        };
         let entry = PresenceEntry {
             user_id,
             state,
             room_id,
-            activity: self.resolve_activity(activity_id, since),
             away_message,
         };
         self.presence.insert(user_id, entry.clone());
@@ -223,7 +194,7 @@ impl Gateway {
         let mut count = self.conn_count.entry(user_id).or_insert(0);
         *count += 1;
         if *count == 1 {
-            let entry = self.apply_presence(user_id, PresenceState::Around, None, None);
+            let entry = self.apply_presence(user_id, PresenceState::Around, None);
             self.publish(ServerEvent::PresenceUpdate(entry));
         }
     }
@@ -261,7 +232,6 @@ fn offline_entry(user_id: UserId) -> PresenceEntry {
         user_id,
         state: PresenceState::Offline,
         room_id: None,
-        activity: None,
         away_message: None,
     }
 }

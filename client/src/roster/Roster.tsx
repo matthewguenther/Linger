@@ -14,7 +14,6 @@
  * **Nothing here is a count** (SPEC §4.2). Cards are cards; there is no "3
  * online", and the durations are how long ago, never how many.
  *
- * **The activity line is a registry label, never a window title** (SPEC §4.3).
  * The wire type has no field for one, so this file could not render one if it
  * wanted to — which is the point of putting the rule in the type.
  *
@@ -35,7 +34,6 @@ import StatusCard from "../status/StatusCard";
 import StatusEditor from "../status/StatusEditor";
 import { emptyRoster } from "../settings/copy";
 import {
-  activityMark,
   buildRoster,
   hasStatus,
   type RosterEntry,
@@ -309,7 +307,7 @@ function Removal({ api, user }: { api: AuthedApi; user: User }) {
  * come first.
  */
 function PersonLines({ entry, now }: { entry: RosterEntry; now: number }) {
-  const { state, room, activity, awayMessage } = entry;
+  const { state, room, awayMessage } = entry;
 
   // "around" says nothing here on purpose — the dot has already said it, and a
   // card that spends a line on "around" is a card that says less.
@@ -318,19 +316,12 @@ function PersonLines({ entry, now }: { entry: RosterEntry; now: number }) {
   const stateLine = state === "idle" || state === "away" ? stateWord(state) : null;
 
   const since = sinceOf(entry, now);
-  const mark = activity === null ? null : activityMark(activity.kind);
   const away = awayMessage === null || awayMessage === "" ? null : awayMessage;
 
   return (
     <div className="person-lines">
       {where !== null || stateLine !== null ? (
         <p className="person-where">{where ?? stateLine}</p>
-      ) : null}
-      {activity !== null ? (
-        <p className="person-activity">
-          {mark === null ? null : <span className="activity-mark">{mark}</span>}
-          {activity.label}
-        </p>
       ) : null}
       {/* Gone, and what they left behind: SPEC §3 draws these on one line. */}
       {state === "offline" ? (
@@ -363,7 +354,7 @@ function sinceOf(entry: RosterEntry, now: number): string | null {
   }
   const awaySince = entry.user.status?.away_since ?? null;
   if (entry.state === "away" && awaySince !== null) return shortAgo(awaySince, now);
-  return entry.activity === null ? null : shortAgo(entry.activity.since, now);
+  return null;
 }
 
 /** What the panel is currently for. Three modes, one label. */

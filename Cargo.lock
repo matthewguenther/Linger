@@ -1237,15 +1237,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "linger-activity"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "linger-core"
 version = "0.1.0"
 dependencies = [
@@ -1272,7 +1263,6 @@ dependencies = [
  "image",
  "infer",
  "jsonwebtoken",
- "linger-activity",
  "linger-core",
  "rand 0.8.7",
  "reqwest",
