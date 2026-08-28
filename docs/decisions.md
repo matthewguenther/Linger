@@ -170,3 +170,22 @@ section does not currently allow for it. That has to be answered before any
 mobile code is written, not during.
 
 This is a "when the desktop app is boring" item, not a "next quarter" item.
+
+---
+
+## Decided — no AI features, said once
+
+**Matt, 2026-08-28.** The product has no AI features. That has been true since
+2026-08-19, when an earlier plan for local-only, opt-in features was dropped
+before anything was built.
+
+What changed today is the *volume*, not the decision. There was a SPEC section,
+a README section, and a paragraph in the user guide arguing the case at length —
+which turned "we don't have that feature" into a position the project campaigned
+on. It was never meant to be a differentiator. It is now one bullet in SPEC §2's
+anti-goals, alongside threads and algorithmic ordering, and one line in AGENTS
+rule 13.
+
+Kept here only so nobody restores the deleted sections thinking they were lost.
+Adding an AI feature is still Matt's call rather than a maintenance decision;
+there is just no need to explain that at length.
