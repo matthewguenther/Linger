@@ -171,10 +171,12 @@ index listing who shared what and when. It opens with an ordinary text editor
 and an ordinary file browser. **You do not need Linger, or an account, or the
 server to still exist**, which is the entire point.
 
-It takes a moment to build on a busy server, and you can ask once an hour.
+**Settings → take everything with you.** Press the button, wait — it takes a
+moment on a busy server — then press *download it*. The file opens in your
+normal browser's downloads, like anything else you download.
 
-*Note: at the moment this is only reachable through the server's own interface
-— there is no button in the app for it yet.*
+You can ask for one an hour. If you ask again too soon the app tells you when
+you can come back.
 
 ## Updates
 

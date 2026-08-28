@@ -16,6 +16,9 @@ import type { CreateInviteRequest } from "../generated/CreateInviteRequest";
 import type { CreateRoomRequest } from "../generated/CreateRoomRequest";
 import type { ErrorBody } from "../generated/ErrorBody";
 import type { ErrorCode } from "../generated/ErrorCode";
+import type { ExportId } from "../generated/ExportId";
+import type { ExportJob } from "../generated/ExportJob";
+import type { ExportStarted } from "../generated/ExportStarted";
 import type { Invite } from "../generated/Invite";
 import type { InvitePreview } from "../generated/InvitePreview";
 import type { CompletedPart } from "../generated/CompletedPart";
@@ -457,6 +460,22 @@ export class AuthedApi {
    */
   linkPreviews(urls: string[]): Promise<LinkPreview[]> {
     return this.post<LinkPreview[]>("/links/preview", { urls });
+  }
+
+  /**
+   * Ask the server for an archive of everything (SPEC §4.11, PROTOCOL §7).
+   *
+   * Any member, once an hour. A refusal is `RATE_LIMITED` carrying
+   * `retryAfterMs`, which is a thing to say in words rather than an error to
+   * show.
+   */
+  startExport(): Promise<ExportStarted> {
+    return this.post<ExportStarted>("/export", {});
+  }
+
+  /** How far along that archive is, and where to get it once it exists. */
+  exportJob(jobId: ExportId, signal?: AbortSignal): Promise<ExportJob> {
+    return this.get<ExportJob>(`/export/${encodeURIComponent(jobId)}`, signal);
   }
 
   invites(signal?: AbortSignal): Promise<Invite[]> {

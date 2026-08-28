@@ -240,19 +240,34 @@ at all until T-705.
   because the stream reads that way, and its `after` still orders `DESC` — the
   newest messages after a point rather than the next ones. An archive reads
   forwards, so it gets its own query rather than a flag on that one.
-- ⬜ **T-802 · The export button** — effort: **low**
-  T-801 built the whole feature and no way for a person to reach it: nothing in
-  the client calls `POST /export`, so a member cannot ask for their archive
-  without curl. The wire types are generated and waiting
-  (`ExportStarted`, `ExportJob`, `ExportState`).
-  Settings, under a heading of its own: one control that starts an export,
-  the progress while it builds, and the finished archive as a download handed
-  to the system browser (`tauri-plugin-opener`, the way a link in a message is
-  — the WebView must not navigate itself to a zip). `RATE_LIMITED` says when to
-  come back; say that in words rather than showing an error.
-  *Accept:* click it in a running app, watch it finish, and open the file that
-  lands in Downloads. Then `docs/user-guide.md` loses the line saying there is
-  no button yet.
+- ✅ **T-802 · The export button** — effort: **low** — landed 2026-08-28
+
+  **Landing note.** Settings, under *take everything with you*: one button that
+  starts an export, a line that says what is happening, and a second button
+  that hands the finished archive to the system browser once there is one.
+
+  **The download goes out of the app, not into it.** `openExternal`, the same
+  path a link in a message takes — a WebView that navigates itself to a zip has
+  left the application, taking the signed-in session with it.
+
+  **A refusal is a sentence, not an error.** A second export inside the hour
+  comes back `RATE_LIMITED` with `retry_after_ms`, which the panel says as "you
+  can ask again in about 50 minutes". Rounded up and vague on purpose. A server
+  that refuses without saying when falls back to the documented hour.
+
+  **Polling, not a gateway frame.** A job belongs to the one person who asked
+  for it; putting progress on the socket every member shares would tell the
+  whole server whenever anybody takes a copy. Closing the panel stops the
+  asking and leaves the job running — it is being built for a person, not for a
+  window.
+
+  Twelve tests in `client/src/settings/export.test.ts` cover the wording, the
+  refusal, the poll-to-completion, and that nothing is said after the panel
+  closes. The logic is in `settings/export.ts` so it is testable without
+  rendering; the component is the thin part.
+
+  **Not done here:** nobody has clicked it in a running app. It is on the
+  human-checks list.
 
 ---
 

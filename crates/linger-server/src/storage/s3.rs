@@ -170,11 +170,21 @@ impl ObjectStore for S3Store {
         size_bytes: u64,
     ) -> anyhow::Result<UploadSlot> {
         let (count, part_size) = super::part_plan(size_bytes);
+        // Part one is signed once and used twice. Signing it a second time for
+        // `url` produced a *different* URL whenever the clock ticked between
+        // the two calls — both valid, but not equal, which is a promise this
+        // type makes ("url is the first part") and an intermittent test
+        // failure nobody could reproduce on purpose.
+        let first = self.part_url(upload_id, 1);
         let parts = (count > 1).then(|| {
             (1..=count)
                 .map(|number| UploadPart {
                     number,
-                    url: self.part_url(upload_id, number),
+                    url: if number == 1 {
+                        first.clone()
+                    } else {
+                        self.part_url(upload_id, number)
+                    },
                 })
                 .collect()
         });
@@ -182,7 +192,7 @@ impl ObjectStore for S3Store {
             upload_id,
             attachment_id,
             method: "PUT".to_string(),
-            url: self.part_url(upload_id, 1),
+            url: first,
             headers: std::collections::HashMap::new(),
             part_size_bytes: part_size,
             parts,
