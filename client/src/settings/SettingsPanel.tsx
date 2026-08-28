@@ -16,6 +16,7 @@ import type { AuthResponse } from "../generated/AuthResponse";
 import type { User } from "../generated/User";
 import { ApiError, PublicApi, type AuthedApi } from "../lib/api";
 import DensityPicker from "../lib/DensityPicker";
+import { openExternal } from "../lib/external";
 import type { Density } from "../lib/density";
 import { THEME_PREFS, type ThemePref } from "../lib/theme";
 import {
@@ -25,6 +26,7 @@ import {
   updateLine,
   type UpdateCheck,
 } from "../lib/updates";
+import { exportLine, type ExportPhase, runExport } from "./export";
 import StylePicker from "./StylePicker";
 import { saveDisplayName } from "../lib/gateway";
 import {
@@ -171,6 +173,7 @@ export default function SettingsPanel({
             {normalize ? "names normalized" : "normalize everyone"}
           </button>
         </section>
+        <ExportSection api={api} />
         <UpdatesSection />
         <section className="settings-section">
           <h3 className="panel-label">this computer</h3>
@@ -203,6 +206,76 @@ export default function SettingsPanel({
  * The signature check is not a setting and is not mentioned as one — it is not
  * optional, and there is no build of this that installs an unsigned update.
  */
+/**
+ * Taking everything with you (SPEC §4.11, T-802).
+ *
+ * This is the anti-lock-in guarantee with a button on it, so it says plainly
+ * what comes out and that it needs nothing from this project to read. The
+ * finished archive goes to the system browser rather than to this window —
+ * a WebView that follows a download has left the app (`lib/external.ts`).
+ */
+function ExportSection({ api }: { api: AuthedApi }) {
+  const [phase, setPhase] = useState<ExportPhase>({ kind: "idle" });
+  const stop = useRef<AbortController | null>(null);
+
+  // Closing the panel stops the asking. The job carries on at the server, which
+  // is the right way round: it is being built for a person, not for a window.
+  useEffect(
+    () => () => {
+      stop.current?.abort();
+    },
+    [],
+  );
+
+  const ask = (): void => {
+    stop.current?.abort();
+    const controller = new AbortController();
+    stop.current = controller;
+    setPhase({ kind: "working", progress: 0 });
+    void runExport(api, setPhase, controller.signal);
+  };
+
+  const working = phase.kind === "working";
+  const line = exportLine(phase);
+
+  return (
+    <section className="settings-section">
+      <h3 className="panel-label">take everything with you</h3>
+      <p className="settings-lead">
+        A copy of this whole server: every message, every file, in one zip. One
+        plain text file per room, a folder of the files, and an index. It opens
+        in any text editor and needs nothing from Linger — that is the point.
+        You can ask for one an hour.
+      </p>
+      <p
+        className={phase.kind === "failed" ? "settings-problem" : "settings-ok"}
+        aria-live="polite"
+      >
+        {line}
+      </p>
+      <div className="settings-update-actions">
+        <button
+          type="button"
+          className="settings-mini"
+          disabled={working}
+          onClick={ask}
+        >
+          {working ? "building…" : "export everything"}
+        </button>
+        {phase.kind === "ready" ? (
+          <button
+            type="button"
+            className="settings-mini"
+            onClick={() => openExternal(phase.url)}
+          >
+            download it
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function UpdatesSection() {
   const [version, setVersion] = useState<string | null>(null);
   const [check, setCheck] = useState<UpdateCheck | null>(null);
