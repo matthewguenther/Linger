@@ -319,7 +319,7 @@ SPEC §4.9 is the whole spec and the hard part is what it *refuses*: no message,
 no thread, no unread state, nothing to dismiss. A knock that leaves a notification
 sitting there has become a message, and the feature is gone.
 
-- ⬜ **T-1101 · Knock, server side** — effort: **low**
+- ⏳ **T-1101 · Knock, server side** — effort: **low** — Matt, 2026-08-29
   Implement `POST /knock`: the target has to be a member of this server, the
   rate limit is `RATE_KNOCK_PER_TARGET` (3 per hour **per target**, so knocking
   five different people is fine), and the `knock` frame goes to that one
@@ -328,7 +328,7 @@ sitting there has become a message, and the feature is gone.
   not on a third member's; the fourth knock inside an hour gets `RATE_LIMITED`;
   knocking somebody who was removed is `NOT_FOUND`.
 
-- ⬜ **T-1102 · Knock, client side** — effort: **medium**
+- ⏳ **T-1102 · Knock, client side** — effort: **medium** — Matt, 2026-08-29
   Where you knock from: the person's card in the roster, one control. What
   arrives: a card that appears, does not steal focus, and fades by itself. No
   buttons on it. No history of it anywhere.
