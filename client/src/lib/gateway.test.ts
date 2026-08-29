@@ -44,8 +44,21 @@ vi.mock("@tauri-apps/api/event", () => ({
 // neither has anything to do with which snapshot a frame lands in.
 vi.mock("../notify/notify", () => ({ considerFrame: () => undefined }));
 
-const { anyNewActivity, connect, disconnect, hasNewActivity, send, serverState } =
-  await import("./gateway");
+// The sound player reaches for an `AudioContext` that a test runner does not
+// have. Whether a knock makes a noise is `sound.test.ts`'s question; this file
+// is about where the card ends up.
+vi.mock("./sound", () => ({ playKnock: () => false }));
+
+const {
+  anyNewActivity,
+  connect,
+  disconnect,
+  dismissKnock,
+  hasNewActivity,
+  KNOCK_TTL_MS,
+  send,
+  serverState,
+} = await import("./gateway");
 
 const HOME = "https://home.example";
 const WORK = "https://work.example";
@@ -297,5 +310,85 @@ describe("the gateway store, with two servers", () => {
     arrive(WORK, ready({ user: matt, rooms: [room("r-standup", "standup", null)] }));
 
     expect(serverState(WORK).rooms).toEqual([]);
+  });
+});
+
+/**
+ * Knocks (SPEC §4.9, T-1102).
+ *
+ * The store is the only place a knock exists — nothing is written down at
+ * either end — so these are the tests that prove it arrives, that it can be
+ * taken away, and above all that it does not stay.
+ */
+describe("knocks", () => {
+  const matt = person("u-matt", "Matt");
+  const callie = person("u-callie", "Callie");
+
+  beforeEach(async () => {
+    await Promise.all([disconnect(HOME), disconnect(WORK)]);
+    invoked.length = 0;
+  });
+
+  it("holds a knock on the server it came from, and names who knocked", async () => {
+    await connect(fakeApi(HOME));
+    await connect(fakeApi(WORK));
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+
+    arrive(HOME, { s: 2, op: "knock", d: { from_user_id: callie.id } });
+
+    expect(serverState(HOME).knocks.map((knock) => knock.from)).toEqual([callie.id]);
+    expect(serverState(WORK).knocks).toEqual([]);
+  });
+
+  it("keeps two knocks from the same person as two cards", async () => {
+    await connect(fakeApi(HOME));
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+
+    arrive(HOME, { s: 2, op: "knock", d: { from_user_id: callie.id } });
+    arrive(HOME, { s: 3, op: "knock", d: { from_user_id: callie.id } });
+
+    const held = serverState(HOME).knocks;
+    expect(held).toHaveLength(2);
+    // Distinct ids, or React draws one card and the second knock is invisible.
+    expect(new Set(held.map((knock) => knock.id)).size).toBe(2);
+  });
+
+  it("takes one away when its card is done, and leaves nothing behind", async () => {
+    await connect(fakeApi(HOME));
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+    arrive(HOME, { s: 2, op: "knock", d: { from_user_id: callie.id } });
+
+    const [knock] = serverState(HOME).knocks;
+    expect(knock).toBeDefined();
+    dismissKnock(HOME, knock?.id ?? "");
+
+    expect(serverState(HOME).knocks).toEqual([]);
+  });
+
+  it("drops a knock that is already older than its card's life", async () => {
+    await connect(fakeApi(HOME));
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+
+    arrive(HOME, { s: 2, op: "knock", d: { from_user_id: callie.id } });
+    // A window that was asleep, or a card whose timer never ran: the stale one
+    // must not still be there when the next knock arrives.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + KNOCK_TTL_MS + 1);
+    arrive(HOME, { s: 3, op: "knock", d: { from_user_id: matt.id } });
+    vi.useRealTimers();
+
+    expect(serverState(HOME).knocks.map((knock) => knock.from)).toEqual([matt.id]);
+  });
+
+  it("forgets knocks when the session starts over", async () => {
+    await connect(fakeApi(HOME));
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+    arrive(HOME, { s: 2, op: "knock", d: { from_user_id: callie.id } });
+
+    // A fresh `ready` is a new session. A tap on the shoulder from before the
+    // reconnect means nothing now.
+    arrive(HOME, ready({ user: matt, users: [matt, callie] }));
+
+    expect(serverState(HOME).knocks).toEqual([]);
   });
 });

@@ -1,10 +1,11 @@
 //! The gateway (PROTOCOL §8): WS at `/api/v1/gateway`.
 //!
-//! Shape: one broadcast bus of [`ServerEvent`]s; a *session task* per session
-//! that assigns per-session sequence numbers, keeps the 500-frame resume ring,
-//! and forwards to whichever socket is currently attached. The session task
-//! outlives its socket by up to 120s (`RESUME_WINDOW_MS`) so a reconnecting
-//! client can replay what it missed — no gaps, no duplicates.
+//! Shape: one broadcast bus of [`Fanout`]s — an event plus who it is for; a
+//! *session task* per session that assigns per-session sequence numbers, keeps
+//! the 500-frame resume ring, and forwards to whichever socket is currently
+//! attached. The session task outlives its socket by up to 120s
+//! (`RESUME_WINDOW_MS`) so a reconnecting client can replay what it missed —
+//! no gaps, no duplicates.
 //!
 //! Presence lives in memory only, on purpose (ARCHITECTURE §5): restart ⇒
 //! everyone offline until they reconnect.
@@ -27,10 +28,26 @@ pub use socket::ws_route;
 /// Everything the fan-out layer holds. Lives in `AppState` as `Arc<Gateway>`;
 /// REST handlers publish mutation events through [`Gateway::publish`].
 pub struct Gateway {
-    bus: broadcast::Sender<Arc<ServerEvent>>,
+    bus: broadcast::Sender<Arc<Fanout>>,
     sessions: DashMap<String, SessionHandle>,
     presence: DashMap<UserId, PresenceEntry>,
     conn_count: DashMap<UserId, u32>,
+}
+
+/// One event on the bus, plus who it is for.
+///
+/// Every session subscribes to the same broadcast channel, so an event meant
+/// for one person still passes every session task on its way past. `to` is what
+/// those tasks check: `None` is the ordinary case and reaches everybody, and
+/// `Some(id)` reaches that person's sessions and nobody else's.
+///
+/// Addressing lives here rather than on the event because the event is the wire
+/// type (PROTOCOL §8) and a `knock` frame must not tell its receiver who it was
+/// addressed to — they already know, and the sender's copy would be a field
+/// carrying nothing but a way to get the fan-out wrong.
+struct Fanout {
+    event: ServerEvent,
+    to: Option<UserId>,
 }
 
 struct SessionHandle {
@@ -77,7 +94,19 @@ impl Gateway {
     /// Fan an event out to every session. REST mutation handlers call this.
     pub fn publish(&self, event: ServerEvent) {
         // No receivers just means nobody is connected; that is fine.
-        let _ = self.bus.send(Arc::new(event));
+        let _ = self.bus.send(Arc::new(Fanout { event, to: None }));
+    }
+
+    /// Fan an event out to one person's sessions and nobody else's (T-1101).
+    ///
+    /// All of them, not one: somebody signed in on a laptop and a desktop is
+    /// one person, and a knock that landed on whichever machine happened to
+    /// connect first would be a knock they never saw.
+    pub fn publish_to(&self, user_id: UserId, event: ServerEvent) {
+        let _ = self.bus.send(Arc::new(Fanout {
+            event,
+            to: Some(user_id),
+        }));
     }
 
     /// Hang up on every session this person has open (T-413).
@@ -214,10 +243,14 @@ impl Gateway {
         }
     }
 
-    /// PROTOCOL §8 fan-out rules: everything goes everywhere except
-    /// `room.enter`, which only reaches clients currently in that room.
-    fn visible_to(&self, receiver: UserId, event: &ServerEvent) -> bool {
-        match event {
+    /// PROTOCOL §8 fan-out rules. Two things narrow an event: an addressed
+    /// event reaches only the person it names, and `room.enter` reaches only
+    /// clients currently in that room.
+    fn visible_to(&self, receiver: UserId, fanout: &Fanout) -> bool {
+        if let Some(target) = fanout.to {
+            return target == receiver;
+        }
+        match &fanout.event {
             ServerEvent::RoomEnter { room_id, .. } => self
                 .presence
                 .get(&receiver)
@@ -260,7 +293,7 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
                             continue;
                         }
                         seq += 1;
-                        let frame = ServerFrame::sequenced((*event).clone(), seq);
+                        let frame = ServerFrame::sequenced(event.event.clone(), seq);
                         let Ok(json) = serde_json::to_string(&frame) else { continue };
                         if ring.len() == RESUME_BUFFER_FRAMES {
                             ring.pop_front();

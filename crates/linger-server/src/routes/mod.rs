@@ -9,8 +9,6 @@
 //! it answers on `cdn.<domain>` and nowhere else, and every other route answers
 //! everywhere else. See [`media_origin_gate`].
 //!
-//! Still to mount: `/export` (M8).
-//!
 //! Unknown paths get the PROTOCOL §1 envelope, not axum's plain-text 404, so
 //! the client can always switch on `error.code`.
 
@@ -18,6 +16,7 @@ mod auth;
 mod export;
 mod health;
 mod invites;
+mod knock;
 mod links;
 mod media;
 mod messages;
@@ -96,6 +95,7 @@ pub fn router(state: AppState) -> Router {
         .merge(uploads::router())
         .merge(media::router())
         .merge(export::router())
+        .merge(knock::router())
         .merge(links::router())
         .route("/gateway", any(crate::gateway::ws_route))
         .fallback(api_not_found);

@@ -363,6 +363,20 @@
   color: var(--accent);
 }
 
+/* The knock, under somebody else's card (SPEC §4.9, T-1102). Same row as
+   everything else that hangs off an open card, so the one control on your own
+   card and the one on theirs land in the same place. */
+.person-knock {
+  padding-top: 2px;
+}
+
+/* Said and done. It is not a delivery report — the server keeps none — so it
+   stops being a button rather than becoming a status. */
+.person-edit:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
 /* The host's removal control, under a member's card (T-413). It reuses
    `.person-mine`'s row so the one button on your own card and the one on
    somebody else's sit in the same place. */

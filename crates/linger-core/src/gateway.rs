@@ -146,7 +146,12 @@ pub enum ServerEvent {
         room_id: RoomId,
         user_id: UserId,
     },
-    /// V2 (SPEC §4.9); defined now because op values are additive within v1.
+    /// A nudge from one person to one person (SPEC §4.9, T-1101).
+    ///
+    /// Sent to the target's sessions and nobody else's — the only frame on the
+    /// gateway with an audience of one. It carries who knocked and nothing
+    /// else: no message, no id, nothing to reply to. The receiver draws a card
+    /// that fades on its own, and nothing is stored at either end.
     Knock {
         from_user_id: UserId,
     },

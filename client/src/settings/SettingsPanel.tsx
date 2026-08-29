@@ -18,6 +18,13 @@ import { ApiError, PublicApi, type AuthedApi } from "../lib/api";
 import DensityPicker from "../lib/DensityPicker";
 import { openExternal } from "../lib/external";
 import type { Density } from "../lib/density";
+import {
+  loadSoundPrefs,
+  QUIET_FROM_HOUR,
+  QUIET_UNTIL_HOUR,
+  saveSoundPrefs,
+  type SoundPrefs,
+} from "../lib/sound";
 import { THEME_PREFS, type ThemePref } from "../lib/theme";
 import {
   appVersion,
@@ -173,6 +180,7 @@ export default function SettingsPanel({
             {normalize ? "names normalized" : "normalize everyone"}
           </button>
         </section>
+        <SoundSection />
         <ExportSection api={api} />
         <UpdatesSection />
         <section className="settings-section">
@@ -192,6 +200,59 @@ export default function SettingsPanel({
       </div>
       {roster}
     </main>
+  );
+}
+
+/**
+ * Sound (SPEC §4.1, §4.9, T-1102).
+ *
+ * Two switches, and both are about your own machine rather than anything
+ * anybody else can see, so they live here beside density and theme.
+ *
+ * Quiet hours is **on** by default and that is deliberate: the alternative is
+ * an app that can wake somebody at 3am until they find the setting that stops
+ * it. The window is 22:00–08:00 in your own time — a knock from a friend six
+ * timezones away is judged by your clock, not theirs.
+ *
+ * There is one sound today (the knock). Entrance sounds (T-901) will be the
+ * second, and these two switches already cover it.
+ */
+function SoundSection() {
+  const [prefs, setPrefs] = useState<SoundPrefs>(loadSoundPrefs);
+
+  const change = (next: SoundPrefs): void => {
+    setPrefs(next);
+    saveSoundPrefs(next);
+  };
+
+  return (
+    <section className="settings-section">
+      <h3 className="panel-label">sound</h3>
+      <p className="settings-lead">
+        Linger makes one noise: a soft knock when somebody knocks at you. Nothing
+        else in the app makes a sound.
+      </p>
+      <button
+        type="button"
+        className="settings-mini settings-toggle"
+        aria-pressed={prefs.muted}
+        onClick={() => change({ ...prefs, muted: !prefs.muted })}
+      >
+        {prefs.muted ? "muted" : "sound on"}
+      </button>
+      <p className="settings-lead settings-warmth-lead">
+        Quiet hours run from {QUIET_FROM_HOUR}:00 to 0{QUIET_UNTIL_HOUR}:00 on
+        this computer's clock. Nothing makes a sound during them.
+      </p>
+      <button
+        type="button"
+        className="settings-mini settings-toggle"
+        aria-pressed={prefs.quietHours}
+        onClick={() => change({ ...prefs, quietHours: !prefs.quietHours })}
+      >
+        {prefs.quietHours ? "quiet hours on" : "quiet hours off"}
+      </button>
+    </section>
   );
 }
 

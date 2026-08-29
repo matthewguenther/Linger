@@ -109,12 +109,14 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
 | M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see *Human checks* | [m7.md](docs/tasks/m7.md) |
 | M8 — export | tasks 2026-08-28 | Any member can take a zip of the whole server — a file per room, every upload, an index — built in the background and downloaded from the media origin. **One human check is still open** — see *Human checks* | [m8.md](docs/tasks/m8.md) |
+| M9 — knock | tasks 2026-08-29 | `POST /knock` addressed to one person's sessions, a card that fades on its own, the sound player the entrance sounds will extend. **Its check is half-open** — see *Human checks*, HC-6 | still in this file, below |
 
 **Everything a person still has to do by hand lives in one place now:
 [Human checks](#human-checks--things-only-you-can-do), at the bottom of this
-file.** Five of them, all left over from closed milestones. They are not
-optional and they are not tasks an agent can take — each one needs somebody
-sitting in front of a real computer.
+file.** Six of them: five left over from closed V1 milestones, and one from M9
+(hearing a knock on a second computer). They are not optional and they are not
+tasks an agent can take — each one needs somebody sitting in front of a real
+computer.
 
 **The one thing that bit us in T-301:** a webview page is a cross-origin caller,
 so the server had to start sending CORS headers before the client could read a
@@ -206,6 +208,11 @@ middle of it. Anything that lands before them must not break the frames they rel
   5min/listener;
   global + per-user mute; quiet hours 22:00–08:00 listener-local default-on;
   picker UI for bundled sounds.
+  **The player already exists — extend it, do not write a second one.**
+  `client/src/lib/sound.ts` landed with T-1102 and already owns the global mute
+  and the quiet-hours rule, with both switches in settings under `sound`. What
+  is missing there is bundled `.opus` playback (the knock is synthesized), the
+  5-minute-per-listener cooldown, and per-user mute.
 - ⬜ **T-902 · Custom sound upload** — effort: **medium**
   Server: accept ≤2s/≤200KB, transcode to Opus + loudness-normalize (−16 LUFS),
   **reject long files, never truncate**. Needs ffmpeg in the Docker image — add it.
@@ -269,9 +276,11 @@ Recorded in the *Parking lot* too.
 
 ---
 
-## V2 — planned, not started
+## V2 — M9 built, the rest planned
 
-**Nothing here is next.** V1 is done except the five things in *Human checks*,
+**M9 (knock) landed 2026-08-29.** It was the smallest thing here and most of it
+already existed; the rest of this section is still planned and not started.
+**Nothing below M9 is next.** V1 is done except the things in *Human checks*,
 and those come first — a release nobody has installed is not a finished V1. This
 section exists so the shape of V2 is written down while it is fresh, not so
 somebody starts it.
@@ -296,7 +305,7 @@ self-contained, and make the app better next week rather than next quarter.
 Build order, cheapest and safest first:
 
 ```
-M9 knock → M10 search → M11 DMs → M12 voice rooms → M13 ambient voice
+M9 knock (built) → M10 search → M11 DMs → M12 voice rooms → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -305,40 +314,70 @@ people first.
 
 ---
 
-### M9 — knock
+### M9 — knock ✅ *(both tasks landed 2026-08-29)*
 
 *Milestone check: a knock crosses two machines, shows up as something that
-fades on its own, and leaves nothing behind.*
+fades on its own, and leaves nothing behind.* **Half-open:** everything but the
+two machines is done and tested. The two-machine half is **HC-6**.
 
-The smallest thing in V2 and the most already-built: `POST /knock` is in
-PROTOCOL §7, the `knock` frame is already in `linger_core::gateway::ServerFrame`,
-and `RATE_KNOCK_PER_TARGET` is already in `linger_core::limits`. What is missing
-is the two ends.
+SPEC §4.9 was the whole spec and the hard part was what it *refuses*: no
+message, no thread, no unread state, nothing to dismiss. A knock that leaves a
+notification sitting there has become a message, and the feature is gone. What
+shipped keeps that: nothing is stored at either end, and the card has no
+controls on it at all.
 
-SPEC §4.9 is the whole spec and the hard part is what it *refuses*: no message,
-no thread, no unread state, nothing to dismiss. A knock that leaves a notification
-sitting there has become a message, and the feature is gone.
+- ✅ **T-1101 · Knock, server side** — effort: **low** — Matt, 2026-08-29
+  `POST /knock` is mounted, and `crates/linger-server/tests/knock.rs` covers all
+  three acceptance cases plus three more: a stranger is `NOT_FOUND`, knocking
+  yourself is `VALIDATION_FAILED`, and the schema still has no table with
+  "knock" in its name.
 
-- ⬜ **T-1101 · Knock, server side** — effort: **low**
-  Implement `POST /knock`: the target has to be a member of this server, the
-  rate limit is `RATE_KNOCK_PER_TARGET` (3 per hour **per target**, so knocking
-  five different people is fine), and the `knock` frame goes to that one
-  person's sessions and nobody else's. Nothing is stored — a knock is not a row.
-  *Accept:* an integration test where a knock arrives on the target's socket and
-  not on a third member's; the fourth knock inside an hour gets `RATE_LIMITED`;
-  knocking somebody who was removed is `NOT_FOUND`.
+  **What this changed structurally.** The gateway bus used to carry a bare
+  `ServerEvent` and fan it to everybody; a knock is the first frame with an
+  audience of one. The bus now carries a small `Fanout { event, to }` and
+  `Gateway::publish_to` sets `to`. `publish` is unchanged and every existing
+  caller is untouched. Two things worth knowing next time somebody adds an
+  addressed frame:
 
-- ⬜ **T-1102 · Knock, client side** — effort: **medium**
-  Where you knock from: the person's card in the roster, one control. What
-  arrives: a card that appears, does not steal focus, and fades by itself. No
-  buttons on it. No history of it anywhere.
-  **Depends on a sound**, and the sound plumbing is T-901 (entrance sounds,
-  backburner). Either land T-901 first and use its player, or build the smallest
-  possible one here and let T-901 adopt it — **do not build a second sound
-  system**. Whichever way, the mute and the quiet-hours rule from T-901's spec
-  apply to knocks too.
-  *Accept:* two clients on two machines; a knock crosses, the card fades on its
-  own, and nothing is left in the stream, the roster, or any list.
+  - **The address is not on the wire.** `knock` carries `from_user_id` only.
+    The receiver is the only person who gets the frame, so a `target_user_id`
+    field would carry nothing and would be one more thing to get wrong.
+  - **It is sequenced, like everything else.** That means a resume inside the
+    120s window replays it. That is deliberate: an unsequenced frame is
+    *dropped* by the Tauri core (`gateway.rs` ignores frames without `s`), so a
+    control-frame knock would never reach the frontend at all.
+
+  A knock at somebody who is not connected lands nowhere and returns 204. That
+  is the design, not a gap — nothing is queued, because nothing is stored.
+
+- ✅ **T-1102 · Knock, client side** — effort: **medium** — Matt, 2026-08-29
+  You knock from the person's card in the roster, one control, one click, no
+  confirmation. What arrives is `client/src/knock/KnockCards.tsx`: a card in the
+  bottom-right that appears, is never focusable, and takes itself off after
+  `KNOCK_TTL_MS` (8s). It has no buttons, `pointer-events: none`, and
+  `aria-live="polite"` so a screen reader hears it without anything stealing
+  focus.
+
+  **The sound is `client/src/lib/sound.ts`, and it is the one T-901 extends —
+  do not write a second.** It owns the gate (global mute, plus quiet hours
+  22:00–08:00 listener-local, default **on**) and plays a knock synthesized from
+  an oscillator, so this task did not have to reach into T-903's curation for an
+  asset. What T-901 adds to *this* file: bundled `.opus` playback, the
+  5-min-per-listener cooldown, and per-user mute. Both switches are in settings
+  under `sound`.
+
+  **A knock lives in the gateway store**, as `GatewayState.knocks`, next to
+  `typing` and for the same reason: it is transient state with no server copy.
+  Not a second store (AGENTS: local state plus one gateway store). Cards from
+  every signed-in server are drawn, not just the active one.
+
+  **Verified on this machine, not on two.** One real client signed in, a second
+  member knocking over the real endpoint: the card appeared, faded on its own,
+  and left nothing in the stream or the roster; knocking from the card reached
+  the other person's socket; the fourth knock inside an hour showed "That's
+  three this hour. Give them a bit." **Still unverified:** the sound by ear (the
+  test ran at 07:50, inside quiet hours, so it correctly stayed silent), and the
+  acceptance criterion's *two machines*. Both belong in a human check.
 
 ---
 
@@ -512,14 +551,15 @@ visible indicator whenever it is on, and one obvious way to kill it.**
 
 ## Human checks — things only you can do
 
-Five things are built, tested, and **never once used by a person**. Automated
-tests prove the code does what it says. They cannot prove that a window opens,
-that a 400 MB upload survives a real network, or that a button feels like
-anything. That is this list.
+Six things are built, tested, and **never once used by a person** — or, in
+HC-6's case, never used across two of them. Automated tests prove the code does
+what it says. They cannot prove that a window opens, that a 400 MB upload
+survives a real network, or that a sound is one you would want to hear. That is
+this list.
 
 None of these are agent tasks. Each one needs you, a real computer, and a few
-minutes. They are ordered so that **doing the first one knocks out most of the
-second and third at the same time.**
+minutes. The first five are ordered so that **doing the first one knocks out
+most of the second and third at the same time.**
 
 ---
 
@@ -665,6 +705,33 @@ stream have only ever been checked as computed values, never seen.
 
 **Done when:** you have read a room out of a zip that Linger did not open for
 you. That is the whole promise of the feature.
+
+---
+
+### HC-6 · Hear a knock, on a second computer
+
+*Closes M9's milestone check (T-1102). The newest one on this list, and the
+only one not left over from V1.*
+
+The knock was built and tested with one real client on one machine and a second
+member knocking over the endpoint. That proves the card and the endpoint. It
+does not prove the two things a second computer proves: that a knock crosses a
+network, and that the sound is a sound you would want to hear.
+
+1. Two computers, both signed into the same server as different people.
+2. On one: open the other person's card in the roster and press **knock**.
+3. On the other: a card should appear bottom-right, say who knocked, and go
+   away by itself after about eight seconds. **Nothing should be left** — not in
+   the stream, not on the roster, not anywhere.
+4. **Do this outside 22:00–08:00**, or you will hear nothing and it will look
+   broken. Quiet hours are on by default, which is the point.
+5. Listen to it. It is two soft taps built out of an oscillator, not a recorded
+   sound, and nobody has heard it on speakers yet. If it is annoying, say so —
+   it is about twenty lines in `client/src/lib/sound.ts` and easy to change.
+6. Press knock four times inside an hour. The fourth should say *"That's three
+   this hour. Give them a bit."* rather than failing.
+
+**Done when:** a knock has crossed two machines and you have heard it.
 
 ---
 

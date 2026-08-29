@@ -256,12 +256,14 @@ Do not start a milestone until the previous one passes its check in
 M0 scaffold → M1 server REST → M2 gateway → M3 client shell
   → M4 presence/roster → M4.5 host controls + server list
   → M5 uploads/media → M6 styling/themes → M7 packaging → M8 export   ← V1, built
-  → M9 knock → M10 search → M11 DMs → M12 voice → M13 ambient voice   ← V2, planned
+  → M9 knock                                                          ← V2, built
+  → M10 search → M11 DMs → M12 voice → M13 ambient voice              ← V2, planned
   → backburner: entrance sounds (T-901…T-903), mobile (T-16xx)
 ```
 
 V1 is built. What is left of it is five things a person has to do by hand — see
-`TASKS.md`, *Human checks*. V2 is planned and not started.
+`TASKS.md`, *Human checks*. **M9 (knock) is built**; the rest of V2 is planned
+and not started.
 
 ---
 
