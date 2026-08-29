@@ -47,6 +47,7 @@ import type { User } from "../generated/User";
 import type { UserStatus } from "../generated/UserStatus";
 import type { UserId } from "../generated/UserId";
 import { considerFrame } from "../notify/notify";
+import { playKnock } from "./sound";
 import type { AuthedApi } from "./api";
 
 /**
@@ -137,7 +138,42 @@ export interface GatewayState {
    * the users it carries are freshly read from the database.
    */
   offlineAt: Record<string, number>;
+  /**
+   * Knocks that have not faded yet (SPEC §4.9, T-1102).
+   *
+   * The one piece of this snapshot that is *not* a copy of something the
+   * server is holding: a knock is not stored at either end, so this list is
+   * the only place it exists, and it is empty again a few seconds later.
+   *
+   * It is a list rather than a set of user ids because two knocks from the same
+   * person are two knocks. Nothing counts them, nothing keeps them, and nothing
+   * shows them after they have gone — SPEC §4.9 is emphatic that a knock which
+   * leaves something sitting there has become a message.
+   */
+  knocks: Knock[];
 }
+
+/** One knock, on its way to a card that fades. `id` is local to this client:
+ *  the wire carries no id, because there is nothing to refer back to. */
+export interface Knock {
+  id: string;
+  from: UserId;
+  /** When it arrived, by this machine's clock. */
+  at: number;
+}
+
+/**
+ * How long a knock's card stays before it goes on its own.
+ *
+ * Long enough to look up and see who it was, short enough that it is gone
+ * before it becomes something you have to deal with. There is no dismiss
+ * button, so this number is the entire lifetime of the thing.
+ */
+export const KNOCK_TTL_MS = 8_000;
+
+/** Ids for knock cards. A counter, because nothing outside this tab ever sees
+ *  one and two knocks in the same millisecond still have to be two cards. */
+let knockSeq = 0;
 
 const EMPTY: GatewayState = {
   status: { kind: "offline" },
@@ -153,6 +189,7 @@ const EMPTY: GatewayState = {
   leftOff: {},
   notifyRules: [],
   offlineAt: {},
+  knocks: [],
 };
 
 /**
@@ -407,6 +444,10 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         streams: {},
         typing: {},
         offlineAt: {},
+        // A knock is a tap on the shoulder. One that was on screen before the
+        // connection dropped has stopped meaning anything by the time we are
+        // back, so it goes with the rest of the transient state.
+        knocks: [],
         // `read` and `leftOff` survive: one is a copy of something the server
         // is holding for us, and the other is where this session started, which
         // a reconnect does not change.
@@ -499,6 +540,24 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
           held.id === id ? { ...held, body: "", deleted_at: held.deleted_at ?? Date.now() } : held,
         ),
       }));
+    }
+    case "knock": {
+      // A knock is a moment, not a record (SPEC §4.9). It goes in so a card
+      // can be drawn, the card takes itself off, and the list is empty again.
+      //
+      // Stale entries are dropped on the way in as well, because a card whose
+      // timer was lost — a window backgrounded so long the timers were
+      // throttled, a card unmounted by a re-render — must not come back later
+      // as a knock from the past.
+      const fresh = current.knocks.filter((held) => Date.now() - held.at < KNOCK_TTL_MS);
+      knockSeq += 1;
+      return {
+        ...current,
+        knocks: [
+          ...fresh,
+          { id: `knock-${knockSeq}`, from: frame.d.from_user_id, at: Date.now() },
+        ],
+      };
     }
     case "typing": {
       const { room_id, user_id } = frame.d;
@@ -658,6 +717,10 @@ async function attachListeners(): Promise<void> {
       // somebody for depends on who they are and what rules they have, and
       // the snapshot is where both of those live.
       considerFrame(server, frame, next);
+      // The card is drawn by the fold above; the noise is a side effect and
+      // belongs out here with the other one. `playKnock` applies the mute and
+      // the quiet hours itself, so a knock at 3am is a card and nothing more.
+      if (frame.op === "knock") playKnock();
     }),
   ]);
   await listening;
@@ -1089,6 +1152,20 @@ export function typistsIn(current: GatewayState, roomId: RoomId, now: number): U
     .filter(([userId, at]) => now - at < TYPING_TTL_MS && userId !== current.me?.id)
     .sort(([, a], [, b]) => a - b)
     .map(([userId]) => userId);
+}
+
+/**
+ * Take one knock's card off the screen (T-1102).
+ *
+ * Called by the card itself when its time is up — there is no dismiss control,
+ * because a knock you have to dismiss is a knock that wanted something from
+ * you (SPEC §4.9). The store is the only place a knock exists, so this is also
+ * the end of it: nothing is written down and nothing is left to find.
+ */
+export function dismissKnock(server: string, id: string): void {
+  const current = stateOf(server);
+  if (!current.knocks.some((knock) => knock.id === id)) return;
+  publish(server, { ...current, knocks: current.knocks.filter((knock) => knock.id !== id) });
 }
 
 /**

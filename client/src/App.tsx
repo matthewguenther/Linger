@@ -35,6 +35,7 @@ import type { RoomId } from "./generated/RoomId";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { User } from "./generated/User";
 import HostPanel, { type HostSection } from "./host/HostPanel";
+import KnockCards from "./knock/KnockCards";
 import type { MessageId } from "./generated/MessageId";
 import MediaPanel from "./media/MediaPanel";
 import { storageDetail, storageLine } from "./media/media";
@@ -608,6 +609,16 @@ function Console({
       )}
 
       {narrow ? null : roster}
+
+      {/* Knocks (SPEC §4.9, T-1102). Every server you are signed into, not
+          only the one on screen: somebody knocking is the reason to go and
+          look at the other one. It draws nothing when nobody has knocked. */}
+      <KnockCards
+        servers={servers.map((session) => ({
+          baseUrl: session.baseUrl,
+          name: info[session.baseUrl]?.name ?? hostOf(session.baseUrl),
+        }))}
+      />
 
       <footer className="status-bar meta">
         <span className="status-left">

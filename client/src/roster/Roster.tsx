@@ -169,10 +169,15 @@ function PersonCard({
   onEdit: () => void;
 }) {
   const { user, state } = entry;
+  // Knocking at somebody who has nothing open lands nowhere — the server holds
+  // no knocks and there is nothing to deliver it to — so the control is absent
+  // rather than present and useless (SPEC §4.9, T-1102).
+  const canKnock = !entry.isMe && state !== "offline";
   // A host can open anybody, whether or not they wrote a status: the way to
   // remove somebody is under here, and a card that will not open would hide it
-  // for exactly the quiet people it is most likely to be needed for.
-  const openable = hasStatus(entry) || entry.isMe || canRemove;
+  // for exactly the quiet people it is most likely to be needed for. The same
+  // now goes for anybody you can knock at.
+  const openable = hasStatus(entry) || entry.isMe || canRemove || canKnock;
   const head = (
     <>
       {/* The dot is decoration; the word beside it is what a screen reader
@@ -213,12 +218,71 @@ function PersonCard({
                 edit
               </button>
             </p>
-          ) : canRemove ? (
-            <Removal api={api} user={user} />
-          ) : null}
+          ) : (
+            <>
+              {canKnock ? <KnockButton api={api} user={user} /> : null}
+              {canRemove ? <Removal api={api} user={user} /> : null}
+            </>
+          )}
         </>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * The knock (SPEC §4.9, T-1102): one control, on the card of the person it is
+ * about.
+ *
+ * One click, no confirmation. A knock is the smallest thing you can send
+ * somebody and it costs them a card that fades — asking "are you sure" about
+ * that would make it feel like more than it is.
+ *
+ * Afterwards it says so and stops, and the "knocked" is the end of it: there is
+ * no delivery report, because the server does not keep one. If they were not
+ * connected it landed nowhere, and that is the same as knocking on a door with
+ * nobody behind it.
+ *
+ * Being refused is the interesting case. Three an hour, per person, is a rule
+ * about not nagging somebody, so the refusal is said in those words rather than
+ * as the server's generic "slow down".
+ */
+function KnockButton({ api, user }: { api: AuthedApi; user: User }) {
+  const [phase, setPhase] = useState<"idle" | "knocking" | "knocked">("idle");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const knock = async (): Promise<void> => {
+    setPhase("knocking");
+    setProblem(null);
+    try {
+      await api.knock(user.id);
+      setPhase("knocked");
+    } catch (error) {
+      setPhase("idle");
+      setProblem(
+        error instanceof ApiError && error.code === "RATE_LIMITED"
+          ? "That's three this hour. Give them a bit."
+          : error instanceof ApiError
+            ? error.message
+            : "Couldn't knock.",
+      );
+    }
+  };
+
+  return (
+    <div className="person-knock">
+      <p className="person-mine">
+        <button
+          type="button"
+          className="person-edit meta"
+          disabled={phase !== "idle"}
+          onClick={() => void knock()}
+        >
+          {phase === "idle" ? "knock" : phase === "knocking" ? "knocking…" : "knocked"}
+        </button>
+      </p>
+      {problem === null ? null : <p className="person-host-note">{problem}</p>}
+    </div>
   );
 }
 

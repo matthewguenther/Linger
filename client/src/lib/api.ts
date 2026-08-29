@@ -21,6 +21,7 @@ import type { ExportJob } from "../generated/ExportJob";
 import type { ExportStarted } from "../generated/ExportStarted";
 import type { Invite } from "../generated/Invite";
 import type { InvitePreview } from "../generated/InvitePreview";
+import type { KnockRequest } from "../generated/KnockRequest";
 import type { CompletedPart } from "../generated/CompletedPart";
 import type { CreateUploadRequest } from "../generated/CreateUploadRequest";
 import type { LinkPreview } from "../generated/LinkPreview";
@@ -476,6 +477,22 @@ export class AuthedApi {
   /** How far along that archive is, and where to get it once it exists. */
   exportJob(jobId: ExportId, signal?: AbortSignal): Promise<ExportJob> {
     return this.get<ExportJob>(`/export/${encodeURIComponent(jobId)}`, signal);
+  }
+
+  /**
+   * Nudge one person (SPEC §4.9, PROTOCOL §7).
+   *
+   * Three an hour, per person you are knocking at, so a refusal is
+   * `RATE_LIMITED` and means "you have already knocked at them" rather than
+   * "the server is busy". Somebody who has been removed is `NOT_FOUND`.
+   */
+  knock(targetUserId: UserId): Promise<void> {
+    return this.#withAuth((accessToken) =>
+      requestVoid(this.baseUrl, "POST", "/knock", {
+        accessToken,
+        body: { target_user_id: targetUserId } satisfies KnockRequest,
+      }),
+    );
   }
 
   invites(signal?: AbortSignal): Promise<Invite[]> {
