@@ -482,7 +482,7 @@ DELETE /invites/:code                                       → 204
 
 POST /export             → { job_id }                        # any member, 1/hour
 GET  /export/:job_id     → { job_id, state, progress, url? } # the asker's own only
-POST /knock              { target_user_id }                 → 204   # V2
+POST /knock              { target_user_id }                 → 204   # 3/hour per target
 ```
 
 **Export** (SPEC §4.11, T-801). `state` is `queued | running | complete |
@@ -496,6 +496,22 @@ two it was is not the asker's business. A member has one archive at a time:
 starting a new export deletes the previous one's bytes, so an old `url` stops
 working. The rate limit is about the host's disk and CPU, not about permission;
 there is no host approval anywhere in this flow and there must never be one.
+
+**Knock** (SPEC §4.9, T-1101). One member nudges one member. The target has to
+be a member of this server — a stranger and somebody the host removed are both
+`NOT_FOUND` — and knocking yourself is `VALIDATION_FAILED`. The rate limit is
+`RATE_KNOCK_PER_TARGET`: three per hour **per target**, so knocking five
+different people is five separate buckets.
+
+The server writes nothing. A knock is not a row, and there is no endpoint that
+lists knocks, because there is nothing to list. All it does is put one `knock`
+frame on the target's sessions (every session that person has open, and nobody
+else's — see §8's fan-out rules). If they are not connected it lands nowhere,
+which is correct: it is a tap on the shoulder, not a voicemail.
+
+The frame carries `from_user_id` and nothing else. No id, no body, nothing to
+reply to and nothing to dismiss — a knock that a client could mark as read
+would be a message, and §4.9 exists to avoid making anybody write one.
 
 ---
 
@@ -560,7 +576,7 @@ Beyond that, the client must re-identify and refetch.
 | `user.remove` | `{ user_id }` — this person is off the server. The mirror of `user.update`, and it names an id rather than carrying a `User` because there is no state left to describe: `User` has no `deactivated_at` field and is not going to grow one to carry a tombstone |
 | `room.create` / `room.update` | `Room` |
 | `typing` | `{ room_id, user_id }` |
-| `knock` | `{ from_user_id }` (V2) |
+| `knock` | `{ from_user_id }` — **sent to that one person's sessions and nobody else's** (SPEC §4.9) |
 
 ```ts
 type PresenceEntry = {
@@ -578,6 +594,10 @@ type PresenceEntry = {
   client applies its own mute rules and quiet hours before playing anything (SPEC §4.1).
 - Message events go to all clients; the client decides what to render. There are no
   per-room permissions in V1, so there is nothing to filter on.
+- `knock` is the one **addressed** frame: it goes to every session the target
+  has open and to no other member, the sender included. The address is not on
+  the wire — the receiver is the only one who gets the frame, so a field naming
+  them would carry nothing (SPEC §4.9, T-1101).
 
 ---
 

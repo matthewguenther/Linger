@@ -649,6 +649,21 @@ pub struct ExportJob {
     pub url: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Knock (SPEC §4.9, PROTOCOL §7)
+// ---------------------------------------------------------------------------
+
+/// The body of `POST /knock`: who you are nudging.
+///
+/// There is no message field and there is never going to be one. A knock that
+/// carries words is a message, and a message is the thing SPEC §4.9 is trying
+/// not to make you write.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnockRequest {
+    pub target_user_id: UserId,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
