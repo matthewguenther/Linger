@@ -110,12 +110,16 @@ inverts the priority. **People are the primary surface, not a gutter.**
 │  #shop   │  │ yeah, mounting it now           │ │ ♪ Bill Evans│ │
 │          │  │ [img]                           │ └─────────────┘ │
 │  media   │                                    │ ┌─────────────┐ │
-│          │                                    │ │○ Jen        │ │
+│  search  │                                    │ │○ Jen        │ │
 │          │  ┌──────────────────────────────┐  │ │ 2h · "back  │ │
 │          │  │ say something                │  │ │ after work" │ │
 │          │  └──────────────────────────────┘  │ └─────────────┘ │
 └──────────┴────────────────────────────────────┴─────────────────┘
 ```
+
+**`media` and `search` are destinations, not rooms.** They sit under the room list
+and open in place of the message stream. Anything that is a place but is not a room
+goes there; nothing floats over the stream.
 
 **The roster (right) is a card stack, not a name list.** Each card shows: name in the
 user's own styling, presence dot, which room they are in, and their status. Offline
@@ -330,6 +334,51 @@ files, in one archive. No gatekeeping, no host approval, one export per hour.
 This is a trust feature and an anti-lock-in guarantee. It costs a weekend and it is the
 most credible thing in the product.
 
+### 4.12 Search
+
+Search exists because principle 3 — keep the artifact — is a promise that a thing said
+two years ago is still *reachable*, and scrollback alone is not reachable. It is the
+smallest feature that makes the archive worth having.
+
+**Where it lives: a destination in the rail, under the rooms, next to `media`** (§3).
+It opens in place of the message stream, the way the media collection does, so there is
+one pattern for a place that is not a room and nothing floats over the conversation.
+`Ctrl`/`Cmd`+`K` opens that same destination with the box focused — a shortcut *into*
+the rail item, never a second surface with its own behavior.
+
+**What it covers: what people typed, and the names of the files they shared.** A photo
+is findable by its filename, because "the invoice pdf" is how people remember files.
+Link titles are deliberately *not* covered: a title is a page's own words fetched into
+a cache the server refreshes on its own schedule, so indexing them would mean search
+results changing under people with nobody having edited anything. A link is findable by
+the text somebody wrote around it, which is theirs.
+
+**What it refuses.**
+
+- **No ranking that is not time.** Results are newest first. Relevance ordering is an
+  algorithm deciding what matters, and §2 rules those out; with eight people and one
+  server, recency is the ordering anybody can predict.
+- **No search history, no saved searches, no suggestions.** Nothing about a search is
+  written down anywhere, on either side.
+- **Nothing a deleted message can be found by.** A deleted message is deleted — its
+  words *and* the names of the files it carried leave the index, the same rule the
+  export follows (§4.11).
+
+**Behavior.**
+
+- Whole words, not substrings. Simple English endings are folded together, so `photo`
+  finds `photos` and `running` finds `run`.
+- Several words means *all* of them, in one message, in any order. A run inside double
+  quotes means those words in that order.
+- No wildcards and no operators. `AND`, `OR` and `NEAR` are words to look for like any
+  others — a search box that quietly has a query language is a search box that lies to
+  most of the people typing in it.
+- Filterable by room and by person, combinable.
+- A hit is a line: who, which room, when, and a few words either side of the match with
+  the matched words marked. When the match was a filename, the hit says which file.
+- Clicking a hit opens that room and goes to that message.
+- Rate limit: 30 searches per person per minute.
+
 ---
 
 ## 5. Design system — "Console"
@@ -497,7 +546,7 @@ says what replaced it: a status somebody typed.
 - Voice rooms (WebRTC mesh + coturn), push-to-talk, per-user gain
 - Ambient voice: a room you leave running, not a call you join
 - DMs and group DMs
-- Search
+- Search (§4.12)
 - Knock (§4.9)
 - Mobile client
 

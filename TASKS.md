@@ -278,12 +278,12 @@ Recorded in the *Parking lot* too.
 
 ## V2 — M9 built, the rest planned
 
-**M9 (knock) landed 2026-08-29.** It was the smallest thing here and most of it
-already existed; the rest of this section is still planned and not started.
-**Nothing below M9 is next.** V1 is done except the things in *Human checks*,
-and those come first — a release nobody has installed is not a finished V1. This
-section exists so the shape of V2 is written down while it is fresh, not so
-somebody starts it.
+**M9 (knock) landed 2026-08-29**, and **M10's server half landed 2026-08-30** —
+the index and the endpoint; what is left of search is the surface, T-1203.
+Everything below M10 is still planned and not started. **Nothing below M10 is
+next.** V1 is done except the things in *Human checks*, and those come first — a
+release nobody has installed is not a finished V1. This section exists so the
+shape of V2 is written down while it is fresh, not so somebody starts it.
 
 **Read this before touching any of it:** SPEC §6 lists what V2 is; anything not
 on that list is not V2, it is scope creep. Voice and DMs each add a whole
@@ -384,35 +384,92 @@ controls on it at all.
 ### M10 — search
 
 *Milestone check: type a word, get the messages that contain it, click one, land
-on it in the room it was said in.*
+on it in the room it was said in.* **Open, and waiting on one task:** the index
+and the endpoint landed 2026-08-30, so the words are findable over HTTP and
+nothing draws them. T-1203 is the whole of what is left.
 
-**A spec section has to be written first.** SPEC has no section for search — it
-is one word on the V2 list. The first commit of T-1201 writes **SPEC §4.12** and
-the PROTOCOL §6 entry, and the rest of the milestone implements what they say.
-Two questions that section has to answer, and they are Matt's:
+**The spec section is written** — SPEC §4.12, and the search entry in PROTOCOL
+§6, both landed with T-1201. The two questions in it were Matt's and were
+answered on 2026-08-30:
 
-- **Where does search live in the layout?** SPEC §3 has no search box. A
-  destination in the left rail next to `media` is the obvious answer and matches
-  how media works. A keyboard shortcut over the stream is the other. Pick one.
-- **Does search cover file names and link titles, or only what people typed?**
-  Cheap either way; it changes what people expect from it.
+- **Search is a destination in the left rail, under the rooms, next to
+  `media`**, opening in place of the message stream. `Ctrl`/`Cmd`+`K` is a
+  shortcut *into* that destination, never a second surface with its own
+  behavior.
+- **It covers what people typed and the names of the files they shared.** Link
+  titles are deliberately out: a title is a cache the server refreshes on its
+  own schedule, so indexing one means results changing under people with nobody
+  having edited anything.
 
-- ⬜ **T-1201 · The index** — effort: **high**
-  SQLite FTS5 over message bodies, kept in step by triggers on insert, edit and
-  delete, plus a one-time backfill migration for servers that already have
-  history. **Tombstones must not be searchable** — a deleted message is deleted,
-  the same rule the export follows. An edit must update the index, not add to
-  it. Write SPEC §4.12 and PROTOCOL §6 in the same commit.
-  *Accept:* integration tests — a word in an old message is findable after the
-  backfill; editing a message changes what it matches; deleting one makes it
-  unfindable; a message with 5,000 words does not slow an insert to a crawl.
+- ✅ **T-1201 · The index** — effort: **high** — Matt, 2026-08-30
+  `message_fts` in `migrations/0004_search.sql`: an FTS5 table with two columns,
+  `body` and `filenames`, keyed by the message's implicit rowid. Five triggers
+  keep it — three on `messages`, two on `attachments` — and every one of them is
+  "throw the row away and write what is true now" rather than an incremental
+  edit, so the index cannot drift from the table it indexes. **Nothing in Rust
+  writes to it.** The backfill is one `INSERT ... SELECT` in the same migration.
 
-- ⬜ **T-1202 · The endpoint** — effort: **medium**
-  `GET /search?q=&room_id=&author_id=&before=`: keyset paging like `/media`, a
-  short snippet per hit with the matched words marked, and a rate limit
-  (FTS is cheap but not free, and it is the one endpoint somebody can hammer).
-  *Accept:* filters combine; paging never repeats or skips a hit; an empty query
-  is a validation error rather than every message on the server.
+  **No new dependency and nothing for a host to install.** FTS5 ships inside the
+  SQLite that sqlx already bundles (`libsqlite3-sys` compiles it with
+  `-DSQLITE_ENABLE_FTS5`).
+
+  Four things worth knowing before touching this:
+
+  - **The index carries its own copy of the text.** An external-content table
+    (`content='messages'`) would save a few megabytes and cannot produce a
+    `snippet()`, which is the whole result list — and a filename does not live
+    in `messages` at all.
+  - **A deleted message has no row here, not an empty one.** A tombstone empties
+    `body` but keeps its attachments, so indexing "the message minus its words"
+    would leave it findable by the name of the file it was carrying. The trigger
+    deletes the row outright and there is a test for exactly that.
+  - **Filenames are joined with `char(31)`**, not a space, because a filename may
+    contain spaces and a hit has to be able to say *which* file it matched.
+    `validate::filename` strips control characters, so U+001F cannot occur inside
+    one.
+  - **The tokenizer is `porter unicode61 remove_diacritics 2`.** Stemming is why
+    `photo` finds `photos`. Query and index are stemmed the same way, so they
+    cannot disagree.
+
+  **Two surprises.** First, **there is no such thing as a 5,000-word message** —
+  PROTOCOL §4 caps a body at 8,000 characters, which is nearer 1,300 words. The
+  acceptance test posts the largest message the API will take, nine of them, and
+  asserts the insert path has not become something you can feel; it is a guard
+  against a quadratic regression, not a benchmark. Second, the backfill can only
+  be tested by *removing* the index: the test posts real messages, drops the
+  table and its five triggers (which puts the server exactly where an old one
+  is), then replays the shipped migration file over it with `include_str!`.
+
+- ✅ **T-1202 · The endpoint** — effort: **medium** — Matt, 2026-08-30
+  `GET /search?q=&room_id=&author_id=&before=&limit=` in
+  `routes/search.rs`, over `repo::search`. `crates/linger-server/tests/search.rs`
+  covers all three acceptance cases and ten more.
+
+  **The query is rebuilt, never forwarded.** FTS5 has a query language of its
+  own, and handing it somebody's raw typing means either a syntax error thrown
+  at whoever typed an apostrophe, or a search that quietly did something other
+  than what it looked like. `Terms::parse` takes the searchable runs out of the
+  string and wraps each in quotes, and quoting is what makes every operator
+  inert — `AND`, `OR`, `NEAR`, `*`, `(`, `^` all arrive as words to look for.
+  There is no input that reaches `MATCH` as syntax, and a test fires eight of
+  them at it. **Do not "simplify" this by passing `q` through.**
+
+  **A snippet arrives as runs, not as a marked-up string.** `SearchHit.snippet`
+  is a `SearchSnippetPart[]` of `{ text, matched }`, because any marker
+  character is a character a message could contain — and because the obvious
+  rendering of a marked-up string is to drop it into HTML. Nothing to parse,
+  nothing to escape.
+
+  **Paging is keyset on the message id** and the cursor is that id, hex. UUIDv7
+  bytes sort chronologically, so `before` is a range scan and the order is the
+  same one the stream reads in. There is no relevance ranking and SPEC §4.12
+  says there will not be one.
+
+  Two things that caught the tests out, both about limits rather than search.
+  A validation refusal here is **422**, not 400 (`ApiError::validation`). And
+  `RATE_SEARCH` (30/min) refills while a burst of requests is in flight, so the
+  test asserts the refusal lands *after* the burst is spent rather than on an
+  exact request number — the same shape any future rate-limit test wants.
 
 - ⬜ **T-1203 · The search surface** — effort: **medium**
   Whatever SPEC §4.12 decided. Results as a list of snippets with room, author
@@ -746,12 +803,11 @@ network, and that the sound is a sound you would want to hear.
   exactly what leaves the server, or a self-hosted relay — which is a second
   piece of infrastructure for every host and probably ends the idea. **This
   blocks mobile** and nothing else. Raised 2026-08-28 while planning V2.
-- **Where does search live, and what does it cover?** SPEC §3's layout has no
-  search box. A destination in the rail next to `media` matches how media
-  works; a keyboard shortcut over the stream is the other option. And: does it
-  search file names and link titles, or only what people typed? Both are cheap;
-  they change what people expect. **This blocks M10's first task**, which
-  writes SPEC §4.12. Raised 2026-08-28.
+- ~~**Where does search live, and what does it cover?**~~ **Answered by Matt,
+  2026-08-30**, and written into SPEC §4.12: a destination in the rail next to
+  `media`, opening in place of the stream, with `Ctrl`/`Cmd`+`K` as a shortcut
+  into it rather than a second surface; and it covers what people typed plus the
+  names of files, not link titles. Raised 2026-08-28.
 - **Nothing in the client can pin a message.** The server has
   `POST /messages/{id}/pin`, the media grid has a `pinned` filter, and file
   expiry spares "starred or pinned" files — but there is no pin control

@@ -220,6 +220,23 @@ CREATE TABLE link_previews (
   fetched_at      INTEGER NOT NULL
 );
 
+-- Full-text search (SPEC §4.12). One FTS5 row per message, keyed by the
+-- message's implicit rowid, carrying its own copy of the text — an external
+-- `content=` table cannot produce a snippet, and a filename does not live in
+-- `messages` at all. It is maintained entirely by triggers on `messages` and
+-- `attachments`, so no application code can forget to index something.
+--
+-- Two invariants: a message with `deleted_at` set has **no row here at all**
+-- (its words and its filenames both leave, the rule the export follows), and an
+-- edit replaces its row rather than adding to it. `filenames` joins the names
+-- with `char(31)`, which `validate::filename` guarantees cannot occur inside
+-- one, so a hit can say which file it matched.
+CREATE VIRTUAL TABLE message_fts USING fts5(
+  body,
+  filenames,
+  tokenize = "porter unicode61 remove_diacritics 2"
+);
+
 CREATE TABLE reactions (
   message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   user_id         BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -328,7 +345,7 @@ E2EE launders a false promise, which is worse than an honest limitation.
 4. **No open registration.** Invite code required, always. Codes are 12 chars from a
    CSPRNG, single-use by default.
 5. **Rate limits:** login 5/min/IP, message send 10/10s/user, upload slot 20/hour/user,
-   invite creation 10/day/user, knock 3/hour/target.
+   invite creation 10/day/user, knock 3/hour/target, search 30/min/user.
 6. **CORS is an allowlist, not a wildcard.** The client is a webview page, so it is
    a cross-origin caller and the server must grant it permission explicitly. The
    allowed origins are the Tauri app's (`tauri://localhost`, and
@@ -600,7 +617,7 @@ project. V1's remaining work is still five things a person has to do by hand
 | # | Milestone | Done when | Estimate |
 |---|---|---|---|
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
-| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days |
+| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **the index and the endpoint landed 2026-08-30; the surface (T-1203) is what is left** |
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
@@ -610,10 +627,11 @@ be M14; it is on `TASKS.md`'s *Backburner* instead, because the desktop app has
 to be finished and used by real people before a second platform doubles the
 surface of every bug still in it.
 
-Two decisions are Matt's and block the work they belong to: where search lives
-in the layout (M10), and whether mobile push through Apple and Google is
-acceptable at all (whenever mobile comes back). Both are in `TASKS.md`'s
-parking lot.
+Where search lives in the layout was Matt's and was answered on 2026-08-30 —
+a destination in the rail next to `media`, covering what people typed and the
+names of files (SPEC §4.12). One decision is still open and blocks the work it
+belongs to: whether mobile push through Apple and Google is acceptable at all
+(whenever mobile comes back). It is in `TASKS.md`'s parking lot.
 
 **The activity-detection spike came before M0** and did its job. One evening,
 Kubuntu/Plasma 6 Wayland and Windows, a throwaway binary that printed the
