@@ -220,6 +220,23 @@ CREATE TABLE link_previews (
   fetched_at      INTEGER NOT NULL
 );
 
+-- Full-text search (SPEC §4.12). One FTS5 row per message, keyed by the
+-- message's implicit rowid, carrying its own copy of the text — an external
+-- `content=` table cannot produce a snippet, and a filename does not live in
+-- `messages` at all. It is maintained entirely by triggers on `messages` and
+-- `attachments`, so no application code can forget to index something.
+--
+-- Two invariants: a message with `deleted_at` set has **no row here at all**
+-- (its words and its filenames both leave, the rule the export follows), and an
+-- edit replaces its row rather than adding to it. `filenames` joins the names
+-- with `char(31)`, which `validate::filename` guarantees cannot occur inside
+-- one, so a hit can say which file it matched.
+CREATE VIRTUAL TABLE message_fts USING fts5(
+  body,
+  filenames,
+  tokenize = "porter unicode61 remove_diacritics 2"
+);
+
 CREATE TABLE reactions (
   message_id      BLOB NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   user_id         BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -328,7 +345,7 @@ E2EE launders a false promise, which is worse than an honest limitation.
 4. **No open registration.** Invite code required, always. Codes are 12 chars from a
    CSPRNG, single-use by default.
 5. **Rate limits:** login 5/min/IP, message send 10/10s/user, upload slot 20/hour/user,
-   invite creation 10/day/user, knock 3/hour/target.
+   invite creation 10/day/user, knock 3/hour/target, search 30/min/user.
 6. **CORS is an allowlist, not a wildcard.** The client is a webview page, so it is
    a cross-origin caller and the server must grant it permission explicitly. The
    allowed origins are the Tauri app's (`tauri://localhost`, and

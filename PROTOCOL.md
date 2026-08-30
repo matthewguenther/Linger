@@ -324,7 +324,7 @@ someone "improving" a palette value later.
 
 ---
 
-## 6. Uploads
+## 6. Uploads, media, search
 
 ```
 POST /uploads              { filename, size_bytes, mime }
@@ -470,6 +470,62 @@ fetch itself resolves the name, refuses the whole name if **any** address it
 answers with is private, pins the connection to the address it checked, follows
 at most three redirects with the same check on every hop, and caps both time and
 bytes (ARCHITECTURE §7).
+
+**Search**
+
+```
+GET /search?q=<words>&room_id=<room_id>&author_id=<user_id>
+           &before=<cursor>&limit=<1..50>              → SearchHit[]
+```
+
+Messages containing every word in `q` (SPEC §4.12). Newest first, always — there
+is no relevance ordering and no parameter to ask for one.
+
+`q` is **words, not a query language.** The server takes the searchable runs out
+of it and looks for all of them; a run inside double quotes is one phrase, those
+words in that order. Nothing else is syntax: `AND`, `OR`, `NEAR`, `*`, `(` and
+`^` are characters to tokenize like any other, so no input is a parse error and
+none of it can be made to mean something the person typing did not intend.
+Matching is on whole words with simple English endings folded together, so
+`photo` finds `photos`.
+
+A `q` that holds no searchable characters — empty, blank, or only punctuation —
+is `VALIDATION_FAILED`, not every message on the server. Terms past the twelfth
+are ignored rather than refused, and a `q` over 200 characters is
+`VALIDATION_FAILED`. `room_id` or `author_id` naming something that is not here
+is `NOT_FOUND`, because "no results" and "no such room" send a reader looking in
+different places. The rate limit is `RATE_SEARCH`: 30 per person per minute.
+
+**Paging** is keyset, like `/media`: pass the last hit's `cursor` back as
+`before`. A cursor is opaque — do not parse one, build one, or compare two. A
+page that comes back empty is the end.
+
+```ts
+type SearchSnippetPart = { text: string; matched: boolean }
+
+type SearchHit = {
+  message_id: string; room_id: string; author_id: string;
+  created_at: number;
+  cursor: string;                    // opaque; hand back as `before`
+  snippet: SearchSnippetPart[];      // in order; draw `matched` runs emphasised
+  matched_filenames: string[];       // set when the match was a file's name
+}
+```
+
+A hit is **not** a `Message`. A result list draws who, where, when and a few
+words; opening one fetches the real message from its room, which is the moment
+its attachments and reactions are worth sending.
+
+`snippet` arrives already cut into runs rather than as a string with markers in
+it, because any marker is a character a message could contain. Draw the runs in
+order and emphasise the matched ones however the density mode allows — there is
+nothing to parse and nothing to escape. It is empty when the message said
+nothing, which happens when a photo was posted with no caption and the match was
+its filename.
+
+**A deleted message is not searchable** — neither its words nor the names of the
+files it was carrying, and it never comes back as a hit. That is the same rule
+the export follows (§7).
 
 ---
 

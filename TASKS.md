@@ -386,18 +386,20 @@ controls on it at all.
 *Milestone check: type a word, get the messages that contain it, click one, land
 on it in the room it was said in.*
 
-**A spec section has to be written first.** SPEC has no section for search — it
-is one word on the V2 list. The first commit of T-1201 writes **SPEC §4.12** and
-the PROTOCOL §6 entry, and the rest of the milestone implements what they say.
-Two questions that section has to answer, and they are Matt's:
+**The spec section is written** — SPEC §4.12, and the search entry in PROTOCOL
+§6, both landed with T-1201. The two questions in it were Matt's and were
+answered on 2026-08-30:
 
-- **Where does search live in the layout?** SPEC §3 has no search box. A
-  destination in the left rail next to `media` is the obvious answer and matches
-  how media works. A keyboard shortcut over the stream is the other. Pick one.
-- **Does search cover file names and link titles, or only what people typed?**
-  Cheap either way; it changes what people expect from it.
+- **Search is a destination in the left rail, under the rooms, next to
+  `media`**, opening in place of the message stream. `Ctrl`/`Cmd`+`K` is a
+  shortcut *into* that destination, never a second surface with its own
+  behavior.
+- **It covers what people typed and the names of the files they shared.** Link
+  titles are deliberately out: a title is a cache the server refreshes on its
+  own schedule, so indexing one means results changing under people with nobody
+  having edited anything.
 
-- ⬜ **T-1201 · The index** — effort: **high**
+- ⏳ **T-1201 · The index** — effort: **high** — Matt, 2026-08-30
   SQLite FTS5 over message bodies, kept in step by triggers on insert, edit and
   delete, plus a one-time backfill migration for servers that already have
   history. **Tombstones must not be searchable** — a deleted message is deleted,
@@ -407,7 +409,7 @@ Two questions that section has to answer, and they are Matt's:
   backfill; editing a message changes what it matches; deleting one makes it
   unfindable; a message with 5,000 words does not slow an insert to a crawl.
 
-- ⬜ **T-1202 · The endpoint** — effort: **medium**
+- ⏳ **T-1202 · The endpoint** — effort: **medium** — Matt, 2026-08-30
   `GET /search?q=&room_id=&author_id=&before=`: keyset paging like `/media`, a
   short snippet per hit with the matched words marked, and a rate limit
   (FTS is cheap but not free, and it is the one endpoint somebody can hammer).
