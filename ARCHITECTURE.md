@@ -617,7 +617,7 @@ project. V1's remaining work is still five things a person has to do by hand
 | # | Milestone | Done when | Estimate |
 |---|---|---|---|
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
-| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days |
+| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **the index and the endpoint landed 2026-08-30; the surface (T-1203) is what is left** |
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
@@ -627,10 +627,11 @@ be M14; it is on `TASKS.md`'s *Backburner* instead, because the desktop app has
 to be finished and used by real people before a second platform doubles the
 surface of every bug still in it.
 
-Two decisions are Matt's and block the work they belong to: where search lives
-in the layout (M10), and whether mobile push through Apple and Google is
-acceptable at all (whenever mobile comes back). Both are in `TASKS.md`'s
-parking lot.
+Where search lives in the layout was Matt's and was answered on 2026-08-30 —
+a destination in the rail next to `media`, covering what people typed and the
+names of files (SPEC §4.12). One decision is still open and blocks the work it
+belongs to: whether mobile push through Apple and Google is acceptable at all
+(whenever mobile comes back). It is in `TASKS.md`'s parking lot.
 
 **The activity-detection spike came before M0** and did its job. One evening,
 Kubuntu/Plasma 6 Wayland and Windows, a throwaway binary that printed the

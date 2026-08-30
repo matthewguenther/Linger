@@ -541,6 +541,51 @@ pub struct LinkPreviewRequest {
 }
 
 // ---------------------------------------------------------------------------
+// Search (SPEC §4.12, PROTOCOL §6)
+// ---------------------------------------------------------------------------
+
+/// One run of the snippet a hit shows, and whether it is what was searched for.
+///
+/// The snippet arrives already cut into pieces rather than as a string with
+/// markers in it, because a marker is a character a message could contain. A
+/// client draws the pieces in order and gives the matched ones whatever
+/// emphasis the density mode allows — there is nothing to parse and nothing
+/// to escape.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SearchSnippetPart {
+    pub text: String,
+    pub matched: bool,
+}
+
+/// One message that matched (SPEC §4.12).
+///
+/// It is deliberately not a `Message`: a result list shows who, where, when and
+/// a few words, and clicking one opens the room and goes to the message, which
+/// is the moment the real thing is fetched. Sending the whole message here
+/// would mean sending its attachments and reactions for every hit on a page
+/// nobody has clicked yet.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SearchHit {
+    pub message_id: MessageId,
+    pub room_id: RoomId,
+    pub author_id: UserId,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    /// Paging cursor: hand it back as `before`. Opaque — do not parse one,
+    /// build one, or compare two.
+    pub cursor: String,
+    /// A few words either side of the match, in order. Empty for a message
+    /// that matched only on the name of a file attached to it and said
+    /// nothing, which is the one case where there is no text to show.
+    pub snippet: Vec<SearchSnippetPart>,
+    /// The filenames on the message, when the match was one of them. Lets a
+    /// hit say *why* it is a hit when the words are not in the text.
+    pub matched_filenames: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Presence (SPEC §4.3, PROTOCOL §8) — shared by REST `ready` and the gateway
 // ---------------------------------------------------------------------------
 

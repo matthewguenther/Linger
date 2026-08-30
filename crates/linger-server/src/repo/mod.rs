@@ -6,4 +6,5 @@ pub mod links;
 pub mod media;
 pub mod messages;
 pub mod rooms;
+pub mod search;
 pub mod users;

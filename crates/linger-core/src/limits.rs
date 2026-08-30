@@ -54,6 +54,20 @@ pub const MAX_LINK_REDIRECTS: usize = 3;
 /// Ceiling on `GET /media?limit=` (PROTOCOL §6).
 pub const MAX_MEDIA_PAGE: u32 = 100;
 
+/// Search (SPEC §4.12, PROTOCOL §6).
+///
+/// A query longer than this is a paste, not a search, and every extra token is
+/// another term the index has to intersect.
+pub const MAX_SEARCH_QUERY_CHARS: usize = 200;
+/// Terms beyond this are ignored rather than refused: a long query still
+/// answers, it is simply the first few words that decide the answer.
+pub const MAX_SEARCH_TERMS: usize = 12;
+/// How much of a message a hit shows, in words. A result list is scanned, not
+/// read — a snippet long enough to need reading is the room's job.
+pub const SEARCH_SNIPPET_TOKENS: u32 = 16;
+/// Ceiling on `GET /search?limit=` (PROTOCOL §6).
+pub const MAX_SEARCH_PAGE: u32 = 50;
+
 /// Access tokens are short-lived JWTs; refresh tokens rotate (ARCHITECTURE §7).
 pub const ACCESS_TOKEN_TTL_SECS: u64 = 15 * 60;
 pub const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
@@ -80,6 +94,10 @@ pub const RATE_UPLOAD_SLOTS: (u32, u64) = (20, 3_600);
 pub const RATE_INVITE_CREATE: (u32, u64) = (10, 86_400);
 pub const RATE_KNOCK_PER_TARGET: (u32, u64) = (3, 3_600);
 pub const RATE_EXPORT: (u32, u64) = (1, 3_600);
+/// Full-text search is cheap per query and not free, and it is the one endpoint
+/// a client can fire on every keystroke. Thirty a minute leaves room for
+/// search-as-you-type without leaving the index open to a loop.
+pub const RATE_SEARCH: (u32, u64) = (30, 60);
 /// Link previews are cached server-side, so this only bounds the misses.
 pub const RATE_LINK_PREVIEW: (u32, u64) = (60, 60);
 pub const RATE_TYPING_PER_ROOM: (u32, u64) = (1, 4);
