@@ -140,6 +140,20 @@ function person(id: string, name: string): User {
   };
 }
 
+function dm(id: string, members: string[], lastMessageId: string | null = null): Room {
+  return {
+    id,
+    slug: `dm-${id}`,
+    name: `dm-${id}`,
+    topic: null,
+    kind: "dm",
+    member_ids: members,
+    position: 0,
+    archived_at: null,
+    last_message_id: lastMessageId,
+  };
+}
+
 function room(id: string, slug: string, lastMessageId: string | null): Room {
   return {
     id,
@@ -584,5 +598,93 @@ describe("a room opened on a search hit", () => {
     expect(stream?.atEnd).toBe(true);
     expect(stream?.messages.some((held) => held.id === id(NEWEST))).toBe(true);
     expect(stream?.messages.some((held) => held.id === id(HIT))).toBe(false);
+  });
+});
+
+/**
+ * DMs in the store (SPEC §4.13, T-1302).
+ *
+ * The one thing that must never happen here is a DM ending up in `rooms`. The
+ * wire keeps the two lists apart so that a surface drawing the server's rooms
+ * cannot draw a private conversation by forgetting a filter, and this store
+ * would hand that mistake straight back if it merged them.
+ */
+describe("DMs", () => {
+  beforeEach(async () => {
+    await Promise.all([disconnect(HOME), disconnect(WORK)]);
+    invoked.length = 0;
+  });
+
+  it("keeps the two lists apart from the first frame", async () => {
+    await connect(fakeApi(HOME));
+    const matt = person("u-matt", "Matt");
+    arrive(
+      HOME,
+      ready({
+        user: matt,
+        rooms: [room("r-garage", "garage", null)],
+        dms: [dm("d1", ["u-matt", "u-callie"])],
+      }),
+    );
+
+    const state = serverState(HOME);
+    expect(state.rooms.map((r) => r.id)).toEqual(["r-garage"]);
+    expect(state.dms.map((r) => r.id)).toEqual(["d1"]);
+  });
+
+  it("files a room.create by what the room says it is", async () => {
+    await connect(fakeApi(HOME));
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+
+    arrive(HOME, { s: 2, op: "room.create", d: room("r-porch", "porch", null) } as ServerFrame);
+    arrive(HOME, { s: 3, op: "room.create", d: dm("d1", ["u-matt", "u-callie"]) } as ServerFrame);
+
+    const state = serverState(HOME);
+    expect(state.rooms.map((r) => r.id)).toEqual(["r-porch"]);
+    expect(state.dms.map((r) => r.id)).toEqual(["d1"]);
+    expect(
+      state.rooms.every((r) => r.kind === "room"),
+      "a DM reached the room list",
+    ).toBe(true);
+  });
+
+  it("updates a DM in place rather than adding it twice", async () => {
+    await connect(fakeApi(HOME));
+    arrive(HOME, ready({ user: person("u-matt", "Matt"), dms: [dm("d1", ["u-matt", "u-callie"])] }));
+
+    // The same DM arriving again — which it does, because `POST /dms` answers
+    // with it *and* the server publishes `room.create` to its members.
+    arrive(HOME, {
+      s: 2,
+      op: "room.create",
+      d: dm("d1", ["u-matt", "u-callie"], "m0001"),
+    } as ServerFrame);
+
+    const state = serverState(HOME);
+    expect(state.dms).toHaveLength(1);
+    expect(state.dms[0]?.last_message_id).toBe("m0001");
+  });
+
+  it("marks a server holding something new in a DM, and still not with a number", async () => {
+    await connect(fakeApi(HOME));
+    const matt = person("u-matt", "Matt");
+    arrive(HOME, ready({ user: matt, dms: [dm("d1", ["u-matt", "u-callie"], "m0007")] }));
+
+    // Nothing read in it yet, so there is something new — the same boolean the
+    // rooms use, reached by the same route (SPEC §4.2).
+    expect(anyNewActivity(serverState(HOME))).toBe(true);
+    expect(hasNewActivity(serverState(HOME), "d1")).toBe(true);
+  });
+
+  it("a person who is in no DMs has an empty list, not somebody else's", async () => {
+    await connect(fakeApi(HOME));
+    // `ready` carries the DMs *this person* is in, so a stranger's client has
+    // nothing to draw. The server is what enforces it; this asserts the client
+    // has no other source for the list.
+    arrive(HOME, ready({ user: person("u-dave", "Dave"), rooms: [room("r-garage", "garage", null)] }));
+
+    const state = serverState(HOME);
+    expect(state.dms).toEqual([]);
+    expect(state.rooms).toHaveLength(1);
   });
 });

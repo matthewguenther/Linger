@@ -255,10 +255,32 @@ impl Gateway {
         }
     }
 
-    /// Presence snapshot for `ready`.
+    /// Presence snapshot for `ready`, as this person is allowed to see it.
+    ///
+    /// **Redacted the same way a live `presence.update` is** (SPEC §4.13):
+    /// somebody standing in a DM the receiver cannot see comes back without the
+    /// room. This is easy to miss and was: the live path goes through
+    /// `visible_to` and the snapshot does not, so for a while the frames were
+    /// right and the first frame of the session was not — a client connecting
+    /// while somebody was in a DM was handed that DM's id.
+    ///
+    /// The room is dropped rather than the person, for the same reason as
+    /// everywhere else: they *are* around, and hiding them would say something
+    /// false rather than saying less.
     #[must_use]
-    pub fn presence_snapshot(&self) -> Vec<PresenceEntry> {
-        self.presence.iter().map(|e| e.value().clone()).collect()
+    pub fn presence_snapshot(&self, receiver: UserId) -> Vec<PresenceEntry> {
+        self.presence
+            .iter()
+            .map(|e| {
+                let mut entry = e.value().clone();
+                if let Some(room_id) = entry.room_id {
+                    if !self.can_see_room(receiver, room_id) {
+                        entry.room_id = None;
+                    }
+                }
+                entry
+            })
+            .collect()
     }
 
     /// Who is in a room right now.

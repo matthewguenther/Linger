@@ -354,7 +354,7 @@ self-contained, and make the app better next week rather than next quarter.
 Build order, cheapest and safest first:
 
 ```
-M9 knock (built) → M10 search (built) → M11 DMs (started, T-1301 of 3)
+M9 knock (built) → M10 search (built) → M11 DMs (T-1303 of 3 left)
   → M12 voice → M13 ambient voice
 ```
 
@@ -386,9 +386,11 @@ down: two to eight people, membership fixed when the DM is made, no DM with
 yourself, and a `NOT_FOUND` rather than a `FORBIDDEN` for everything a
 non-member asks.
 
-**⚠ T-1301 landed the model and the fan-out. DMs still leak** through search,
-media, export, notifications and link previews until **T-1303**. Do not run a
-server where people use DMs before then — see T-1301's note.
+**⚠ T-1301 and T-1302 landed the model, the fan-out and the client. DMs still
+leak** through search, media, export, notifications and link previews until
+**T-1303** — and now that the app can make one, those leaks are reachable by
+ordinary use rather than by `curl`. Do not run a server where people use DMs
+before then.
 
 - ✅ **T-1301 · The model and the endpoints** — effort: **high** — Matt, 2026-08-31
   `rooms.kind` and `room_members` in `migrations/0005_dms.sql`, `GET`/`POST
@@ -503,13 +505,82 @@ server where people use DMs before then — see T-1301's note.
   run a server where people use DMs until it is done.** No client can make a DM
   before T-1302, so the exposure today is to somebody with `curl` and an account.
 
-- ⬜ **T-1302 · DMs in the client** — effort: **high**
-  A section of the rail under the rooms, started from a person's card in the
-  roster. Typing and presence work inside a DM the way they do in a room.
-  **No unread counts** — AGENTS rule 3 does not get an exception because a DM
-  feels more urgent. A DM with something new in it can be marked the same
-  quiet way a room is, and no number appears anywhere.
-  *Accept:* two clients hold a DM; a third client shows no sign it exists.
+- ✅ **T-1302 · DMs in the client** — effort: **high** — Matt, 2026-08-31
+  A `direct` section in the rail between the rooms and the destinations, a
+  `message` control on a person's roster card, and `client/src/dm/dm.ts` for
+  the one piece of real logic in the feature. SPEC §3's diagram now draws it.
+
+  **A DM has no name, so every client works one out — and the answer is
+  different for everybody.** Callie's DM with Dave is "Dave" to Callie and
+  "Callie" to Dave, which is why the server cannot send one and why the `slug`
+  and `name` it does send are generated and ignored. That produced two
+  functions rather than one, and the difference between them is the whole
+  reason this was not a five-minute job:
+
+  - `dmLabel` answers *"what is this conversation called to me"* — the rail and
+    the stream header.
+  - `dmWhere` answers *"where is this person"* on somebody else's roster card,
+    and has to leave that person out and call the reader "you". Using `dmLabel`
+    there puts "in Callie" on Callie's own card, which is nonsense. There is a
+    test asserting the two give different answers, because they look
+    interchangeable and are not.
+
+  **The rail section is between the rooms and `media`/`search`.** A DM is
+  neither one of the server's rooms nor a place that is not a conversation. It
+  shrinks and scrolls before the destinations do, for the same reason the room
+  list does: `media` and `search` have to stay reachable.
+
+  **No count, and the ordering is careful about it too.** `orderDms` floats the
+  ones holding something new and then sorts by whichever was spoken in most
+  recently. It takes "has something new" as a boolean it is handed — there is
+  nothing to compare two of them by, and sorting by *how much* is unread is the
+  badge wearing a different coat (SPEC §4.2, AGENTS rule 3).
+
+  **`message` sits above `knock` on the card, and works on somebody who is
+  not here.** That is the whole difference between the two: a knock at somebody
+  with nothing open lands nowhere, so the control is absent; a message waits.
+  No dialog and no double-click guard — create-or-find means pressing it twice
+  lands you in the conversation you already had.
+
+  ### A leak found while building this, and fixed here
+
+  **`ready`'s presence snapshot was not redacted.** The live `presence.update`
+  path goes through `visible_to`; the snapshot did not. So a client connecting
+  *while* somebody was standing in a DM was handed that DM's id in its very
+  first frame — the one path T-1301's tests never covered, because they all
+  connected before the DM was occupied. `presence_snapshot` now takes the
+  receiver, and `dms.rs` has a test whose whole point is the ordering: the
+  stranger connects **after** the DM is occupied.
+
+  ### Verified with three parties, one of them real
+
+  A server with three accounts. The desktop client signed in as Matt and driven
+  by hand; Callie and Dave held live gateway sockets from a script that logged
+  every frame.
+
+  Matt opened Callie's card, pressed `message`, and landed in the DM — `Callie`
+  in the rail under `DIRECT`, `Callie · Matt` as the header, and his own roster
+  card reading *"in a message with Callie"*. He said something; Callie replied
+  over REST and it arrived live.
+
+  **Callie's socket: 10 frames**, including the DM's id, both messages, typing
+  and occupancy. **Dave's socket: 6 frames, and not one of them mentions the DM
+  id or either message.** What he did get is the interesting half: `presence`
+  saying Matt is `in_room` with `room_id: null` — he knows Matt is around and
+  is not told where — plus the public room's occupancy, which proves the filter
+  is a filter and not a blanket.
+
+  **What that does not prove:** one *real* client, not two. Two desktop clients
+  on this box share a keyring entry and revoke each other's sign-in (see the
+  agent notes), so the second and third parties were scripted. The frames they
+  received are the same frames a client would have.
+
+  ### ⚠ Still not safe to use — T-1303 is what closes it
+
+  This makes DMs reachable from the app, which makes T-1303's leaks reachable
+  too: search returns other people's words, the media grid shows their files,
+  and the export contains conversations you were not in. **Do not run a server
+  where people use DMs until T-1303 lands.**
 
 - ⬜ **T-1303 · Everywhere else a DM can leak** — effort: **high**
   Its own task because it is the security-critical half and it is the half that

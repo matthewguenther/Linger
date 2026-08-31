@@ -25,9 +25,11 @@ import { useMemo, useState } from "react";
 
 import type { Room } from "../generated/Room";
 import type { User } from "../generated/User";
+import type { UserId } from "../generated/UserId";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
 import { useGateway } from "../lib/gateway";
+import { dmWhere } from "../dm/dm";
 import { nameProps, personStyle } from "../lib/names";
 import NotifyRules from "../notify/NotifyRules";
 import StatusCard from "../status/StatusCard";
@@ -49,10 +51,19 @@ export default function Roster({
   api,
   rooms,
   layout,
+  onOpenDm,
 }: {
   api: AuthedApi;
   rooms: Room[];
   layout: RosterLayout;
+  /**
+   * Start (or find) a DM with this person and open it (SPEC §4.13, T-1302).
+   *
+   * The roster is where it starts because a DM is about a person, and their
+   * card is the only place in the app that is. The frame owns what happens
+   * next — which room is open is its state, not this panel's.
+   */
+  onOpenDm: (userId: UserId) => Promise<void>;
 }) {
   const gateway = useGateway(api.baseUrl);
   const now = useNow();
@@ -68,7 +79,14 @@ export default function Roster({
   const [open, setOpen] = useState<string | null>(null);
 
   const { users, presence, me, offlineAt } = gateway;
-  const allRooms = gateway.rooms;
+  // Rooms *and* DMs: presence names whichever a person is standing in, and a
+  // room this client cannot look up draws as a vague "in a room". The server
+  // only ever names a DM to somebody who is in it (PROTOCOL §8), so nothing
+  // private arrives here to be looked up in the first place.
+  const allRooms = useMemo(
+    () => [...gateway.rooms, ...gateway.dms],
+    [gateway.rooms, gateway.dms],
+  );
   const entries = useMemo(
     () =>
       buildRoster({
@@ -127,6 +145,9 @@ export default function Roster({
               // else — the same rule the host panel follows (T-410). The lock
               // is the endpoint, which answers FORBIDDEN either way.
               canRemove={(me?.is_host ?? false) && !entry.isMe}
+              onOpenDm={onOpenDm}
+              users={users}
+              meId={me?.id ?? null}
               open={open === entry.user.id}
               onToggle={() =>
                 setOpen((held) => (held === entry.user.id ? null : entry.user.id))
@@ -156,6 +177,9 @@ function PersonCard({
   entry,
   now,
   canRemove,
+  onOpenDm,
+  users,
+  meId,
   open,
   onToggle,
   onEdit,
@@ -164,6 +188,10 @@ function PersonCard({
   entry: RosterEntry;
   now: number;
   canRemove: boolean;
+  /** For naming a DM somebody is standing in — it has no name of its own. */
+  users: User[];
+  meId: UserId | null;
+  onOpenDm: (userId: UserId) => Promise<void>;
   open: boolean;
   onToggle: () => void;
   onEdit: () => void;
@@ -173,11 +201,15 @@ function PersonCard({
   // no knocks and there is nothing to deliver it to — so the control is absent
   // rather than present and useless (SPEC §4.9, T-1102).
   const canKnock = !entry.isMe && state !== "offline";
+  // Unlike a knock, a DM works on somebody who is not here: it is a message,
+  // and a message waits. That is the whole difference between the two controls
+  // sitting next to each other.
+  const canMessage = !entry.isMe;
   // A host can open anybody, whether or not they wrote a status: the way to
   // remove somebody is under here, and a card that will not open would hide it
   // for exactly the quiet people it is most likely to be needed for. The same
   // now goes for anybody you can knock at.
-  const openable = hasStatus(entry) || entry.isMe || canRemove || canKnock;
+  const openable = hasStatus(entry) || entry.isMe || canRemove || canKnock || canMessage;
   const head = (
     <>
       {/* The dot is decoration; the word beside it is what a screen reader
@@ -205,7 +237,7 @@ function PersonCard({
       ) : (
         <p className="person-head">{head}</p>
       )}
-      <PersonLines entry={entry} now={now} />
+      <PersonLines entry={entry} users={users} meId={meId} now={now} />
       {open ? (
         <>
           {/* The away message is already on the lines above, so the card
@@ -220,6 +252,7 @@ function PersonCard({
             </p>
           ) : (
             <>
+              {canMessage ? <MessageButton user={user} onOpenDm={onOpenDm} /> : null}
               {canKnock ? <KnockButton api={api} user={user} /> : null}
               {canRemove ? <Removal api={api} user={user} /> : null}
             </>
@@ -227,6 +260,57 @@ function PersonCard({
         </>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Start a DM with this person (SPEC §4.13, T-1302).
+ *
+ * One control, no dialog, no "who else?" step. Create-or-find on the server
+ * means pressing it twice is the same as pressing it once — you land in the
+ * conversation you already had rather than starting a second one — so it needs
+ * no confirmation and no guard against a double click.
+ *
+ * A group DM is not started from here. Three people is a different gesture and
+ * this card knows about one person; building a picker onto it would put a form
+ * inside a card, which the roster is already careful not to do.
+ */
+function MessageButton({
+  user,
+  onOpenDm,
+}: {
+  user: User;
+  onOpenDm: (userId: UserId) => Promise<void>;
+}) {
+  const [problem, setProblem] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+
+  const start = async (): Promise<void> => {
+    setOpening(true);
+    setProblem(null);
+    try {
+      await onOpenDm(user.id);
+    } catch (error) {
+      setProblem(error instanceof ApiError ? error.message : "Couldn't open that.");
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <div className="person-knock">
+      <p className="person-mine">
+        <button
+          type="button"
+          className="person-edit meta"
+          disabled={opening}
+          onClick={() => void start()}
+        >
+          {opening ? "opening…" : "message"}
+        </button>
+      </p>
+      {problem === null ? null : <p className="person-host-note">{problem}</p>}
+    </div>
   );
 }
 
@@ -370,13 +454,33 @@ function Removal({ api, user }: { api: AuthedApi; user: User }) {
  * strip shows only the first of these lines, so the most locating one has to
  * come first.
  */
-function PersonLines({ entry, now }: { entry: RosterEntry; now: number }) {
+function PersonLines({
+  entry,
+  users,
+  meId,
+  now,
+}: {
+  entry: RosterEntry;
+  users: User[];
+  meId: UserId | null;
+  now: number;
+}) {
   const { state, room, awayMessage } = entry;
 
   // "around" says nothing here on purpose — the dot has already said it, and a
   // card that spends a line on "around" is a card that says less.
+  //
+  // A DM is named by who is in it rather than by a slug (SPEC §4.13), and only
+  // ever reaches this line for somebody who is in it: the server sends `null`
+  // for the room to everybody else, so `room` is null and this says nothing.
   const where =
-    state === "in_room" ? (room === null ? "in a room" : `in #${room.slug}`) : null;
+    state === "in_room"
+      ? room === null
+        ? "in a room"
+        : room.kind === "dm"
+          ? dmWhere(room, users, entry.user.id, meId)
+          : `in #${room.slug}`
+      : null;
   const stateLine = state === "idle" || state === "away" ? stateWord(state) : null;
 
   const since = sinceOf(entry, now);
