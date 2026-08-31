@@ -662,7 +662,6 @@ function Console({
           room={open}
           users={gateway.users}
           density={density}
-          onDensityChange={setDensity}
           focus={jumpTo}
           onFocused={forgetJump}
           roster={narrow ? roster : undefined}

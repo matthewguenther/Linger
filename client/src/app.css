@@ -83,10 +83,12 @@
   text-overflow: ellipsis;
 }
 
-/* Density lives in the room header (you change it while looking at a room)
-   and also in settings, so it is findable without a room (T-411). */
+/* A small segmented control: density and theme both use it, and both live in
+   settings and nowhere else (T-904). It sat in the room header until
+   2026-08-31, which is where the `margin-left: auto` that used to be here came
+   from — it pinned the control to the right of the room name. Nothing pins it
+   now. */
 .density {
-  margin-left: auto;
   display: flex;
   gap: 2px;
 }

@@ -153,9 +153,11 @@
   color: var(--text-secondary);
 }
 
-/* The stream header pins this control to the right; here it is just a row. */
-.settings-density .density {
-  margin-left: 0;
+/* Density and theme each sit in their own row. `align-self: start` is what keeps
+   the control from stretching across the section, which is what a flex child
+   does by default. */
+.settings-density {
+  align-self: start;
 }
 
 /* A control that stands on its own in a section rather than in an actions row.

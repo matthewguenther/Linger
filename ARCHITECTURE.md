@@ -621,11 +621,18 @@ project. V1's remaining work is still five things a person has to do by hand
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
+| **M14** | Custom themes | Somebody makes a colour scheme, it survives a restart, and a file carries it to another computer | **V3, not V2.** Three decisions come first — see `TASKS.md` *Parking lot* |
 
 **A mobile client is not in this sequence** (Matt, 2026-08-28). It was going to
 be M14; it is on `TASKS.md`'s *Backburner* instead, because the desktop app has
 to be finished and used by real people before a second platform doubles the
-surface of every bug still in it.
+surface of every bug still in it. **M14 is now custom themes** (Matt,
+2026-08-31), which is V3 rather than V2: SPEC §6 carries the scope line and
+`TASKS.md` M14 carries the three things that have to be decided before any of it
+starts. The short version is that a theme is a list of token values rather than
+a stylesheet, §5.1's visual rules are not themeable, and if a theme can repaint
+the 16 name colours then the 4.5:1 contrast test has to move out of CI and into
+the app.
 
 Where search lives in the layout was Matt's and was answered on 2026-08-30 —
 a destination in the rail next to `media`, covering what people typed and the

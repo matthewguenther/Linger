@@ -556,6 +556,16 @@ says what replaced it: a status somebody typed.
 - Sandboxed client scripting (the real mIRC nostalgia answer; also a real security
   surface)
 - Custom emoji
+- **Custom themes** — a person's own colour scheme for the whole app, shared as a file
+  (Matt, 2026-08-31). It is the personalization thesis one size up from a styled name.
+  Three things bound it and none of them is settled: a theme is **a list of values, not
+  a stylesheet**, because the tokens in §5.3 are already that shape and a stylesheet is
+  the client-scripting security surface above wearing a different hat; §5.1's hard
+  visual rules are **not themeable**, because a design system a theme can switch off is
+  advice rather than a product; and if a theme can repaint the 16 name colours, the
+  4.5:1 contrast guarantee has to move with it, live, in front of whoever is making it.
+  A gallery inside the app is out — that is a store without prices, and §2 rules out
+  every payment surface. See `TASKS.md` M14.
 
 ---
 
