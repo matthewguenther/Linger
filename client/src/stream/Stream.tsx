@@ -56,9 +56,12 @@ import {
   deleteMessage,
   editMessage,
   enterRoom,
+  leaveWindow,
+  loadNewer,
   loadOlder,
   loadUntil,
   markRead,
+  openAround,
   openRoom,
   sendMessage,
   startedTyping,
@@ -112,6 +115,32 @@ const BOTTOM_MARGIN_PX = 48;
 
 /** How many people "since you were gone" names before it trails off. */
 const SINCE_NAMES = 5;
+
+/**
+ * How a jump to a message knows it has arrived.
+ *
+ * A virtualized row is an estimated height until it has been drawn, so a jump
+ * re-aims every frame. Knowing when to stop is the whole difficulty, and there
+ * are three parts to it because two of them are individually wrong.
+ *
+ * `STILL` frames of an unchanged aim is not enough on its own: at the moment a
+ * jump starts, *every* row is the same estimate, so the aim is perfectly stable
+ * and perfectly wrong, and it stays that way until the first measurements land.
+ * That is the bug this replaced — it settled in five frames on a list of
+ * guesses, and the real heights then pushed the message off the top.
+ *
+ * So the total measured height has to hold still as well, and `MIN` frames have
+ * to have passed. The floor is what covers the gap before measurements start
+ * arriving: they come from a ResizeObserver, which reports after a paint rather
+ * than on the frame clock, so the first few frames of any jump are a list that
+ * has not been measured at all.
+ *
+ * `MAX` is the seatbelt: about a second and a half, then the scrollbar goes
+ * back to whoever wants it.
+ */
+const JUMP_STILL_FRAMES = 5;
+const JUMP_MIN_FRAMES = 20;
+const JUMP_MAX_FRAMES = 90;
 
 /**
  * What a message row can ask the stream to do. The two that talk to the server
@@ -206,6 +235,10 @@ export default function Stream({
 
   const messages = stream?.messages;
   const atStart = stream?.atStart ?? false;
+  // False only while the room is showing a historical window — a search hit
+  // landed on with `openAround`. Everything that assumes "the bottom of this
+  // list is the newest thing said here" has to check it (SPEC §4.12).
+  const atEnd = stream?.atEnd ?? true;
   // Pinned when the room was opened and never moved after that, so the line
   // stays somewhere you can find your way back to (SPEC §4.2).
   const leftOff = gateway.leftOff[room.id] ?? null;
@@ -271,10 +304,17 @@ export default function Stream({
     if (rows.length === 0) return;
     if (landing.current.room !== room.id) landing.current = { room: room.id, done: false };
     if (landing.current.done) return;
+    // A room opened *at* a message is already where it was asked to be; the
+    // bottom of its window is six months ago and nobody asked to go there.
+    if (!atEnd) return;
 
     let frames = 0;
     let pending = 0;
     const step = (): void => {
+      // A jump marks the landing done the moment it starts (`jumpTo`). Two
+      // loops aiming at two different rows fight, and the one aiming at an
+      // eight-month-old message is the one the person asked for.
+      if (landing.current.done) return;
       virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
       const drawn = virtualizer.getVirtualItems();
       frames += 1;
@@ -288,7 +328,7 @@ export default function Stream({
     };
     pending = requestAnimationFrame(step);
     return () => cancelAnimationFrame(pending);
-  }, [room.id, rows.length, virtualizer]);
+  }, [room.id, rows.length, atEnd, virtualizer]);
 
   // Following a new message down is not one scroll, for the same reason
   // walking into a room is not: a row is an estimated height until it has been
@@ -304,7 +344,7 @@ export default function Stream({
   const lastKey = rows[rows.length - 1]?.key;
   useEffect(() => {
     const element = scroller.current;
-    if (!element || rows.length === 0 || !landing.current.done) return;
+    if (!element || rows.length === 0 || !landing.current.done || !atEnd) return;
     if (element.scrollHeight - element.scrollTop - element.clientHeight > element.clientHeight) {
       return;
     }
@@ -319,7 +359,20 @@ export default function Stream({
     };
     pending = requestAnimationFrame(step);
     return () => cancelAnimationFrame(pending);
-  }, [lastKey, rows.length, virtualizer]);
+  }, [lastKey, rows.length, atEnd, virtualizer]);
+
+  // The row index of every message, as of the last render. A jump re-aims over
+  // many frames while pages may still be arriving above it, so it has to look
+  // the row up *each frame* rather than hold the number it started with —
+  // one page loading in above the target moves every index below it.
+  const rowOfNow = useRef(rowOf);
+  rowOfNow.current = rowOf;
+
+  // Set while a jump is re-aiming. Backfill has to keep out of the way: a jump
+  // passes through the top of the list on its way, and a `loadOlder` fired from
+  // there prepends a page, moves the target, and starts the whole thing again —
+  // which walks a room all the way back to its first message.
+  const jumping = useRef(false);
 
   /**
    * You have read what you can see.
@@ -334,10 +387,13 @@ export default function Stream({
   const noteRead = useCallback(() => {
     const element = scroller.current;
     const newest = messages?.[messages.length - 1];
+    // The bottom of a historical window is not the bottom of the room, and
+    // marking it read would eat the line that says where you actually stopped.
+    if (!atEnd) return;
     if (!element || newest === undefined || !isLooking()) return;
     if (element.scrollHeight - element.scrollTop - element.clientHeight > BOTTOM_MARGIN_PX) return;
     markRead(api, room.id, newest.id);
-  }, [api, room.id, messages]);
+  }, [api, room.id, messages, atEnd]);
 
   useEffect(() => {
     noteRead();
@@ -348,8 +404,12 @@ export default function Stream({
   const backfill = useCallback(() => {
     noteRead();
     const element = scroller.current;
-    if (!element || element.scrollTop > BACKFILL_MARGIN_PX) return;
-    void loadOlder(api, room.id);
+    if (!element || jumping.current) return;
+    if (element.scrollTop <= BACKFILL_MARGIN_PX) void loadOlder(api, room.id);
+    // The other edge only exists inside a historical window, and reading to the
+    // bottom of one is how the room becomes whole again.
+    const below = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (below <= BACKFILL_MARGIN_PX) void loadNewer(api, room.id);
   }, [api, room.id, noteRead]);
 
   // Where "go to where you left off" goes.
@@ -372,10 +432,10 @@ export default function Stream({
   // anybody scrolls, or there is nothing to scroll.
   useEffect(() => {
     const element = scroller.current;
-    if (!element || !stream || stream.loading || stream.atStart) return;
-    if (element.scrollHeight - element.clientHeight <= BACKFILL_MARGIN_PX) {
-      void loadOlder(api, room.id);
-    }
+    if (!element || !stream || stream.loading || jumping.current) return;
+    if (element.scrollHeight - element.clientHeight > BACKFILL_MARGIN_PX) return;
+    if (!stream.atStart) void loadOlder(api, room.id);
+    else if (!stream.atEnd) void loadNewer(api, room.id);
   }, [api, room.id, stream]);
 
   const actions: Actions = useMemo(
@@ -391,9 +451,61 @@ export default function Stream({
       react: (message, key) => toggleReaction(api, message, key),
       remove: (message) => deleteMessage(api, message),
       jumpTo: (id) => {
-        const index = rowOf.get(id);
-        if (index === undefined) return;
-        virtualizer.scrollToIndex(index, { align: "center" });
+        if (rowOfNow.current.get(id) === undefined) return;
+        // The same re-aim walking into a room does, and for the same reason:
+        // every row above the target is an estimated height until it has been
+        // drawn, so one jump aims with guesses and lands near the message
+        // rather than on it. Each go corrects the rows it lands on, which moves
+        // the target, so keep jumping — once per frame, because the browser
+        // reports a scroll asynchronously and two jumps in one frame means the
+        // second one aims with the first one's stale numbers.
+        //
+        // Done is: the row is drawn, it is actually inside the viewport, and
+        // both the aim and the measured height of the list have held still for
+        // a run of frames — after a floor of frames that gives the first
+        // measurements time to arrive. See `JUMP_STILL_FRAMES` above for why
+        // each of those is there.
+        landing.current = { room: room.id, done: true };
+        jumping.current = true;
+        let frames = 0;
+        let still = 0;
+        let aim = -1;
+        let height = -1;
+        const step = (): void => {
+          const index = rowOfNow.current.get(id);
+          if (index === undefined) {
+            jumping.current = false;
+            return;
+          }
+          virtualizer.scrollToIndex(index, { align: "center" });
+          frames += 1;
+          const offset = virtualizer.scrollOffset ?? 0;
+          const total = virtualizer.getTotalSize();
+          still = offset === aim && total === height ? still + 1 : 0;
+          aim = offset;
+          height = total;
+
+          // On screen, not merely drawn: the virtualizer keeps a margin of
+          // rows either side of the viewport, so "drawn" includes rows nobody
+          // can see.
+          const row = virtualizer.getVirtualItems().find((one) => one.index === index);
+          const view = scroller.current;
+          const onScreen =
+            row !== undefined &&
+            view !== null &&
+            row.end - offset > 0 &&
+            row.start - offset < view.clientHeight;
+
+          const settled = onScreen && still >= JUMP_STILL_FRAMES && frames >= JUMP_MIN_FRAMES;
+          // The frame cap is a seatbelt, not a mechanism: a list that never
+          // settles has to give the scrollbar back rather than hold it forever.
+          if (settled || frames >= JUMP_MAX_FRAMES) {
+            jumping.current = false;
+            return;
+          }
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
         // The message you jumped to is somewhere in the middle of a screen of
         // other messages, so say which one it was. It fades on its own; there
         // is nothing to dismiss.
@@ -401,18 +513,28 @@ export default function Stream({
         window.setTimeout(() => setFlash((current) => (current === id ? null : current)), 1600);
       },
     }),
-    [api, rowOf, virtualizer],
+    [api, room.id, virtualizer],
   );
 
   /**
-   * Going to a message the media grid pointed at.
+   * Going to a message the media grid or a search hit pointed at.
    *
-   * It can be eight months old, which is the whole point of the collection, so
-   * the room is opened and then walked backwards until the message is inside
-   * the loaded range — `loadUntil` is the same reach "since you were gone"
-   * uses, and it stops at a thousand messages rather than pulling a year of
-   * history. `done` is how the hunt ends when it does not find it: without it,
-   * a message further back than that would leave the frame waiting forever.
+   * Two ways to get there, and which one is right depends on how far away it
+   * is. If the message is already loaded, or within a page or two of the
+   * newest, walking backwards is cheap and keeps the scrollback that is
+   * already on screen — that is `loadUntil`, the same reach "since you were
+   * gone" uses, and it stops at a thousand messages.
+   *
+   * Past that, walking is the wrong tool: a search hit six months back in a
+   * busy room is thousands of messages behind the newest, which is dozens of
+   * round trips for history nobody asked to read. So the room is re-opened
+   * *at* the message instead (`openAround`, PROTOCOL §4). That throws the
+   * loaded history away and leaves the room detached from the newest message
+   * until somebody reads forwards out of it, which is why it is the second
+   * choice rather than the first.
+   *
+   * `done` is how the hunt ends when it fails: without it, a message that no
+   * longer exists would leave the frame waiting forever.
    */
   const [hunting, setHunting] = useState<{ id: MessageId; done: boolean } | null>(null);
   useEffect(() => {
@@ -421,9 +543,10 @@ export default function Stream({
     setHunting({ id: focus, done: false });
     void (async () => {
       await openRoom(api, room.id);
-      await loadUntil(api, room.id, focus);
+      const reached = await loadUntil(api, room.id, focus);
+      if (!reached) await openAround(api, room.id, focus);
       if (alive) {
-        setHunting((held) => (held?.id === focus ? { id: focus, done: true } : held));
+        setHunting((current) => (current?.id === focus ? { id: focus, done: true } : current));
       }
     })();
     return () => {
@@ -473,7 +596,20 @@ export default function Stream({
           {who !== "" ? <span className="room-occupancy meta">· {who}</span> : null}
         </span>
         {room.topic ? <span className="room-topic meta">{room.topic}</span> : null}
-        {strayed ? (
+        {/* The way out of a historical window (SPEC §4.12). A room opened on a
+            search hit is showing February, and without this the only route back
+            to today is scrolling through everything in between. Reading
+            forwards to the bottom gets there too — this is the shortcut. */}
+        {atEnd ? null : (
+          <button
+            type="button"
+            className="since-pull meta"
+            onClick={() => void leaveWindow(api, room.id)}
+          >
+            back to the newest
+          </button>
+        )}
+        {strayed && atEnd ? (
           <button
             type="button"
             className="since-pull meta"

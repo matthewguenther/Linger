@@ -608,8 +608,8 @@ passes its check.
 | **M7** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
 | **M8** | Export | One archive contains every message and file, and it opens | 1 day |
 
-**V2 starts here.** Planned 2026-08-28. **M9 is built** (2026-08-29); the rest
-is not started. The order below is not SPEC §6's listing order: knock and search
+**V2 starts here.** Planned 2026-08-28. **M9 is built** (2026-08-29) and **M10
+is built** (2026-08-31); the rest is not started. The order below is not SPEC §6's listing order: knock and search
 are small and self-contained, and voice is the largest and riskiest thing in the
 project. V1's remaining work is still five things a person has to do by hand
 (`TASKS.md`, *Human checks*), and M9's check is a sixth.
@@ -617,7 +617,7 @@ project. V1's remaining work is still five things a person has to do by hand
 | # | Milestone | Done when | Estimate |
 |---|---|---|---|
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
-| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **the index and the endpoint landed 2026-08-30; the surface (T-1203) is what is left** |
+| **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **built: index and endpoint 2026-08-30, surface 2026-08-31. Its check passed in a running app** |
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
@@ -629,7 +629,13 @@ surface of every bug still in it.
 
 Where search lives in the layout was Matt's and was answered on 2026-08-30 —
 a destination in the rail next to `media`, covering what people typed and the
-names of files (SPEC §4.12). One decision is still open and blocks the work it
+names of files (SPEC §4.12). **Landing on a hit changed how the client holds
+history** (T-1203, [`docs/tasks/m10.md`](docs/tasks/m10.md)): a message six
+months back is thousands of pages behind the newest, so the messages endpoint
+grew `around=<id>` and a room can now be *behind its own newest message*. While
+it is, live message frames for that room are dropped rather than folded into
+history they do not join onto — an invisible gap is the one thing the message
+store must never produce. One decision is still open and blocks the work it
 belongs to: whether mobile push through Apple and Google is acceptable at all
 (whenever mobile comes back). It is in `TASKS.md`'s parking lot.
 

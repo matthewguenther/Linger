@@ -33,6 +33,7 @@ import type { RefreshResponse } from "../generated/RefreshResponse";
 import type { RegisterRequest } from "../generated/RegisterRequest";
 import type { Room } from "../generated/Room";
 import type { RoomId } from "../generated/RoomId";
+import type { SearchHit } from "../generated/SearchHit";
 import type { ServerInfo } from "../generated/ServerInfo";
 import type { SetupPreview } from "../generated/SetupPreview";
 import type { SetupRequest } from "../generated/SetupRequest";
@@ -210,6 +211,28 @@ export function mediaQuery(query: MediaQuery): string {
   if (query.limit !== undefined) parts.set("limit", String(query.limit));
   const text = parts.toString();
   return text === "" ? "" : `?${text}`;
+}
+
+/** What the search surface is asking for (PROTOCOL §6). */
+export interface SearchRequest {
+  /** Words, not a query language. Handed over exactly as typed. */
+  q: string;
+  room: RoomId | null;
+  author: UserId | null;
+  /** The last hit's `cursor` from the previous page. Opaque. */
+  before?: string | null;
+  limit?: number;
+}
+
+/** Built here rather than in the panel, so the query shape lives with the call. */
+export function searchQuery(query: SearchRequest): string {
+  const parts = new URLSearchParams();
+  parts.set("q", query.q);
+  if (query.room) parts.set("room_id", query.room);
+  if (query.author) parts.set("author_id", query.author);
+  if (query.before) parts.set("before", query.before);
+  if (query.limit !== undefined) parts.set("limit", String(query.limit));
+  return `?${parts.toString()}`;
 }
 
 /**
@@ -452,6 +475,20 @@ export class AuthedApi {
 
   unstarMedia(id: AttachmentId): Promise<void> {
     return this.delete(`/media/${encodeURIComponent(id)}/star`);
+  }
+
+  /**
+   * A page of search results (SPEC §4.12, PROTOCOL §6).
+   *
+   * `q` goes over as typed. The server pulls the words out of it and looks for
+   * all of them — there is no query language to build here, and quietly turning
+   * somebody's typing into operators is the thing SPEC §4.12 refuses.
+   *
+   * Newest first, always. Paging is keyset: hand the last hit's `cursor` back
+   * as `before`, untouched.
+   */
+  search(query: SearchRequest, signal?: AbortSignal): Promise<SearchHit[]> {
+    return this.get<SearchHit[]>(`/search${searchQuery(query)}`, signal);
   }
 
   /**

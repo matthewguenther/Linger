@@ -13,6 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Message } from "../generated/Message";
 import type { ReadyData } from "../generated/ReadyData";
 import type { Room } from "../generated/Room";
 import type { ServerFrame } from "../generated/ServerFrame";
@@ -56,6 +57,10 @@ const {
   dismissKnock,
   hasNewActivity,
   KNOCK_TTL_MS,
+  leaveWindow,
+  loadNewer,
+  openAround,
+  openRoom,
   send,
   serverState,
 } = await import("./gateway");
@@ -67,14 +72,52 @@ const WORK = "https://work.example";
  * Just enough of an `AuthedApi` for the store: the URL it is filed under, and
  * a token to hand the core. Nothing here makes an HTTP request.
  */
-function fakeApi(baseUrl: string): AuthedApi {
+function fakeApi(baseUrl: string, get?: (path: string) => unknown): AuthedApi {
   const stub = {
     baseUrl,
     accessToken: async () => ({ token: `token-${baseUrl}`, expiresAt: 0 }),
+    // Only the history tests hand one of these in. Everything else in the
+    // store talks to the core, not to HTTP.
+    get: async (path: string) => {
+      if (!get) throw new Error(`unexpected GET ${path}`);
+      return get(path);
+    },
   };
-  // The store only ever touches those two members; the cast is confined to
+  // The store only ever touches those few members; the cast is confined to
   // this helper rather than spread through the tests.
   return stub as unknown as AuthedApi;
+}
+
+/**
+ * A message id that sorts like a real one. Message ids are UUIDv7 and the
+ * store compares them as strings, so a zero-padded counter behaves the same
+ * way: `id(9) < id(10)`.
+ */
+function id(at: number): string {
+  return `m${String(at).padStart(6, "0")}`;
+}
+
+function message(at: number): Message {
+  return {
+    id: id(at),
+    room_id: "r-garage",
+    author_id: "u-matt",
+    body: `message ${at}`,
+    reply_to: null,
+    attachments: [],
+    reactions: [],
+    pinned_at: null,
+    edited_at: null,
+    deleted_at: null,
+    created_at: at,
+  };
+}
+
+/** Newest-first, the way every page from this endpoint arrives. */
+function pageOf(from: number, to: number): Message[] {
+  const out: Message[] = [];
+  for (let at = to; at >= from; at -= 1) out.push(message(at));
+  return out;
 }
 
 function person(id: string, name: string): User {
@@ -390,5 +433,153 @@ describe("knocks", () => {
     arrive(HOME, ready({ user: matt, users: [matt, callie] }));
 
     expect(serverState(HOME).knocks).toEqual([]);
+  });
+});
+
+/**
+ * A room opened *at* an old message (SPEC §4.12, T-1203).
+ *
+ * This is the half of search that can go wrong silently. A window six months
+ * back is not the newest page, and every live message that arrives while it is
+ * open would, if folded in, sit next to a message from months earlier with
+ * nothing between them and nothing to say so. A gap you cannot see is worse
+ * than a message that arrives a moment later, so the frames are dropped and
+ * reading forwards picks them up.
+ *
+ * There are 10,000 messages in the fake room, numbered 1 (oldest) to 10,000,
+ * which is the size the acceptance criterion names.
+ */
+describe("a room opened on a search hit", () => {
+  const NEWEST = 10_000;
+  /** Where the hit is: far from both ends, the case paging cannot reach. */
+  const HIT = 1_800;
+
+  /** The room, answering `before` / `around` the way the server does. */
+  function history(): (path: string) => Message[] {
+    return (path: string) => {
+      const url = new URL(`https://x${path}`);
+      const limit = Number(url.searchParams.get("limit") ?? "50");
+      const around = url.searchParams.get("around");
+      if (around !== null) {
+        const at = Number(around.slice(1));
+        const older = Math.ceil(limit / 2);
+        const newer = Math.floor(limit / 2);
+        // Each half capped on its own, neither borrowing from the other —
+        // which is what makes a short half a real edge (PROTOCOL §4).
+        return pageOf(Math.max(1, at - older + 1), Math.min(NEWEST, at + newer));
+      }
+      const before = url.searchParams.get("before");
+      const top = before === null ? NEWEST : Number(before.slice(1)) - 1;
+      return pageOf(Math.max(1, top - limit + 1), top);
+    };
+  }
+
+  beforeEach(async () => {
+    await disconnect(HOME);
+    invoked.length = 0;
+  });
+
+  it("lands on the message and knows it is not at the newest", async () => {
+    const api = fakeApi(HOME, history());
+    await connect(api);
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+
+    await openRoom(api, "r-garage");
+    // Opened the ordinary way: the newest page, attached to the live socket.
+    expect(serverState(HOME).streams["r-garage"]?.atEnd).toBe(true);
+
+    await openAround(api, "r-garage", id(HIT));
+    const stream = serverState(HOME).streams["r-garage"];
+    // The hit is here, in one request rather than eighty.
+    expect(stream?.messages.some((held) => held.id === id(HIT))).toBe(true);
+    // And the newest page it replaced is gone, rather than joined onto it.
+    expect(stream?.messages.some((held) => held.id === id(NEWEST))).toBe(false);
+    expect(stream?.atEnd).toBe(false);
+    expect(stream?.atStart).toBe(false);
+    // Oldest first, with no gaps: consecutive ids all the way across.
+    const ids = (stream?.messages ?? []).map((held) => held.id);
+    expect(ids).toEqual([...ids].sort());
+  });
+
+  it("drops a live message rather than leaving a hole in the window", async () => {
+    const api = fakeApi(HOME, history());
+    await connect(api);
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+    await openAround(api, "r-garage", id(HIT));
+
+    const fresh = message(NEWEST + 1);
+    arrive(HOME, { s: 2, op: "message.create", d: fresh } as ServerFrame);
+
+    const stream = serverState(HOME).streams["r-garage"];
+    expect(stream?.messages.some((held) => held.id === fresh.id)).toBe(false);
+    // But the room still counts as holding something new, because it does —
+    // that is tracked beside the history for exactly this reason.
+    expect(serverState(HOME).newest["r-garage"]).toBe(fresh.id);
+  });
+
+  it("still applies an edit to a message the window holds", async () => {
+    const api = fakeApi(HOME, history());
+    await connect(api);
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+    await openAround(api, "r-garage", id(HIT));
+
+    const edited = { ...message(HIT), body: "edited", edited_at: 1 };
+    arrive(HOME, { s: 2, op: "message.update", d: edited } as ServerFrame);
+
+    const held = serverState(HOME).streams["r-garage"]?.messages.find(
+      (one) => one.id === id(HIT),
+    );
+    expect(held?.body).toBe("edited");
+  });
+
+  it("reads forwards out of the window without skipping anything", async () => {
+    const api = fakeApi(HOME, history());
+    await connect(api);
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+    await openAround(api, "r-garage", id(HIT));
+
+    const before = serverState(HOME).streams["r-garage"];
+    const wasNewest = before?.messages[before.messages.length - 1]?.id;
+
+    await loadNewer(api, "r-garage");
+    const after = serverState(HOME).streams["r-garage"];
+    const ids = (after?.messages ?? []).map((held) => held.id);
+
+    // It moved forwards, it is still in order, and it is still contiguous —
+    // no id from the old end is missing and none was skipped past.
+    expect((ids[ids.length - 1] ?? "") > (wasNewest ?? "")).toBe(true);
+    expect(ids).toEqual([...ids].sort());
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain(wasNewest);
+    expect(after?.atEnd).toBe(false);
+  });
+
+  it("becomes whole again at the end of the room", async () => {
+    const api = fakeApi(HOME, history());
+    await connect(api);
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+    // A hit near the newest message: one read forwards reaches the end.
+    await openAround(api, "r-garage", id(NEWEST - 10));
+
+    expect(serverState(HOME).streams["r-garage"]?.atEnd).toBe(true);
+    // Which means live frames land again.
+    const fresh = message(NEWEST + 1);
+    arrive(HOME, { s: 2, op: "message.create", d: fresh } as ServerFrame);
+    expect(
+      serverState(HOME).streams["r-garage"]?.messages.some((held) => held.id === fresh.id),
+    ).toBe(true);
+  });
+
+  it("goes back to the newest when asked", async () => {
+    const api = fakeApi(HOME, history());
+    await connect(api);
+    arrive(HOME, ready({ user: person("u-matt", "Matt") }));
+    await openAround(api, "r-garage", id(HIT));
+
+    await leaveWindow(api, "r-garage");
+    const stream = serverState(HOME).streams["r-garage"];
+    expect(stream?.atEnd).toBe(true);
+    expect(stream?.messages.some((held) => held.id === id(NEWEST))).toBe(true);
+    expect(stream?.messages.some((held) => held.id === id(HIT))).toBe(false);
   });
 });

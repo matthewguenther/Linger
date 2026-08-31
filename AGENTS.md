@@ -257,15 +257,16 @@ M0 scaffold → M1 server REST → M2 gateway → M3 client shell
   → M4 presence/roster → M4.5 host controls + server list
   → M5 uploads/media → M6 styling/themes → M7 packaging → M8 export   ← V1, built
   → M9 knock                                                          ← V2, built
-  → M10 search                                       ← V2, server built; UI left
+  → M10 search                                                        ← V2, built
   → M11 DMs → M12 voice → M13 ambient voice                         ← V2, planned
   → backburner: entrance sounds (T-901…T-903), mobile (T-16xx)
 ```
 
 V1 is built. What is left of it is five things a person has to do by hand — see
-`TASKS.md`, *Human checks*. **M9 (knock) is built.** **M10 (search) has its
-index and its endpoint**; the surface is T-1203. The rest of V2 is planned and
-not started.
+`TASKS.md`, *Human checks*. **M9 (knock) and M10 (search) are built** — M10's
+notes are in `docs/tasks/m10.md`, and its second half changed how the client
+holds history, so read it before touching message loading. The rest of V2 is
+planned and not started.
 
 ---
 

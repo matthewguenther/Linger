@@ -133,6 +133,7 @@ inside the app — see `docs/decisions.md`.
 
 ```
 GET  /rooms/:id/messages?before=<id>&after=<id>&limit=<1..100>   → Message[]
+GET  /rooms/:id/messages?around=<id>&limit=<1..100>              → Message[]
 POST /rooms/:id/messages   { body, reply_to?, attachment_ids? }  → Message
 PATCH  /messages/:id       { body }                              → Message
 DELETE /messages/:id                                             → 204
@@ -144,6 +145,23 @@ DELETE /messages/:id/reactions/:key                              → 204
 
 `before`/`after` are message IDs, not timestamps. UUIDv7 sorts chronologically, so
 pagination is a range scan. Results are always newest-first.
+
+`around` is the same range scan run from the middle: it returns that message
+plus as much either side of it as `limit` allows — the older half carries the
+message itself and gets the odd one. **The two halves are capped separately and
+neither borrows from the other**, so a window near an edge comes back short
+rather than growing the other side. That is what makes each half readable on its
+own: fewer than `⌈limit/2⌉` at or before the message means the start of the
+room, and fewer than `⌊limit/2⌋` after it means the newest message. It exists for search (SPEC §4.12): a hit
+six months back is thousands of messages behind the newest, and reaching it by
+paging is dozens of round trips for history nobody asked to read. It cannot be
+combined with `before` or `after` (`VALIDATION_FAILED`), and a message that is
+not in the room named in the path is `NOT_FOUND`.
+
+A client holding a window from `around` is **not** at the newest message, and
+that is the thing to get right: folding a live message frame into it would
+leave a gap in the middle of the history with nothing to show that it is there.
+Read forwards to the end of the room, or open the room again.
 
 `body` is 1–8000 chars after trimming (`linger-core::limits::MAX_MESSAGE_CHARS`);
 empty or oversize bodies are `VALIDATION_FAILED` — **except** that a message
