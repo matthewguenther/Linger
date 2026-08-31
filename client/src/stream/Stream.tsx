@@ -49,6 +49,7 @@ import type { RoomId } from "../generated/RoomId";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
+import { dmLabel } from "../dm/dm";
 import { type Density } from "../lib/density";
 import { emptyRoom } from "../settings/copy";
 import {
@@ -233,6 +234,12 @@ export default function Stream({
     },
     [byHandle, me?.id],
   );
+
+  // What this conversation is called, in one place. A room is its slug with a
+  // `#`; a DM has no name of its own and is drawn by who is in it (SPEC §4.13)
+  // — its `slug` and `name` are generated and mean nothing.
+  const isDm = room.kind === "dm";
+  const title = isDm ? dmLabel(room, users, me?.id ?? null) : `#${room.slug}`;
 
   const messages = stream?.messages;
   const atStart = stream?.atStart ?? false;
@@ -593,7 +600,7 @@ export default function Stream({
     <main className="stream">
       <header className="stream-header">
         <span className="room-title">
-          <span className="room-name">#{room.slug}</span>
+          <span className="room-name">{title}</span>
           {who !== "" ? <span className="room-occupancy meta">· {who}</span> : null}
         </span>
         {room.topic ? <span className="room-topic meta">{room.topic}</span> : null}
@@ -646,7 +653,7 @@ export default function Stream({
         ref={scroller}
         onScroll={backfill}
         role="log"
-        aria-label={`messages in #${room.slug}`}
+        aria-label={isDm ? `messages with ${title}` : `messages in ${title}`}
         tabIndex={0}
       >
         {rows.length === 0 ? (
@@ -714,6 +721,8 @@ export default function Stream({
       <Composer
         api={api}
         room={room}
+        title={title}
+        isDm={isDm}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
         onEditLast={() => {
@@ -1224,12 +1233,17 @@ interface Pending {
 function Composer({
   api,
   room,
+  title,
+  isDm,
   replyTo,
   onClearReply,
   onEditLast,
 }: {
   api: AuthedApi;
   room: Room;
+  /** What this conversation is called — `#garage`, or the people in a DM. */
+  title: string;
+  isDm: boolean;
   replyTo: Message | null;
   onClearReply: () => void;
   onEditLast: () => void;
@@ -1441,8 +1455,14 @@ function Composer({
               attach(pasted);
             }
           }}
-          placeholder={replyTo ? "say something back" : `say something in #${room.slug}`}
-          aria-label={`message #${room.slug}`}
+          placeholder={
+            replyTo
+              ? "say something back"
+              : isDm
+                ? `say something to ${title}`
+                : `say something in ${title}`
+          }
+          aria-label={isDm ? `message ${title}` : `message in ${title}`}
           autoComplete="off"
         />
         <button

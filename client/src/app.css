@@ -312,6 +312,18 @@
 }
 
 /*
+ * Your DMs (SPEC §4.13). Between the rooms and the destinations, because a DM
+ * is neither: not one of the server's rooms, and not a place that is not a
+ * conversation. It shrinks before the destinations do for the same reason the
+ * room list does — `media` and `search` have to stay reachable.
+ */
+.rail-dms {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
  * `media` and `search`: places that are not rooms. A hairline above them is the
  * only thing separating them from the room list, which is the whole distinction
  * the rail needs to draw.

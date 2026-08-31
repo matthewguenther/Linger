@@ -192,7 +192,7 @@ async fn handshake(
                 users,
                 rooms,
                 dms,
-                presence: state.gateway.presence_snapshot(),
+                presence: state.gateway.presence_snapshot(user_id),
             };
             let frame = ServerFrame::sequenced(ServerEvent::Ready(ready), 0);
             sink.send(serde_json::to_string(&frame).ok()?).await.ok()?;

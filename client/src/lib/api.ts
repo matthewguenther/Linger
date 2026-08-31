@@ -13,6 +13,7 @@ import type { AttachmentId } from "../generated/AttachmentId";
 import type { AuthResponse } from "../generated/AuthResponse";
 import type { ChangePasswordRequest } from "../generated/ChangePasswordRequest";
 import type { CreateInviteRequest } from "../generated/CreateInviteRequest";
+import type { CreateDmRequest } from "../generated/CreateDmRequest";
 import type { CreateRoomRequest } from "../generated/CreateRoomRequest";
 import type { ErrorBody } from "../generated/ErrorBody";
 import type { ErrorCode } from "../generated/ErrorCode";
@@ -412,6 +413,31 @@ export class AuthedApi {
    *  and everything in it is still there. */
   archiveRoom(id: RoomId): Promise<Room> {
     return this.post<Room>(`/rooms/${encodeURIComponent(id)}/archive`);
+  }
+
+  // --- DMs (SPEC §4.13, PROTOCOL §3.1) --------------------------------------
+
+  /**
+   * The DMs you are in. `ready` already carries them, so this is for a client
+   * that wants them without a socket — nothing in the app calls it today, and
+   * it is here because the endpoint exists and a half-mapped API is worse than
+   * a mapped one.
+   */
+  dms(): Promise<Room[]> {
+    return this.get<Room[]>("/dms");
+  }
+
+  /**
+   * Open a DM with these people, or find the one that already exists.
+   *
+   * Create-*or-find*: asking twice for the same set of people gives the same
+   * room, so this is safe to call from a button somebody might press twice.
+   * `userIds` is everybody else — you are always in it and never name yourself
+   * (PROTOCOL §3.1).
+   */
+  openDm(userIds: UserId[]): Promise<Room> {
+    const request: CreateDmRequest = { user_ids: userIds };
+    return this.post<Room>("/dms", request);
   }
 
   /**

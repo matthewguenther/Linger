@@ -100,7 +100,18 @@ export interface GatewayState {
   /** Who the server says we are. Null until the first `ready`. */
   me: User | null;
   users: User[];
+  /** The server's rooms — the same list for everybody. */
   rooms: Room[];
+  /**
+   * The DMs you are in (SPEC §4.13), which is a different list for every
+   * person on the server.
+   *
+   * Kept apart from `rooms` because the wire keeps them apart, and the wire
+   * keeps them apart so that a surface drawing the server's rooms cannot draw
+   * somebody's private conversation by forgetting a filter. Mixing them here
+   * and filtering at each drawing site would hand that mistake straight back.
+   */
+  dms: Room[];
   presence: PresenceEntry[];
   /** Who is in each room, keyed by room id. */
   occupancy: Record<string, UserId[]>;
@@ -193,6 +204,7 @@ const EMPTY: GatewayState = {
   me: null,
   users: [],
   rooms: [],
+  dms: [],
   presence: [],
   occupancy: {},
   streams: {},
@@ -267,7 +279,7 @@ export function useServers(): Record<string, GatewayState> {
  * are not looking at gets a mark, never a number.
  */
 export function anyNewActivity(current: GatewayState): boolean {
-  return current.rooms.some(
+  return [...current.rooms, ...current.dms].some(
     (room) => room.archived_at === null && hasNewActivity(current, room.id),
   );
 }
@@ -452,6 +464,7 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         me: frame.d.user,
         users: frame.d.users,
         rooms: frame.d.rooms,
+        dms: frame.d.dms,
         presence: frame.d.presence,
         occupancy: occupancyFrom(frame.d.presence),
         streams: {},
@@ -464,7 +477,7 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         // `read` and `leftOff` survive: one is a copy of something the server
         // is holding for us, and the other is where this session started, which
         // a reconnect does not change.
-        newest: newestFrom(frame.d.rooms),
+        newest: newestFrom([...frame.d.rooms, ...frame.d.dms]),
       };
     case "presence.update": {
       const entry = frame.d;
@@ -514,7 +527,15 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
     case "room.create":
     case "room.update": {
       const room = frame.d;
-      return { ...current, rooms: upsert(current.rooms, room, (r) => r.id === room.id) };
+      // Which list it belongs in is the room's own answer, not the frame's.
+      // A DM's `room.create` only ever reaches its members (PROTOCOL §8), so
+      // arriving here at all means this one is ours — but it still goes in the
+      // list for its kind, because `rooms` is what the rail draws as the
+      // server's rooms and a DM is not one of them.
+      const same = (r: Room): boolean => r.id === room.id;
+      return room.kind === "dm"
+        ? { ...current, dms: upsert(current.dms, room, same) }
+        : { ...current, rooms: upsert(current.rooms, room, same) };
     }
     case "room.occupancy":
       return {
@@ -1014,6 +1035,23 @@ export async function loadUntil(
     if (stateOf(api.baseUrl).streams[roomId] === stream) return holds();
   }
   return holds();
+}
+
+/**
+ * Fold a DM the server just handed back into the snapshot (SPEC §4.13).
+ *
+ * `POST /dms` answers with the room *and* the server publishes `room.create`
+ * to its members, so this arrives twice by two routes. Merging by id makes
+ * that harmless, and doing both means the DM is on screen the instant the
+ * button was pressed rather than one round trip later — the same belt and
+ * braces `sendMessage` uses, for the same reason.
+ */
+export function noteDm(server: string, dm: Room): void {
+  const current = stateOf(server);
+  publish(server, {
+    ...current,
+    dms: upsert(current.dms, dm, (held) => held.id === dm.id),
+  });
 }
 
 /** Fetch the page before the oldest message held. Safe to call repeatedly. */

@@ -34,6 +34,7 @@ import type { AuthResponse } from "./generated/AuthResponse";
 import type { RoomId } from "./generated/RoomId";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { User } from "./generated/User";
+import type { UserId } from "./generated/UserId";
 import HostPanel, { type HostSection } from "./host/HostPanel";
 import KnockCards from "./knock/KnockCards";
 import type { MessageId } from "./generated/MessageId";
@@ -60,10 +61,12 @@ import {
   hasNewActivity,
   loadNotifyRules,
   loadReadMarkers,
+  noteDm,
   statusText,
   useGateway,
   useServers,
 } from "./lib/gateway";
+import { dmLabel, noDms, orderDms } from "./dm/dm";
 import { useNarrow } from "./lib/layout";
 import { hostOf } from "./lib/link";
 import { personStyle } from "./lib/names";
@@ -368,9 +371,17 @@ function Console({
   const rooms = [...gateway.rooms]
     .filter((room) => room.archived_at === null)
     .sort((a, b) => a.position - b.position);
-  // Land in the first room, and don't hold a room that was archived or that
-  // this account can no longer see.
-  const open = rooms.find((room) => room.id === openRoomIds[active.baseUrl]) ?? rooms[0] ?? null;
+  // Your DMs (SPEC §4.13). Kept apart from `rooms` all the way from the wire,
+  // and drawn as its own section — a DM is not one of the server's rooms and
+  // putting it in that list would be the first step towards it being treated
+  // as one.
+  const dms = orderDms(gateway.dms, (room) => hasNewActivity(gateway, room.id));
+  // Everything the stream can be opened on. Land in the first room, and don't
+  // hold a room that was archived, a DM you are no longer in, or anything this
+  // account can no longer see.
+  const openable = [...rooms, ...dms];
+  const open =
+    openable.find((room) => room.id === openRoomIds[active.baseUrl]) ?? rooms[0] ?? null;
 
   // Nothing interrupts you about the room you are already reading, and you are
   // only ever standing in one room — switching servers takes you out of the
@@ -392,7 +403,34 @@ function Console({
 
   // One roster, in one of two places. Rendering it twice and hiding one would
   // mean two of everything it holds — two open cards, two scroll positions.
-  const roster = <Roster api={api} rooms={rooms} layout={narrow ? "strip" : "column"} />;
+  /**
+   * Open a DM with somebody, from their card in the roster (SPEC §4.13).
+   *
+   * Create-or-find on the server, so this is the same call whether the
+   * conversation is new or eight months old — there is no "start" and "open" to
+   * tell apart, on this side or the other. The room the server hands back is
+   * folded in here rather than waited for on the socket: its `room.create`
+   * arrives too, and the store merges by id, but the button should not feel
+   * like it did nothing while a frame is in flight.
+   */
+  const openDm = useCallback(
+    async (userId: UserId): Promise<void> => {
+      const dm = await api.openDm([userId]);
+      noteDm(api.baseUrl, dm);
+      setOpenRoomIds((held) => ({ ...held, [api.baseUrl]: dm.id }));
+      closePanels();
+    },
+    [api, closePanels],
+  );
+
+  const roster = (
+    <Roster
+      api={api}
+      rooms={rooms}
+      layout={narrow ? "strip" : "column"}
+      onOpenDm={openDm}
+    />
+  );
 
   // `ready` is the fresher answer about who we are; the stored session is what
   // we have before it arrives. Neither is the lock — every host endpoint checks
@@ -514,6 +552,49 @@ function Console({
                     <RoomStack
                       people={occupantsOf(
                         room.id,
+                        gateway.occupancy,
+                        gateway.presence,
+                        gateway.users,
+                      )}
+                    />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="rail-section rail-dms">
+          {/* SPEC §4.13. Under the rooms because a DM is not one of the
+              server's rooms — it is yours, and everybody's list here is
+              different. A DM holding something new gets the same weight change
+              a room gets and nothing else: no number, no dot, no colour, no
+              matter how urgent a DM feels (AGENTS rule 3). */}
+          <div className="rail-head">
+            <h2 className="panel-label">direct</h2>
+          </div>
+          {dms.length === 0 ? (
+            <p className="placeholder">{noDms()}</p>
+          ) : (
+            <ul className="room-list">
+              {dms.map((dm) => (
+                <li key={dm.id}>
+                  <button
+                    type="button"
+                    className="room-item"
+                    aria-current={dm.id === open?.id ? "true" : undefined}
+                    data-new={hasNewActivity(gateway, dm.id) ? "true" : undefined}
+                    onClick={() => {
+                      setOpenRoomIds((held) => ({ ...held, [active.baseUrl]: dm.id }));
+                      closePanels();
+                    }}
+                  >
+                    {/* No `#`: a DM is not a channel, it is who is in it. */}
+                    <span className="room-slug">
+                      {dmLabel(dm, gateway.users, gateway.me?.id ?? null)}
+                    </span>
+                    <RoomStack
+                      people={occupantsOf(
+                        dm.id,
                         gateway.occupancy,
                         gateway.presence,
                         gateway.users,

@@ -109,17 +109,24 @@ inverts the priority. **People are the primary surface, not a gutter.**
 │  #garage │  Matt     9:31                     │ │ Blender     │ │
 │  #shop   │  │ yeah, mounting it now           │ │ ♪ Bill Evans│ │
 │          │  │ [img]                           │ └─────────────┘ │
-│  media   │                                    │ ┌─────────────┐ │
-│  search  │                                    │ │○ Jen        │ │
-│          │  ┌──────────────────────────────┐  │ │ 2h · "back  │ │
-│          │  │ say something                │  │ │ after work" │ │
+│ DIRECT   │                                    │ ┌─────────────┐ │
+│  Callie  │                                    │ │○ Jen        │ │
+│  Dave,   │  ┌──────────────────────────────┐  │ │ 2h · "back  │ │
+│   Jen    │  │ say something                │  │ │ after work" │ │
 │          │  └──────────────────────────────┘  │ └─────────────┘ │
+│  media   │                                    │                 │
+│  search  │                                    │                 │
 └──────────┴────────────────────────────────────┴─────────────────┘
 ```
 
 **`media` and `search` are destinations, not rooms.** They sit under the room list
 and open in place of the message stream. Anything that is a place but is not a room
 goes there; nothing floats over the stream.
+
+**`DIRECT` is your DMs** (§4.13), between the rooms and the destinations. It is a
+different list for every person on the server, and each one is named by who is in it
+rather than by a slug — a DM has no name of its own. A DM holding something new gets
+the same weight change a room gets and nothing else (§4.2).
 
 **The roster (right) is a card stack, not a name list.** Each card shows: name in the
 user's own styling, presence dot, which room they are in, and their status. Offline

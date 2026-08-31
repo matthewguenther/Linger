@@ -577,6 +577,55 @@ async fn presence_in_a_dm_is_redacted_rather_than_withheld() {
     );
 }
 
+/// The `ready` frame is a frame like any other, and it was not being filtered
+/// like one. Found while building T-1302: the live `presence.update` path goes
+/// through `visible_to` and the snapshot did not, so a client connecting *while*
+/// somebody stood in a DM was handed that DM's id in its very first frame.
+///
+/// The order here is the whole test — the stranger connects **after** the DM is
+/// already occupied, which is the case the live path never covers.
+#[tokio::test]
+async fn the_ready_snapshot_is_redacted_like_every_other_frame() {
+    let (server, host, _room) = common::server_with_room("garage").await;
+    let (callie, dave) = three_people(&server, &host).await;
+    let dm = dm_with(&server, &host.access_token, &[&callie.user.id.to_string()]).await;
+
+    // The host goes and stands in the DM first.
+    let (mut host_ws, _) = connect_ready(&server, &host.access_token).await;
+    send_json(
+        &mut host_ws,
+        json!({ "op": "room.focus", "d": { "room_id": dm.id.to_string() } }),
+    )
+    .await;
+    tokio::time::sleep(SETTLE).await;
+
+    // Now a stranger arrives and gets the snapshot.
+    let (_dave_ws, dave_ready) = connect_ready(&server, &dave.access_token).await;
+    let presence = dave_ready["presence"]
+        .as_array()
+        .expect("presence snapshot");
+    let host_entry = presence
+        .iter()
+        .find(|e| e["user_id"] == json!(host.user.id.to_string()))
+        .expect("a stranger still sees that somebody is around");
+    assert_eq!(
+        host_entry["room_id"],
+        Value::Null,
+        "the ready snapshot handed a stranger a DM's id"
+    );
+
+    // A member's snapshot still says where, so this is a filter and not a
+    // blanket blanking.
+    let (_callie_ws, callie_ready) = connect_ready(&server, &callie.access_token).await;
+    let seen = callie_ready["presence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["user_id"] == json!(host.user.id.to_string()))
+        .expect("a member sees the host");
+    assert_eq!(seen["room_id"], json!(dm.id.to_string()));
+}
+
 #[tokio::test]
 async fn an_outsider_cannot_stand_in_a_dm_or_type_in_it() {
     let (server, host, _room) = common::server_with_room("garage").await;
