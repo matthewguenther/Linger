@@ -83,10 +83,12 @@
   text-overflow: ellipsis;
 }
 
-/* Density lives in the room header (you change it while looking at a room)
-   and also in settings, so it is findable without a room (T-411). */
+/* A small segmented control: density and theme both use it, and both live in
+   settings and nowhere else (T-904). It sat in the room header until
+   2026-08-31, which is where the `margin-left: auto` that used to be here came
+   from — it pinned the control to the right of the room name. Nothing pins it
+   now. */
 .density {
-  margin-left: auto;
   display: flex;
   gap: 2px;
 }
@@ -296,8 +298,32 @@
   user-select: none;
 }
 
+/*
+ * The room list gives up its space before anything else does, because the two
+ * destinations under it (SPEC §3) have to stay reachable — a rail with thirty
+ * rooms in it must not push `media` and `search` off the bottom. `min-height: 0`
+ * is what lets a flex child scroll at all: without it the default `auto` floor
+ * is the content's full height and there is nothing to scroll.
+ */
 .rail-rooms {
-  flex: 1;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * `media` and `search`: places that are not rooms. A hairline above them is the
+ * only thing separating them from the room list, which is the whole distinction
+ * the rail needs to draw.
+ */
+.rail-places {
+  display: flex;
+  flex-direction: column;
+  /* Full-bleed, like every other hairline in the app: the rule crosses the
+     rail rather than floating inside its gutter. */
+  margin: 0 calc(var(--gutter) * -1);
+  padding: calc(var(--gutter) * 0.75) var(--gutter) 0;
+  border-top: 1px solid var(--hairline);
 }
 
 /* A section heading with the host's control for that section beside it. The
@@ -476,8 +502,14 @@
   color: var(--text-primary);
 }
 
-/* The third of accent's four jobs: the active-room rule (SPEC §5.3). */
-.room-item[aria-current="true"] {
+/* The third of accent's four jobs: the active-room rule (SPEC §5.3). The
+   destinations under the room list get the same mark when they are the thing
+   on screen — `media` and `search` take the stream column exactly as a room
+   does, so "where am I" has to be answerable the same way. They say it with
+   `aria-pressed` rather than `aria-current`, because they are a surface being
+   held open, not a place in a list. */
+.room-item[aria-current="true"],
+.room-item[aria-pressed="true"] {
   border-left-color: var(--accent);
   color: var(--text-primary);
 }
@@ -490,6 +522,7 @@
  */
 .room-item[data-new="true"],
 .room-item[aria-current="true"],
+.room-item[aria-pressed="true"],
 .room-item:hover {
   opacity: 1;
 }

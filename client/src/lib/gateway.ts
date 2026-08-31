@@ -78,6 +78,19 @@ export interface RoomStream {
   messages: Message[];
   /** True once the oldest message held is the oldest the server has. */
   atStart: boolean;
+  /**
+   * True when the newest message held is the newest the server has — which is
+   * every room the ordinary way in, and *not* a room opened on a search hit
+   * six months back (`openAround`).
+   *
+   * It is what makes a detached window safe. A live `message.create` folded
+   * into a window that stops in February would sit next to a message from
+   * eight months earlier with nothing between them and nothing to say so, and
+   * an invisible gap is worse than a message that arrives when you scroll back
+   * down to where it belongs. So frames are dropped while this is false, and
+   * `loadNewer` reads forwards until the room is whole again.
+   */
+  atEnd: boolean;
   /** A page is in flight; stops the same backfill firing twice. */
   loading: boolean;
 }
@@ -511,10 +524,19 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
     case "message.create":
     case "message.update": {
       const message = frame.d;
-      let next = withStream(current, message.room_id, (stream) => ({
-        ...stream,
-        messages: mergeMessage(stream.messages, message),
-      }));
+      let next = withStream(current, message.room_id, (stream) =>
+        // A room showing a historical window (a search hit, `openAround`) is
+        // not at the newest message, so a new one does not join onto what it
+        // holds — folding it in would put August next to February with nothing
+        // between them and nothing to say so. It is dropped, the same way a
+        // frame for a room nobody has opened is, and reading forwards
+        // (`loadNewer`) picks it up in its place. An *update* to a message
+        // already in the window is a different thing and still lands: it
+        // changes a message that is there rather than adding one that is not.
+        !stream.atEnd && !stream.messages.some((held) => held.id === message.id)
+          ? stream
+          : { ...stream, messages: mergeMessage(stream.messages, message) },
+      );
       // Rooms nobody has opened have no stream to fold this into, and they are
       // exactly the rooms whose label has to change weight. So the newest id is
       // tracked separately from the history.
@@ -802,6 +824,12 @@ function putStream(server: string, roomId: RoomId, stream: RoomStream): void {
   publish(server, { ...current, streams: { ...current.streams, [roomId]: stream } });
 }
 
+/**
+ * Fetch the page before `from` and fold it in.
+ *
+ * A short answer is the start of the room: the range scan ran out before the
+ * limit did.
+ */
 async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | null): Promise<void> {
   const server = api.baseUrl;
   const room = encodeURIComponent(roomId);
@@ -819,11 +847,66 @@ async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | nul
   const stream = stateOf(server).streams[roomId];
   if (linkFor(api) === null || !stream) return;
   putStream(server, roomId, {
+    ...stream,
     messages: mergePage(stream.messages, page),
     // A short page means the range scan ran out of room: this is the beginning.
     atStart: page.length < PAGE_SIZE,
     loading: false,
   });
+}
+
+/** How the halves of an `around` window are split, mirroring the server. */
+const WINDOW_OLDER = Math.ceil(PAGE_SIZE / 2);
+const WINDOW_NEWER = Math.floor(PAGE_SIZE / 2);
+
+/**
+ * Fetch the window centred on `around` (PROTOCOL §4) and fold it in.
+ *
+ * `replace` is the difference between landing on a search hit and reading
+ * forwards out of one. Landing throws the loaded history away, because a
+ * February window merged into an August one leaves a hole in the middle with
+ * nothing to show that it is there. Reading forwards keeps it, because the two
+ * overlap by construction: the window is centred on a message already held, so
+ * its older half is history we have and its newer half is the next stretch,
+ * with no room for a gap between them.
+ *
+ * Reading forwards this way costs half a page of messages already held. That is
+ * the price of never producing a gap, and it is worth paying: `after` on this
+ * endpoint answers newest-first, so it hands back the *newest* hundred messages
+ * after a point rather than the next hundred — which is exactly the gap.
+ */
+async function fetchWindow(
+  api: AuthedApi,
+  roomId: RoomId,
+  around: MessageId,
+  replace: boolean,
+): Promise<boolean> {
+  const server = api.baseUrl;
+  const room = encodeURIComponent(roomId);
+  let page: Message[];
+  try {
+    page = await api.get<Message[]>(
+      `/rooms/${room}/messages?around=${encodeURIComponent(around)}&limit=${PAGE_SIZE}`,
+    );
+  } catch {
+    const stream = stateOf(server).streams[roomId];
+    if (linkFor(api) !== null && stream) putStream(server, roomId, { ...stream, loading: false });
+    return false;
+  }
+  const stream = stateOf(server).streams[roomId];
+  if (linkFor(api) === null || !stream) return false;
+
+  // Each half is capped on its own and neither borrows from the other, so a
+  // short half is a real edge rather than an artefact of the limit.
+  const older = page.filter((held) => held.id <= around).length;
+  const newer = page.filter((held) => held.id > around).length;
+  putStream(server, roomId, {
+    messages: replace ? [...page].sort(byId) : mergePage(stream.messages, page),
+    atStart: replace ? older < WINDOW_OLDER : stream.atStart || older < WINDOW_OLDER,
+    atEnd: newer < WINDOW_NEWER,
+    loading: false,
+  });
+  return true;
 }
 
 /**
@@ -838,8 +921,56 @@ async function fetchPage(api: AuthedApi, roomId: RoomId, before: MessageId | nul
  */
 export async function openRoom(api: AuthedApi, roomId: RoomId): Promise<void> {
   if (linkFor(api) === null || stateOf(api.baseUrl).streams[roomId]) return;
-  putStream(api.baseUrl, roomId, { messages: [], atStart: false, loading: true });
+  putStream(api.baseUrl, roomId, { messages: [], atStart: false, atEnd: true, loading: true });
   await fetchPage(api, roomId, null);
+}
+
+/**
+ * Open a room *at* one message rather than at its newest (SPEC §4.12).
+ *
+ * This is how a search hit is landed on, and paging backwards cannot do it: a
+ * hit six months back in a busy room is thousands of messages behind the newest
+ * one, which is dozens of round trips for history nobody asked to read.
+ *
+ * While the window is behind the newest message the room is *detached*:
+ * `atEnd` is false, live frames for it are dropped rather than folded into a
+ * history they do not join onto, and `loadNewer` reads forwards until the room
+ * is whole again. `openRoom` after that does nothing, because the room is
+ * already loaded — going back to the newest means dropping the room first,
+ * which is what `leaveWindow` is for.
+ */
+export async function openAround(
+  api: AuthedApi,
+  roomId: RoomId,
+  around: MessageId,
+): Promise<void> {
+  if (linkFor(api) === null) return;
+  putStream(api.baseUrl, roomId, {
+    messages: [],
+    atStart: false,
+    atEnd: false,
+    loading: true,
+  });
+  const landed = await fetchWindow(api, roomId, around, true);
+  // The message is gone, or the server is. Either way the room is better off
+  // showing its newest page than an empty window nobody can get out of.
+  if (!landed) await leaveWindow(api, roomId);
+}
+
+/**
+ * Give up a historical window and open the room at its newest message again.
+ *
+ * Dropping the stream first is the whole of it: `openRoom` returns early for a
+ * room that is already loaded, which is what keeps scrollback when you switch
+ * rooms, and is exactly wrong here.
+ */
+export async function leaveWindow(api: AuthedApi, roomId: RoomId): Promise<void> {
+  if (linkFor(api) === null) return;
+  const current = stateOf(api.baseUrl);
+  const streams = { ...current.streams };
+  delete streams[roomId];
+  publish(api.baseUrl, { ...current, streams });
+  await openRoom(api, roomId);
 }
 
 /**
@@ -857,18 +988,32 @@ const MAX_CATCHUP_PAGES = 10;
  * than one page: the "you left off here" line can only be drawn once the client
  * holds the message on *both* sides of it, or it would be marking the top of a
  * page rather than the place you stopped.
+ *
+ * Answers whether the room now actually holds that message. A caller that has
+ * somewhere else to go when walking does not reach — a search hit thousands of
+ * messages back — needs to know the difference between "it is here" and "I ran
+ * out of pages", and "the oldest message held is older than it" is not the same
+ * answer: a deleted or moved id passes that test and is still not there.
  */
-export async function loadUntil(api: AuthedApi, roomId: RoomId, id: MessageId): Promise<void> {
+export async function loadUntil(
+  api: AuthedApi,
+  roomId: RoomId,
+  id: MessageId,
+): Promise<boolean> {
+  const holds = (): boolean =>
+    stateOf(api.baseUrl).streams[roomId]?.messages.some((held) => held.id === id) ?? false;
+
   for (let page = 0; page < MAX_CATCHUP_PAGES; page += 1) {
     const stream = stateOf(api.baseUrl).streams[roomId];
-    if (linkFor(api) === null || !stream || stream.atStart) return;
+    if (linkFor(api) === null || !stream || stream.atStart) return holds();
     const oldest = stream.messages[0];
-    if (oldest !== undefined && oldest.id <= id) return;
+    if (oldest !== undefined && oldest.id <= id) return holds();
     await loadOlder(api, roomId);
     // `loadOlder` declines while a page is already in flight. Nothing changed,
     // so asking again in a tight loop would only spin.
-    if (stateOf(api.baseUrl).streams[roomId] === stream) return;
+    if (stateOf(api.baseUrl).streams[roomId] === stream) return holds();
   }
+  return holds();
 }
 
 /** Fetch the page before the oldest message held. Safe to call repeatedly. */
@@ -878,6 +1023,22 @@ export async function loadOlder(api: AuthedApi, roomId: RoomId): Promise<void> {
   const oldest = stream.messages[0];
   putStream(api.baseUrl, roomId, { ...stream, loading: true });
   await fetchPage(api, roomId, oldest?.id ?? null);
+}
+
+/**
+ * Read forwards out of a historical window. Safe to call repeatedly.
+ *
+ * Only a room opened on a search hit is ever behind the newest message, so this
+ * does nothing in the ordinary case: `atEnd` is true from the moment a room is
+ * opened the usual way, and stays true.
+ */
+export async function loadNewer(api: AuthedApi, roomId: RoomId): Promise<void> {
+  const stream = stateOf(api.baseUrl).streams[roomId];
+  if (linkFor(api) === null || !stream || stream.loading || stream.atEnd) return;
+  const newest = stream.messages[stream.messages.length - 1];
+  if (newest === undefined) return;
+  putStream(api.baseUrl, roomId, { ...stream, loading: true });
+  await fetchWindow(api, roomId, newest.id, false);
 }
 
 /**
@@ -908,6 +1069,14 @@ export async function sendMessage(
   const message = await api.post<Message>(path, request);
   const stream = stateOf(api.baseUrl).streams[roomId];
   if (linkFor(api) === null || !stream) return;
+  // Saying something out of a historical window puts you back at the newest
+  // message. It cannot be folded into a February window — that is the gap this
+  // store must never produce — and the alternative is a message you just sent
+  // that does not appear anywhere.
+  if (!stream.atEnd) {
+    await leaveWindow(api, roomId);
+    return;
+  }
   putStream(api.baseUrl, roomId, { ...stream, messages: mergeMessage(stream.messages, message) });
 }
 

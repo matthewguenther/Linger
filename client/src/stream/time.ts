@@ -110,6 +110,20 @@ export function fullTime(at: number): string {
 }
 
 /**
+ * Date and time on one line, for a search hit (SPEC §4.12).
+ *
+ * Shorter than `fullTime`, which spells the weekday out and is a tooltip's
+ * worth of words. A result line already carries a name, a room and a snippet;
+ * the date has to fit beside them and still say which year.
+ */
+export function hitTime(at: number): string {
+  return new Date(at).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+/**
  * How opaque a message body is, by age (SPEC §5.6). Scrolling up should feel
  * like walking into the past, and the floor is 78% — old is not unreadable.
  */

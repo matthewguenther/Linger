@@ -75,6 +75,7 @@ import { forgetPreviews } from "./lib/previews";
 import { checkForUpdate } from "./lib/updates";
 import { forgetNotifications, resetNotifications, setViewing } from "./notify/notify";
 import Roster from "./roster/Roster";
+import SearchPanel from "./search/SearchPanel";
 import Stream from "./stream/Stream";
 import "./app.css";
 
@@ -227,6 +228,11 @@ function Console({
   // The media collection (T-504). A destination in the rail, not a search
   // result (SPEC §4.4) — it takes the stream column like the other panels.
   const [mediaOpen, setMediaOpen] = useState(false);
+  // Search (T-1203), the other destination. Same column, same pattern.
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Bumped on every Ctrl/Cmd+K. The panel is already open on the second press,
+  // so this is what puts the cursor back in the box rather than a remount.
+  const [searchFocus, setSearchFocus] = useState(0);
   // A message the collection pointed at, on its way to the stream that holds
   // it. Cleared once that stream has been and looked.
   const [jumpTo, setJumpTo] = useState<MessageId | null>(null);
@@ -244,12 +250,21 @@ function Console({
   const server = info[active.baseUrl] ?? null;
   const gateway = useGateway(active.baseUrl);
 
-  const closePanels = (): void => {
+  // Stable, because the keyboard shortcut below holds them in an effect.
+  // Every setter React hands back is stable, so the empty dependency list is
+  // the truth rather than a shortcut.
+  const closePanels = useCallback((): void => {
     setHostSection(null);
     setSettingsOpen(false);
     setAddingServer(false);
     setMediaOpen(false);
-  };
+    setSearchOpen(false);
+  }, []);
+  const openSearch = useCallback((): void => {
+    closePanels();
+    setSearchOpen(true);
+    setSearchFocus((held) => held + 1);
+  }, [closePanels]);
   const openMedia = (): void => {
     closePanels();
     setMediaOpen(true);
@@ -291,6 +306,28 @@ function Console({
       open = false;
     };
   }, []);
+
+  /**
+   * `Ctrl`/`Cmd`+`K` (SPEC §4.12).
+   *
+   * A way *into* the search destination, never a second surface: it opens the
+   * same panel the rail opens and puts the cursor in its box. Pressed again
+   * while it is open, it re-focuses the box rather than toggling the panel shut
+   * — somebody reaching for the shortcut is reaching for the box.
+   *
+   * Not excluded from the composer on purpose. A shortcut that stops working
+   * where people spend their time is a shortcut nobody learns.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== "k" || event.altKey) return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      event.preventDefault();
+      openSearch();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openSearch]);
 
   useEffect(() => {
     applyDensity(density);
@@ -439,19 +476,6 @@ function Console({
           </div>
           <p className="rail-server">{server?.name ?? hostOf(active.baseUrl)}</p>
         </section>
-        <section className="rail-section">
-          {/* SPEC §4.4: a first-class destination, not something you find by
-              searching. It sits above the rooms because it is *of* the server
-              rather than in one — everything anybody has shared, in one place. */}
-          <button
-            type="button"
-            className="room-item"
-            aria-pressed={mediaOpen}
-            onClick={() => (mediaOpen ? setMediaOpen(false) : openMedia())}
-          >
-            <span className="room-slug">media</span>
-          </button>
-        </section>
         <section className="rail-section rail-rooms">
           <div className="rail-head">
             <h2 className="panel-label">rooms</h2>
@@ -500,6 +524,29 @@ function Console({
               ))}
             </ul>
           )}
+        </section>
+        <section className="rail-section rail-places">
+          {/* The two destinations (SPEC §3): places that are not rooms. They
+              sit under the room list and open in place of the message stream,
+              so nothing in this app ever floats over the conversation.
+              `media` is everything anybody has shared (SPEC §4.4); `search`
+              is everything anybody said (SPEC §4.12). */}
+          <button
+            type="button"
+            className="room-item"
+            aria-pressed={mediaOpen}
+            onClick={() => (mediaOpen ? setMediaOpen(false) : openMedia())}
+          >
+            <span className="room-slug">media</span>
+          </button>
+          <button
+            type="button"
+            className="room-item"
+            aria-pressed={searchOpen}
+            onClick={() => (searchOpen ? setSearchOpen(false) : openSearch())}
+          >
+            <span className="room-slug">search</span>
+          </button>
         </section>
       </aside>
 
@@ -557,6 +604,20 @@ function Console({
           roster={narrow ? roster : undefined}
           expiryDays={server?.file_expiry_days}
         />
+      ) : searchOpen ? (
+        <SearchPanel
+          api={api}
+          users={gateway.users}
+          rooms={rooms}
+          focusNonce={searchFocus}
+          onOpen={(roomId, messageId) => {
+            setOpenRoomIds((held) => ({ ...held, [active.baseUrl]: roomId }));
+            setJumpTo(messageId);
+            closePanels();
+          }}
+          onClose={() => setSearchOpen(false)}
+          roster={narrow ? roster : undefined}
+        />
       ) : host !== null ? (
         <HostPanel
           api={api}
@@ -601,7 +662,6 @@ function Console({
           room={open}
           users={gateway.users}
           density={density}
-          onDensityChange={setDensity}
           focus={jumpTo}
           onFocused={forgetJump}
           roster={narrow ? roster : undefined}

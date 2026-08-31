@@ -136,6 +136,60 @@ pub async fn page(
     Ok(messages)
 }
 
+/// A window of messages centred on one of them, for landing on a search hit
+/// (SPEC §4.12, PROTOCOL §4).
+///
+/// Paging backwards cannot do this job. A hit six months back in a busy room is
+/// thousands of messages behind the newest one, and walking there a page at a
+/// time is dozens of round trips for history nobody asked to read. So the
+/// window is fetched directly: the message itself, then as much either side of
+/// it as `limit` allows.
+///
+/// Both halves are their own range scan on the same index the stream uses, and
+/// the answer comes back newest-first like every other page from this endpoint,
+/// so a client folds it in the way it folds any other.
+///
+/// The older half carries the target (`id <= around`) and gets the odd one when
+/// `limit` is odd, because scrollback above a message is what gives it context
+/// and the newer half is what a reader scrolls into next anyway.
+pub async fn window(
+    db: &SqlitePool,
+    config: &Config,
+    room_id: RoomId,
+    around: MessageId,
+    limit: u32,
+) -> Result<Vec<Message>, ApiError> {
+    let newer = limit / 2;
+    let older = limit - newer;
+
+    let sql = "SELECT * FROM (
+                 SELECT * FROM messages WHERE room_id = ? AND id <= ? ORDER BY id DESC LIMIT ?
+               )
+               UNION ALL
+               SELECT * FROM (
+                 SELECT * FROM messages WHERE room_id = ? AND id > ? ORDER BY id ASC LIMIT ?
+               )
+               ORDER BY id DESC";
+
+    let rows = sqlx::query(sql)
+        .bind(room_id.to_vec())
+        .bind(around.to_vec())
+        .bind(i64::from(older))
+        .bind(room_id.to_vec())
+        .bind(around.to_vec())
+        .bind(i64::from(newer))
+        .fetch_all(db)
+        .await?;
+
+    let mut messages = rows
+        .iter()
+        .map(row_to_message)
+        .collect::<Result<Vec<_>, _>>()?;
+    hydrate_reactions(db, &mut messages).await?;
+    crate::repo::attachments::hydrate(db, config, &mut messages).await?;
+    Ok(messages)
+}
+
 /// A batch of messages in the order they were said, for anything that walks a
 /// room forwards.
 ///

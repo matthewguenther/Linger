@@ -98,6 +98,16 @@ These terms are used everywhere — UI, code, docs, error messages:
   the roster. They get a soft knock and a card that fades on its own: no message, no
   thread, nothing to dismiss, and nothing written down at either end. Three an hour
   per person, and sounds are muted between 22:00 and 08:00 on your own clock
+- 🔎 **Search** *(the second piece of V2, built)* — `search` sits in the rail under the
+  rooms, next to `media`, and `Ctrl`/`Cmd`+`K` opens it. It covers what people typed and
+  the names of the files they shared. Whole words with English endings folded together,
+  so `photo` finds `photos`; several words means all of them; quotes mean a phrase.
+  **No query language** — `AND` and `OR` are words to look for like any others, because
+  a search box that quietly has a syntax is a search box that lies to most of the people
+  typing in it. Newest first, always: no relevance ranking, no search history, no saved
+  searches, nothing written down on either side. Click a hit and you land on that
+  message in its room, however far back it is. A deleted message is findable by nothing
+  — not its words, not the names of the files it was carrying
 
 ## 🚫 What it will never have
 
@@ -626,10 +636,9 @@ Current work queue lives in [TASKS.md](TASKS.md).
   (see [SPEC.md §6](SPEC.md))
 - **Later (still V1, not on the critical path)** — entrance sounds (T-901…T-903).
   In the spec, not next. See [TASKS.md](TASKS.md) *Backburner*.
-- **V2** — **knock is built** (M9). **Search has its server half** (M10): the
-  index and the endpoint are in, and nothing in the app draws them yet, so there
-  is nothing to click. DMs, voice rooms and ambient voice are planned and not
-  started; V1 still has to be installed and used by real people.
+- **V2** — **knock (M9) and search (M10) are built.** DMs, voice rooms and
+  ambient voice are planned and not started; V1 still has to be installed and
+  used by real people.
 - **Backburner** — a mobile client. Desktop comes first and has to be solid
   before anything else starts.
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji

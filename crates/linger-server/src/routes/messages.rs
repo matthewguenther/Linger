@@ -43,6 +43,9 @@ pub fn router() -> Router<AppState> {
 struct PageQuery {
     before: Option<MessageId>,
     after: Option<MessageId>,
+    /// Centre the page on this message instead of paging from an edge
+    /// (PROTOCOL §4). This is how a search hit is opened.
+    around: Option<MessageId>,
     limit: Option<u32>,
 }
 
@@ -54,16 +57,39 @@ async fn page(
 ) -> Result<Json<Vec<Message>>, ApiError> {
     repo::rooms::expect(&state.db.read, room_id).await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
-    repo::messages::page(
-        &state.db.read,
-        &state.config,
-        room_id,
-        query.before,
-        query.after,
-        limit,
-    )
-    .await
-    .map(Json)
+
+    let Some(around) = query.around else {
+        return repo::messages::page(
+            &state.db.read,
+            &state.config,
+            room_id,
+            query.before,
+            query.after,
+            limit,
+        )
+        .await
+        .map(Json);
+    };
+
+    // Asking for a window *and* an edge is two different pages, and guessing
+    // which one was meant is how a client ends up with history it did not ask
+    // for and cannot tell is wrong.
+    if query.before.is_some() || query.after.is_some() {
+        return Err(ApiError::validation(
+            "Ask for a window around a message or a page before one, not both.",
+        ));
+    }
+    // A message that is not in this room means the caller is holding a stale
+    // id — after a delete, or from another room. "Nothing here" and "not that
+    // room" send a reader looking in different places.
+    let target = repo::messages::expect(&state.db.read, &state.config, around).await?;
+    if target.room_id != room_id {
+        return Err(ApiError::not_found("That message isn't in this room."));
+    }
+
+    repo::messages::window(&state.db.read, &state.config, room_id, around, limit)
+        .await
+        .map(Json)
 }
 
 async fn create(

@@ -110,6 +110,7 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see *Human checks* | [m7.md](docs/tasks/m7.md) |
 | M8 — export | tasks 2026-08-28 | Any member can take a zip of the whole server — a file per room, every upload, an index — built in the background and downloaded from the media origin. **One human check is still open** — see *Human checks* | [m8.md](docs/tasks/m8.md) |
 | M9 — knock | tasks 2026-08-29 | `POST /knock` addressed to one person's sessions, a card that fades on its own, the sound player the entrance sounds will extend. **Its check is half-open** — see *Human checks*, HC-6 | still in this file, below |
+| M10 — search | 2026-08-31 | An FTS5 index kept by triggers, `GET /search` with no query language to trip over, and a destination in the rail that lands you on a hit six months back — `around=` on the messages endpoint, and a room that knows when it is behind its own newest message | [m10.md](docs/tasks/m10.md) |
 
 **Everything a person still has to do by hand lives in one place now:
 [Human checks](#human-checks--things-only-you-can-do), at the bottom of this
@@ -159,9 +160,53 @@ anybody installed**, and says so at startup. **Updates are signed; installers
 are not** — that is a decision, not a gap
 ([`docs/decisions.md`](docs/decisions.md)), and macOS is deliberately not built
 at all until T-705.
+M9 adds knock (below): `POST /knock` addressed to one person's sessions, the
+fading cards, and `lib/sound.ts` — the player entrance sounds will extend.
+M10 adds the whole of search (see [m10.md](docs/tasks/m10.md)): the `message_fts`
+index kept by triggers in `0004_search.sql` (**nothing in Rust writes to it**),
+`GET /search` over `repo::search` with the query rebuilt rather than forwarded,
+and `client/src/search/` — the rail destination, `Ctrl`/`Cmd`+`K`, and landing on
+a hit. Two pieces of it belong to the stream rather than to search and are worth
+knowing before touching either: **`around=` on `GET /rooms/:id/messages`**
+(PROTOCOL §4), which fetches a window centred on one message, and
+**`RoomStream.atEnd`**, which is false while a room is showing one of those
+windows — live message frames for such a room are *dropped*, because folding
+today's message into a February window makes a gap nothing can see. If you are
+changing how history loads, read `openAround`, `loadNewer` and `leaveWindow` in
+`lib/gateway.ts` first.
 
 ---
 
+
+## V1 polish — small changes after the milestones closed
+
+Not a milestone and not a backburner: one-off changes to V1 surfaces that came
+out of using the app. Each one is small enough that it lands in a single session
+with its note written here rather than in an archive.
+
+- ✅ **T-904 · Density belongs in settings, not over every conversation** —
+  effort: **low** — Matt, 2026-08-31
+  `comfortable` / `compact` / `irc` sat in the room header *and* in settings.
+  The header copy is gone; settings is the only home. **Nothing about the
+  feature changed** — the same component, the same three modes, still one
+  attribute on `<html>` and still remembered in `localStorage`.
+
+  The reasoning is Matt's and worth keeping: a density is chosen once and then
+  kept. A control for a decision somebody makes in their first week does not
+  earn a permanent place above every conversation — it is chrome paid for on
+  every screen, forever, for a choice nobody is making today. The room header is
+  now the room's name, who is in it, the topic, and the two things that appear
+  only when they apply (`back to the newest`, `since you were gone`).
+
+  Two leftovers went with it: `.density`'s `margin-left: auto`, which existed to
+  pin the control to the right of the room name, and the settings rule that
+  undid it. `Stream` no longer takes `onDensityChange` at all — it reads
+  `density` to decide grouping and nothing else.
+
+  **SPEC did not have to change.** §5.6 lists the three modes; it never said
+  where the control lives.
+
+---
 
 ## Backburner — later, not the next thing
 
@@ -276,14 +321,15 @@ Recorded in the *Parking lot* too.
 
 ---
 
-## V2 — M9 built, the rest planned
+## V2 — M9 and M10 built, the rest planned
 
-**M9 (knock) landed 2026-08-29**, and **M10's server half landed 2026-08-30** —
-the index and the endpoint; what is left of search is the surface, T-1203.
-Everything below M10 is still planned and not started. **Nothing below M10 is
-next.** V1 is done except the things in *Human checks*, and those come first — a
-release nobody has installed is not a finished V1. This section exists so the
-shape of V2 is written down while it is fresh, not so somebody starts it.
+**M9 (knock) landed 2026-08-29** and **M10 (search) landed 2026-08-31** — the
+index, the endpoint and the surface, all three archived in
+[`docs/tasks/m10.md`](docs/tasks/m10.md). Everything below is still planned and
+not started. **Nothing below M10 is next.** V1 is done except the things in
+*Human checks*, and those come first — a release nobody has installed is not a
+finished V1. This section exists so the shape of V2 is written down while it is
+fresh, not so somebody starts it.
 
 **Read this before touching any of it:** SPEC §6 lists what V2 is; anything not
 on that list is not V2, it is scope creep. Voice and DMs each add a whole
@@ -292,11 +338,13 @@ least one decision in it that is **Matt's, not an implementing session's**.
 Those are called out per milestone and repeated in the *Parking lot*.
 
 **Numbering.** V1 used `T-1xx`–`T-8xx` for milestones M1–M8, plus `T-9xx` for
-the V1 work that came off the critical path. V2 starts a new band at **`T-1xxx`,
-where the hundreds digit is the area** — `T-11xx` knock, `T-12xx` search,
-`T-13xx` DMs, `T-14xx` voice, `T-15xx` ambient voice — and `T-16xx` mobile,
-which is on the backburner rather than in V2. It does not continue the
-milestone-matches-number rule, because `T-9xx` is already spoken for.
+the V1 work that came off the critical path — and for small V1 changes that land
+after the milestones closed (`T-904`). V2 starts a new band at **`T-1xxx`, where
+the hundreds digit is the area** — `T-11xx` knock, `T-12xx` search, `T-13xx`
+DMs, `T-14xx` voice, `T-15xx` ambient voice — and `T-16xx` mobile, which is on
+the backburner rather than in V2, and `T-17xx` themes, which is V3. It does not
+continue the milestone-matches-number rule, because `T-9xx` is already spoken
+for.
 
 **The order is not SPEC §6's order, on purpose.** SPEC lists voice first because
 it is the headline. It is sequenced last here because it is the largest and
@@ -305,7 +353,7 @@ self-contained, and make the app better next week rather than next quarter.
 Build order, cheapest and safest first:
 
 ```
-M9 knock (built) → M10 search → M11 DMs → M12 voice rooms → M13 ambient voice
+M9 knock (built) → M10 search (built) → M11 DMs → M12 voice → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -378,108 +426,6 @@ controls on it at all.
   three this hour. Give them a bit." **Still unverified:** the sound by ear (the
   test ran at 07:50, inside quiet hours, so it correctly stayed silent), and the
   acceptance criterion's *two machines*. Both belong in a human check.
-
----
-
-### M10 — search
-
-*Milestone check: type a word, get the messages that contain it, click one, land
-on it in the room it was said in.* **Open, and waiting on one task:** the index
-and the endpoint landed 2026-08-30, so the words are findable over HTTP and
-nothing draws them. T-1203 is the whole of what is left.
-
-**The spec section is written** — SPEC §4.12, and the search entry in PROTOCOL
-§6, both landed with T-1201. The two questions in it were Matt's and were
-answered on 2026-08-30:
-
-- **Search is a destination in the left rail, under the rooms, next to
-  `media`**, opening in place of the message stream. `Ctrl`/`Cmd`+`K` is a
-  shortcut *into* that destination, never a second surface with its own
-  behavior.
-- **It covers what people typed and the names of the files they shared.** Link
-  titles are deliberately out: a title is a cache the server refreshes on its
-  own schedule, so indexing one means results changing under people with nobody
-  having edited anything.
-
-- ✅ **T-1201 · The index** — effort: **high** — Matt, 2026-08-30
-  `message_fts` in `migrations/0004_search.sql`: an FTS5 table with two columns,
-  `body` and `filenames`, keyed by the message's implicit rowid. Five triggers
-  keep it — three on `messages`, two on `attachments` — and every one of them is
-  "throw the row away and write what is true now" rather than an incremental
-  edit, so the index cannot drift from the table it indexes. **Nothing in Rust
-  writes to it.** The backfill is one `INSERT ... SELECT` in the same migration.
-
-  **No new dependency and nothing for a host to install.** FTS5 ships inside the
-  SQLite that sqlx already bundles (`libsqlite3-sys` compiles it with
-  `-DSQLITE_ENABLE_FTS5`).
-
-  Four things worth knowing before touching this:
-
-  - **The index carries its own copy of the text.** An external-content table
-    (`content='messages'`) would save a few megabytes and cannot produce a
-    `snippet()`, which is the whole result list — and a filename does not live
-    in `messages` at all.
-  - **A deleted message has no row here, not an empty one.** A tombstone empties
-    `body` but keeps its attachments, so indexing "the message minus its words"
-    would leave it findable by the name of the file it was carrying. The trigger
-    deletes the row outright and there is a test for exactly that.
-  - **Filenames are joined with `char(31)`**, not a space, because a filename may
-    contain spaces and a hit has to be able to say *which* file it matched.
-    `validate::filename` strips control characters, so U+001F cannot occur inside
-    one.
-  - **The tokenizer is `porter unicode61 remove_diacritics 2`.** Stemming is why
-    `photo` finds `photos`. Query and index are stemmed the same way, so they
-    cannot disagree.
-
-  **Two surprises.** First, **there is no such thing as a 5,000-word message** —
-  PROTOCOL §4 caps a body at 8,000 characters, which is nearer 1,300 words. The
-  acceptance test posts the largest message the API will take, nine of them, and
-  asserts the insert path has not become something you can feel; it is a guard
-  against a quadratic regression, not a benchmark. Second, the backfill can only
-  be tested by *removing* the index: the test posts real messages, drops the
-  table and its five triggers (which puts the server exactly where an old one
-  is), then replays the shipped migration file over it with `include_str!`.
-
-- ✅ **T-1202 · The endpoint** — effort: **medium** — Matt, 2026-08-30
-  `GET /search?q=&room_id=&author_id=&before=&limit=` in
-  `routes/search.rs`, over `repo::search`. `crates/linger-server/tests/search.rs`
-  covers all three acceptance cases and ten more.
-
-  **The query is rebuilt, never forwarded.** FTS5 has a query language of its
-  own, and handing it somebody's raw typing means either a syntax error thrown
-  at whoever typed an apostrophe, or a search that quietly did something other
-  than what it looked like. `Terms::parse` takes the searchable runs out of the
-  string and wraps each in quotes, and quoting is what makes every operator
-  inert — `AND`, `OR`, `NEAR`, `*`, `(`, `^` all arrive as words to look for.
-  There is no input that reaches `MATCH` as syntax, and a test fires eight of
-  them at it. **Do not "simplify" this by passing `q` through.**
-
-  **A snippet arrives as runs, not as a marked-up string.** `SearchHit.snippet`
-  is a `SearchSnippetPart[]` of `{ text, matched }`, because any marker
-  character is a character a message could contain — and because the obvious
-  rendering of a marked-up string is to drop it into HTML. Nothing to parse,
-  nothing to escape.
-
-  **Paging is keyset on the message id** and the cursor is that id, hex. UUIDv7
-  bytes sort chronologically, so `before` is a range scan and the order is the
-  same one the stream reads in. There is no relevance ranking and SPEC §4.12
-  says there will not be one.
-
-  Two things that caught the tests out, both about limits rather than search.
-  A validation refusal here is **422**, not 400 (`ApiError::validation`). And
-  `RATE_SEARCH` (30/min) refills while a burst of requests is in flight, so the
-  test asserts the refusal lands *after* the burst is spent rather than on an
-  exact request number — the same shape any future rate-limit test wants.
-
-- ⬜ **T-1203 · The search surface** — effort: **medium**
-  Whatever SPEC §4.12 decided. Results as a list of snippets with room, author
-  and time; clicking one opens that room **and scrolls to that message**. The
-  scroll is the hard part and the precedent is T-303's *go to where you left
-  off* — the stream is virtualized, so a row's height is a guess until it has
-  been drawn, and anything that jumps has to keep re-aiming as real heights
-  arrive.
-  *Accept:* search for a word from six months ago in a 10,000-message room,
-  click the hit, and land on the message with it on screen — not near it.
 
 ---
 
@@ -603,6 +549,94 @@ visible indicator whenever it is on, and one obvious way to kill it.**
   time the mic is live. One-click kill from the roster. Quiet hours.
   *Accept:* somebody who did not set it up can tell at a glance whether their
   microphone is on.
+
+---
+
+## V3 — further out than V2, and not all of it will happen
+
+SPEC §6's *V3 or never* list, plus the one Matt added on 2026-08-31. **Nothing
+here is next**, and nothing here starts before V2 is done and V1 has been lived
+with. This section exists so the ideas are written down with their problems
+attached, which is the only useful form to keep an idea in.
+
+**Numbering** continues the V2 rule — the hundreds digit is the area. `T-17xx`
+is themes. The rest of the V3 list (an opt-in directory, sandboxed client
+scripting, custom emoji) has no numbers yet because nobody has thought about it
+hard enough to write a task.
+
+### M14 — custom themes
+
+*Matt, 2026-08-31: "I would like for us to support themes where people can
+create custom color schemes and themes for the application, which will allow for
+some great flexibility and maybe even a themes-community."*
+
+**Why it fits.** Personalization is not a bolt-on here, it is the thesis — SPEC
+§2 names AIM-era self-expression as half of what this product is for, and the
+styled name is already the one expressive element. A person choosing how their
+whole app looks is the same idea one size up. Nothing on the anti-goals list
+forbids it.
+
+**Why it is not simply "let people write CSS", and why this is three tasks and
+not one.** Four things in this repo are load-bearing and a theme walks straight
+into all of them:
+
+1. **The 16-colour palette is a contract, not a preference.** It is defined once
+   in `linger-core::PALETTE`, validated *server-side* (AGENTS rule 8), and a
+   property test in CI asserts every one of the 16 keys clears 4.5:1 contrast
+   against both theme backgrounds. It is what makes "there is no way to pick a
+   colour nobody can read" true. A theme that repaints those keys deletes that
+   guarantee unless it is checked the same way — so the check has to move to
+   wherever the theme is applied, and a theme that fails it has to be refused
+   or corrected, in front of the person who made it.
+2. **Colours are palette keys everywhere** — on the wire and in the database
+   (AGENTS rule 12) — so a theme cannot be stored as somebody's name colour. It
+   is a different kind of thing: the reader's own view of *their* app, closer to
+   density and dark/light than to a styled name. That points at it being a local
+   preference, not a server object, which is a much smaller feature.
+3. **The Console rules are the product, not a default skin** (SPEC §5.1): no
+   chat bubbles, no shadows, no gradients on surfaces, no rounded panels,
+   monospace for metadata only. If a theme can turn those off, the design system
+   is advisory and the answer to "why does this look like Discord" becomes "you
+   installed a theme". A theme almost certainly gets colours and maybe warmth,
+   and does *not* get geometry, spacing or typography.
+4. **"A themes-community" is a distribution problem wearing a cosmetics hat.**
+   Rule 14 forbids a payment surface of any kind, and SPEC §6 already puts an
+   opt-in directory at V3 with "must never be load-bearing" attached. A theme
+   that is a file somebody sends a friend is nothing to build. A gallery inside
+   the app is a store without prices, and it is also a moderation surface. If
+   themes are CSS rather than a list of colours, sharing them is
+   **arbitrary-code-shaped**, and SPEC §6 already flags sandboxed client
+   scripting as "a real security surface".
+
+**Three decisions are Matt's and none of the tasks below can start without
+them.** They are repeated in the *Parking lot*.
+
+- ⬜ **T-1701 · What a theme is allowed to change** — *not a task; a decision.*
+  Matt. Colours only, or colours plus warmth, or something wider? Does a theme
+  repaint the 16 name colours, or only the surfaces and text around them? The
+  contrast guarantee follows the answer, and so does whether this is a weekend
+  or a month.
+- ⬜ **T-1702 · The theme format and the editor** — effort: **high**
+  *Blocked on T-1701.* Whatever a theme turns out to be, it is a **list of
+  values, not a stylesheet** — the tokens in `styles/tokens.css` are already
+  exactly this shape, which is why density and evening warmth are one variable
+  swap. Applying one is then the same move: set custom properties on `<html>`.
+  A theme lives on the reader's machine beside density and theme preference, not
+  on the server, unless T-1701 says otherwise.
+  **The contrast check comes with it, in the app, live** — the CI property test
+  in `linger-core` is the model, and the editor should refuse to let somebody
+  build something they cannot read rather than warning them afterwards.
+  *Accept:* somebody makes a theme, restarts the app, and it is still there —
+  and cannot save one that fails contrast.
+- ⬜ **T-1703 · Sharing a theme** — effort: **medium**
+  *Blocked on T-1701, and on Matt saying how far this goes.* The cheap version
+  is the whole feature: a theme exports as one small file, and importing one
+  shows what it will look like before it applies. That is a themes-community
+  with no infrastructure, no gallery, no moderation and no store — people send
+  each other files, the way they always have.
+  **Anything beyond that is a scope decision, not an implementation detail.**
+  *Accept:* a theme made on one computer is applied on another, with nothing in
+  between but a file.
 
 ---
 
@@ -794,6 +828,18 @@ network, and that the sound is a sound you would want to hear.
 
 ## Parking lot (decisions needed, not tasks yet)
 
+- **What is a custom theme allowed to change, and how far does sharing go?**
+  Raised by Matt on 2026-08-31 and written up as M14 (T-1701…T-1703). Three
+  answers are needed before any of it starts. *What a theme touches:* colours
+  only, or colours plus the evening warmth, or more — and in particular whether
+  it repaints the 16 name colours, because those are validated server-side and
+  their 4.5:1 contrast is guaranteed by a test in CI. *Whether the Console rules
+  are themeable at all:* if a theme can turn off the no-bubbles, no-shadows,
+  no-rounded-panels rules, the design system is advice rather than the product
+  (SPEC §5.1). *How far sharing goes:* a theme as a file people send each other
+  costs nothing and is probably the whole feature; a gallery inside the app is a
+  store without prices and a moderation surface, and rule 14 plus SPEC §6's
+  "must never be load-bearing" both point at it.
 - Bundle identifier is `com.linger.desktop` — fine? Changing after M7 is painful.
 - **Mobile push goes through Apple and Google, or it does not exist.** There is
   no third way to wake a phone app. Whatever a notification says, and the fact

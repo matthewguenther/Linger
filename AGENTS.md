@@ -198,6 +198,18 @@ concurrency model, code signing, and container plumbing are all genuinely new, a
 time it comes up. Nobody is offended by a sentence they did not need; everybody
 loses an afternoon to one that was missing.
 
+This keeps slipping, so it is worth saying flatly (Matt, 2026-08-31): **agents
+write these summaries as if the reader were an architect, and they should not.**
+Naming a thing is not explaining it. "It uses keyset pagination", "the
+virtualizer re-anchors", "the frames are gated on `atEnd`" — each of those is a
+label, and a label only lands for somebody who already knew. Say what it does
+and why anybody should care, in the words a person would use out loud: *"paging
+by the last thing you saw rather than by a page number, so nothing gets skipped
+when somebody posts while you are reading"*. If a sentence would need a
+follow-up question from a smart person who has not read the code, it is not
+finished. When a term is genuinely the name of the thing and you need it, use it
+once and gloss it in the same breath.
+
 Be **clear, concise and direct**. Say what happened, what it means, and what is
 left. Skip the preamble, skip the hedging, and do not pad a small change into a
 report. Being brief is not the same as being vague: if something is broken,
@@ -257,15 +269,16 @@ M0 scaffold → M1 server REST → M2 gateway → M3 client shell
   → M4 presence/roster → M4.5 host controls + server list
   → M5 uploads/media → M6 styling/themes → M7 packaging → M8 export   ← V1, built
   → M9 knock                                                          ← V2, built
-  → M10 search                                       ← V2, server built; UI left
+  → M10 search                                                        ← V2, built
   → M11 DMs → M12 voice → M13 ambient voice                         ← V2, planned
   → backburner: entrance sounds (T-901…T-903), mobile (T-16xx)
 ```
 
 V1 is built. What is left of it is five things a person has to do by hand — see
-`TASKS.md`, *Human checks*. **M9 (knock) is built.** **M10 (search) has its
-index and its endpoint**; the surface is T-1203. The rest of V2 is planned and
-not started.
+`TASKS.md`, *Human checks*. **M9 (knock) and M10 (search) are built** — M10's
+notes are in `docs/tasks/m10.md`, and its second half changed how the client
+holds history, so read it before touching message loading. The rest of V2 is
+planned and not started.
 
 ---
 

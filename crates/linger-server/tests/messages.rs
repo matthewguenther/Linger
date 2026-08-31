@@ -437,3 +437,141 @@ async fn message_send_is_rate_limited() {
     assert_eq!(env.error.code, ErrorCode::RateLimited);
     assert!(env.error.retry_after_ms.is_some_and(|ms| ms > 0));
 }
+
+/// `around` (PROTOCOL §4): the window search lands in.
+///
+/// The case that matters is the one paging cannot do — a message far from
+/// either edge, reached in one request with history on both sides of it.
+#[tokio::test]
+async fn a_window_lands_on_a_message_with_history_either_side() {
+    let (server, host, room) = common::server_with_room("garage").await;
+    let member = common::join_member(&server, &host.access_token, "callie").await;
+    let room_id = room.id.to_string();
+
+    let mut sent = Vec::new();
+    for i in 0..20 {
+        let token = if i % 2 == 0 {
+            &host.access_token
+        } else {
+            &member.access_token
+        };
+        sent.push(send(&server, token, &room_id, &format!("message {i}")).await);
+    }
+    let target = &sent[10];
+
+    let page = fetch(
+        &server,
+        &host.access_token,
+        &room_id,
+        &format!("?around={}&limit=9", target.id),
+    )
+    .await;
+
+    // Nine messages, newest first, with the target in them.
+    assert_eq!(page.len(), 9);
+    assert!(page.windows(2).all(|pair| pair[0].id > pair[1].id));
+    assert!(page.iter().any(|held| held.id == target.id));
+
+    // The odd one goes to the older half: five at or before the target,
+    // four after it. Scrollback above a message is what gives it context.
+    let older = page.iter().filter(|held| held.id <= target.id).count();
+    assert_eq!(older, 5);
+    assert_eq!(page.len() - older, 4);
+
+    // And the window really is centred: it is neither the newest page nor the
+    // oldest one.
+    assert!(page[0].id < sent[19].id);
+    assert!(page[8].id > sent[0].id);
+}
+
+#[tokio::test]
+async fn a_window_at_an_edge_is_short_rather_than_wrong() {
+    let (server, host, room) = common::server_with_room("garage").await;
+    let room_id = room.id.to_string();
+
+    let mut sent = Vec::new();
+    for i in 0..6 {
+        sent.push(send(&server, &host.access_token, &room_id, &format!("m{i}")).await);
+    }
+
+    // The oldest message has nothing above it, so the window is short on that
+    // side — which is how a client learns it has reached the start.
+    let page = fetch(
+        &server,
+        &host.access_token,
+        &room_id,
+        &format!("?around={}&limit=10", sent[0].id),
+    )
+    .await;
+    assert_eq!(page.len(), 6);
+    assert_eq!(page[5].id, sent[0].id);
+
+    // Same at the other end — and the window is *five*, not six. Each half has
+    // its own cap and neither borrows from the other, which is what lets a
+    // client read the two halves separately: a short older half means the start
+    // of the room, a short newer half means the newest message. A window that
+    // quietly grew one side to fill the limit would make both signals a guess.
+    let page = fetch(
+        &server,
+        &host.access_token,
+        &room_id,
+        &format!("?around={}&limit=10", sent[5].id),
+    )
+    .await;
+    assert_eq!(page.len(), 5);
+    assert_eq!(page[0].id, sent[5].id);
+    assert_eq!(page[4].id, sent[1].id);
+}
+
+#[tokio::test]
+async fn a_window_refuses_a_second_edge_and_a_message_from_elsewhere() {
+    let (server, host, room) = common::server_with_room("garage").await;
+    let room_id = room.id.to_string();
+    let other: linger_core::wire::Room = reqwest::Client::new()
+        .post(server.url("/rooms"))
+        .bearer_auth(&host.access_token)
+        .json(&serde_json::json!({ "slug": "porch", "name": "#porch" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let here = send(&server, &host.access_token, &room_id, "here").await;
+    let elsewhere = send(
+        &server,
+        &host.access_token,
+        &other.id.to_string(),
+        "elsewhere",
+    )
+    .await;
+
+    // Two pages asked for at once is a mistake worth saying out loud.
+    let resp = reqwest::Client::new()
+        .get(server.url(&format!(
+            "/rooms/{room_id}/messages?around={}&before={}",
+            here.id, here.id
+        )))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 422);
+    let body: ErrorEnvelope = resp.json().await.unwrap();
+    assert_eq!(body.error.code, ErrorCode::ValidationFailed);
+
+    // A message that is real but in another room is not this room's window.
+    let resp = reqwest::Client::new()
+        .get(server.url(&format!(
+            "/rooms/{room_id}/messages?around={}",
+            elsewhere.id
+        )))
+        .bearer_auth(&host.access_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+    let body: ErrorEnvelope = resp.json().await.unwrap();
+    assert_eq!(body.error.code, ErrorCode::NotFound);
+}
