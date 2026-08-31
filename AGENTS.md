@@ -198,6 +198,18 @@ concurrency model, code signing, and container plumbing are all genuinely new, a
 time it comes up. Nobody is offended by a sentence they did not need; everybody
 loses an afternoon to one that was missing.
 
+This keeps slipping, so it is worth saying flatly (Matt, 2026-08-31): **agents
+write these summaries as if the reader were an architect, and they should not.**
+Naming a thing is not explaining it. "It uses keyset pagination", "the
+virtualizer re-anchors", "the frames are gated on `atEnd`" — each of those is a
+label, and a label only lands for somebody who already knew. Say what it does
+and why anybody should care, in the words a person would use out loud: *"paging
+by the last thing you saw rather than by a page number, so nothing gets skipped
+when somebody posts while you are reading"*. If a sentence would need a
+follow-up question from a smart person who has not read the code, it is not
+finished. When a term is genuinely the name of the thing and you need it, use it
+once and gloss it in the same breath.
+
 Be **clear, concise and direct**. Say what happened, what it means, and what is
 left. Skip the preamble, skip the hedging, and do not pad a small change into a
 report. Being brief is not the same as being vague: if something is broken,
