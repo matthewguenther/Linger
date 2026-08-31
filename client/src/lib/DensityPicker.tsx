@@ -1,9 +1,12 @@
 /**
  * Comfortable / Compact / IRC (SPEC §4.7, §5.6).
  *
- * The same control lives in the room header (you change how you are reading
- * while you are reading) and in settings (so you can find it without a room).
- * One component, so the labels cannot drift.
+ * It lives in settings and nowhere else (T-904, 2026-08-31). It used to sit in
+ * the room header as well, on the theory that you change how you are reading
+ * while you are reading — but nobody does. Somebody picks a density in their
+ * first week and then keeps it, so a permanent control was three words of
+ * chrome above every conversation, paid for on every screen, for a choice made
+ * once.
  */
 import { DENSITIES, type Density } from "./density";
 

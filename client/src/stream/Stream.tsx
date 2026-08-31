@@ -49,7 +49,6 @@ import type { RoomId } from "../generated/RoomId";
 import type { User } from "../generated/User";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { useNow } from "../lib/clock";
-import DensityPicker from "../lib/DensityPicker";
 import { type Density } from "../lib/density";
 import { emptyRoom } from "../settings/copy";
 import {
@@ -160,8 +159,11 @@ interface StreamProps {
   room: Room;
   /** Everyone the server has told us about, for author names and colors. */
   users: User[];
+  /**
+   * How the stream is laid out. Read here, never changed here: the control
+   * lives in settings, because it is a preference somebody sets once (T-904).
+   */
   density: Density;
-  onDensityChange: (density: Density) => void;
   /**
    * A message to go and find, from the media collection (SPEC §4.4: "each item
    * links back to the message and moment it was posted in"). It may be well
@@ -184,7 +186,6 @@ export default function Stream({
   room,
   users,
   density,
-  onDensityChange,
   focus,
   onFocused,
   roster,
@@ -619,7 +620,6 @@ export default function Stream({
             since you were gone
           </button>
         ) : null}
-        <DensityPicker density={density} onChange={onDensityChange} />
       </header>
 
       {strayed && since && leftOff !== null ? (
