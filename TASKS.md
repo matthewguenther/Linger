@@ -471,7 +471,7 @@ answered on 2026-08-30:
   test asserts the refusal lands *after* the burst is spent rather than on an
   exact request number — the same shape any future rate-limit test wants.
 
-- ⬜ **T-1203 · The search surface** — effort: **medium**
+- ⏳ **T-1203 · The search surface** — effort: **medium** — Matt, 2026-08-31
   Whatever SPEC §4.12 decided. Results as a list of snippets with room, author
   and time; clicking one opens that room **and scrolls to that message**. The
   scroll is the hard part and the precedent is T-303's *go to where you left
