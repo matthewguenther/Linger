@@ -109,7 +109,7 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
 | M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see *Human checks* | [m7.md](docs/tasks/m7.md) |
 | M8 — export | tasks 2026-08-28 | Any member can take a zip of the whole server — a file per room, every upload, an index — built in the background and downloaded from the media origin. **One human check is still open** — see *Human checks* | [m8.md](docs/tasks/m8.md) |
-| M9 — knock | tasks 2026-08-29 | `POST /knock` addressed to one person's sessions, a card that fades on its own, the sound player the entrance sounds will extend. **Its check is half-open** — see *Human checks*, HC-6 | still in this file, below |
+| M9 — knock | tasks 2026-08-29 | `POST /knock` addressed to one person's sessions, a card that fades on its own, the sound player the entrance sounds will extend. **Its check is half-open** — see *Human checks*, HC-6 | [m9.md](docs/tasks/m9.md) |
 | M10 — search | 2026-08-31 | An FTS5 index kept by triggers, `GET /search` with no query language to trip over, and a destination in the rail that lands you on a hit six months back — `around=` on the messages endpoint, and a room that knows when it is behind its own newest message | [m10.md](docs/tasks/m10.md) |
 
 **Everything a person still has to do by hand lives in one place now:
@@ -160,8 +160,9 @@ anybody installed**, and says so at startup. **Updates are signed; installers
 are not** — that is a decision, not a gap
 ([`docs/decisions.md`](docs/decisions.md)), and macOS is deliberately not built
 at all until T-705.
-M9 adds knock (below): `POST /knock` addressed to one person's sessions, the
-fading cards, and `lib/sound.ts` — the player entrance sounds will extend.
+M9 adds knock (see [m9.md](docs/tasks/m9.md)): `POST /knock` addressed to one
+person's sessions, the fading cards, and `lib/sound.ts` — the player entrance
+sounds will extend.
 M10 adds the whole of search (see [m10.md](docs/tasks/m10.md)): the `message_fts`
 index kept by triggers in `0004_search.sql` (**nothing in Rust writes to it**),
 `GET /search` over `repo::search` with the query rebuilt rather than forwarded,
@@ -323,8 +324,8 @@ Recorded in the *Parking lot* too.
 
 ## V2 — M9 and M10 built, the rest planned
 
-**M9 (knock) landed 2026-08-29** and **M10 (search) landed 2026-08-31** — the
-index, the endpoint and the surface, all three archived in
+**M9 (knock) landed 2026-08-29** and **M10 (search) landed 2026-08-31**, and
+both are archived — [`docs/tasks/m9.md`](docs/tasks/m9.md) and
 [`docs/tasks/m10.md`](docs/tasks/m10.md). Everything below is still planned and
 not started. **Nothing below M10 is next.** V1 is done except the things in
 *Human checks*, and those come first — a release nobody has installed is not a
@@ -359,73 +360,6 @@ M9 knock (built) → M10 search (built) → M11 DMs → M12 voice → M13 ambien
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
 it is on the *Backburner* instead. Desktop has to be finished and used by real
 people first.
-
----
-
-### M9 — knock ✅ *(both tasks landed 2026-08-29)*
-
-*Milestone check: a knock crosses two machines, shows up as something that
-fades on its own, and leaves nothing behind.* **Half-open:** everything but the
-two machines is done and tested. The two-machine half is **HC-6**.
-
-SPEC §4.9 was the whole spec and the hard part was what it *refuses*: no
-message, no thread, no unread state, nothing to dismiss. A knock that leaves a
-notification sitting there has become a message, and the feature is gone. What
-shipped keeps that: nothing is stored at either end, and the card has no
-controls on it at all.
-
-- ✅ **T-1101 · Knock, server side** — effort: **low** — Matt, 2026-08-29
-  `POST /knock` is mounted, and `crates/linger-server/tests/knock.rs` covers all
-  three acceptance cases plus three more: a stranger is `NOT_FOUND`, knocking
-  yourself is `VALIDATION_FAILED`, and the schema still has no table with
-  "knock" in its name.
-
-  **What this changed structurally.** The gateway bus used to carry a bare
-  `ServerEvent` and fan it to everybody; a knock is the first frame with an
-  audience of one. The bus now carries a small `Fanout { event, to }` and
-  `Gateway::publish_to` sets `to`. `publish` is unchanged and every existing
-  caller is untouched. Two things worth knowing next time somebody adds an
-  addressed frame:
-
-  - **The address is not on the wire.** `knock` carries `from_user_id` only.
-    The receiver is the only person who gets the frame, so a `target_user_id`
-    field would carry nothing and would be one more thing to get wrong.
-  - **It is sequenced, like everything else.** That means a resume inside the
-    120s window replays it. That is deliberate: an unsequenced frame is
-    *dropped* by the Tauri core (`gateway.rs` ignores frames without `s`), so a
-    control-frame knock would never reach the frontend at all.
-
-  A knock at somebody who is not connected lands nowhere and returns 204. That
-  is the design, not a gap — nothing is queued, because nothing is stored.
-
-- ✅ **T-1102 · Knock, client side** — effort: **medium** — Matt, 2026-08-29
-  You knock from the person's card in the roster, one control, one click, no
-  confirmation. What arrives is `client/src/knock/KnockCards.tsx`: a card in the
-  bottom-right that appears, is never focusable, and takes itself off after
-  `KNOCK_TTL_MS` (8s). It has no buttons, `pointer-events: none`, and
-  `aria-live="polite"` so a screen reader hears it without anything stealing
-  focus.
-
-  **The sound is `client/src/lib/sound.ts`, and it is the one T-901 extends —
-  do not write a second.** It owns the gate (global mute, plus quiet hours
-  22:00–08:00 listener-local, default **on**) and plays a knock synthesized from
-  an oscillator, so this task did not have to reach into T-903's curation for an
-  asset. What T-901 adds to *this* file: bundled `.opus` playback, the
-  5-min-per-listener cooldown, and per-user mute. Both switches are in settings
-  under `sound`.
-
-  **A knock lives in the gateway store**, as `GatewayState.knocks`, next to
-  `typing` and for the same reason: it is transient state with no server copy.
-  Not a second store (AGENTS: local state plus one gateway store). Cards from
-  every signed-in server are drawn, not just the active one.
-
-  **Verified on this machine, not on two.** One real client signed in, a second
-  member knocking over the real endpoint: the card appeared, faded on its own,
-  and left nothing in the stream or the roster; knocking from the card reached
-  the other person's socket; the fourth knock inside an hour showed "That's
-  three this hour. Give them a bit." **Still unverified:** the sound by ear (the
-  test ran at 07:50, inside quiet hours, so it correctly stayed silent), and the
-  acceptance criterion's *two machines*. Both belong in a human check.
 
 ---
 
