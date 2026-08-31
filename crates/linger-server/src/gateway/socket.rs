@@ -181,11 +181,17 @@ async fn handshake(
             // idempotent state, never lost.
             let users = repo::users::all(&state.db.read, &state.config).await.ok()?;
             let rooms = repo::rooms::all(&state.db.read).await.ok()?;
+            // This person's DMs, which is a different list for everybody on the
+            // server (SPEC §4.13). Kept apart from `rooms` on the wire so a
+            // client drawing the server's rooms cannot draw somebody's private
+            // conversation by forgetting a filter.
+            let dms = repo::rooms::dms_for(&state.db.read, user_id).await.ok()?;
             let ready = ReadyData {
                 session_id,
                 user,
                 users,
                 rooms,
+                dms,
                 presence: state.gateway.presence_snapshot(),
             };
             let frame = ServerFrame::sequenced(ServerEvent::Ready(ready), 0);
@@ -266,6 +272,24 @@ async fn handle_client_frame(
             state.gateway.publish(ServerEvent::PresenceUpdate(entry));
         }
         ClientFrame::RoomFocus { room_id } => {
+            // Standing in a DM you are not in would put you in its occupancy
+            // and its `room.enter`, in front of the people who *are* in it
+            // (SPEC §4.13). The outward direction is already covered — the
+            // fan-out would not send those frames to anybody else — but this is
+            // the inward one, and a stranger appearing inside a private
+            // conversation is worse than a frame nobody sees.
+            //
+            // Ignored rather than refused: this is a client frame, and the
+            // gateway has no way to answer one. A client that sends it is
+            // broken or lying, and neither deserves a reply.
+            if let Some(room_id) = room_id {
+                if repo::rooms::visible_to(&state.db.read, room_id, user_id)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
             let entrance_sound: Option<String> =
                 sqlx::query_scalar("SELECT sound_key FROM entrance_sounds WHERE user_id = ?")
                     .bind(user_id.to_vec())
@@ -278,6 +302,14 @@ async fn handle_client_frame(
                 .apply_room_focus(user_id, room_id, entrance_sound);
         }
         ClientFrame::TypingStart { room_id } => {
+            // Same check, same reason: without it somebody outside a DM can
+            // make the people inside it see a typing line.
+            if repo::rooms::visible_to(&state.db.read, room_id, user_id)
+                .await
+                .is_err()
+            {
+                return;
+            }
             let key = format!("typing:{user_id}:{room_id}");
             if state.limiter.check(&key, RATE_TYPING_PER_ROOM).is_ok() {
                 state

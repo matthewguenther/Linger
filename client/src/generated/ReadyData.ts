@@ -6,4 +6,15 @@ import type { User } from "./User";
 /**
  * Payload of `ready`: everything a client needs to render without further fetches.
  */
-export type ReadyData = { session_id: string, user: User, users: Array<User>, rooms: Array<Room>, presence: Array<PresenceEntry>, };
+export type ReadyData = { session_id: string, user: User, users: Array<User>, 
+/**
+ * The server's rooms — the same list for everybody.
+ */
+rooms: Array<Room>, 
+/**
+ * The DMs *this person* is in, which is a different list for everybody
+ * (SPEC §4.13). Separate from `rooms` rather than mixed into it, so a
+ * surface that draws the server's rooms cannot draw somebody's DM by
+ * forgetting a filter — it never had one to forget.
+ */
+dms: Array<Room>, presence: Array<PresenceEntry>, };

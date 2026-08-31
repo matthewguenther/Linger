@@ -29,7 +29,18 @@ pub fn username(s: &str) -> Result<(), ApiError> {
 }
 
 /// `[a-z0-9-]{1,32}`.
+/// The prefix a DM's generated slug carries (`repo::dms`). Reserved here so a
+/// host cannot make a public room whose slug collides with one — the collision
+/// would be a `409` at worst, but a room called `dm-anything` drawn in the rail
+/// next to real DMs is a way to mislead people that costs one line to close.
+pub const DM_SLUG_PREFIX: &str = "dm-";
+
 pub fn room_slug(s: &str) -> Result<(), ApiError> {
+    if s.starts_with(DM_SLUG_PREFIX) {
+        return Err(ApiError::validation(
+            "Room slugs cannot start with `dm-`; that prefix belongs to direct messages.",
+        ));
+    }
     let ok = (1..=32).contains(&s.len())
         && s.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');

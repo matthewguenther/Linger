@@ -156,12 +156,26 @@ CREATE TABLE entrance_sounds (
 
 CREATE TABLE rooms (
   id              BLOB PRIMARY KEY,
-  slug            TEXT NOT NULL UNIQUE,        -- [a-z0-9-]{1,32}
+  slug            TEXT NOT NULL UNIQUE,        -- [a-z0-9-]{1,32}; `dm-` reserved
   name            TEXT NOT NULL,
   topic           TEXT,
+  kind            TEXT NOT NULL DEFAULT 'room',-- room | dm (M11)
+  member_key      TEXT UNIQUE,                 -- DMs: sorted member ids, canonical
   position        INTEGER NOT NULL,
   archived_at     INTEGER,
   created_at      INTEGER NOT NULL
+);
+
+-- Who is in a DM (SPEC §4.13). Rooms have no rows here: their members are
+-- everybody, and writing that out would be a copy of the user table that goes
+-- stale the moment somebody joins. `member_key` is what makes create-or-find
+-- work — the ids sorted and joined, so the same set of people always produces
+-- the same string, and UNIQUE is what settles two people asking at once.
+CREATE TABLE room_members (
+  room_id         BLOB NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id         BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at      INTEGER NOT NULL,
+  PRIMARY KEY (room_id, user_id)
 );
 
 CREATE TABLE messages (
@@ -618,7 +632,7 @@ project. V1's remaining work is still five things a person has to do by hand
 |---|---|---|---|
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
 | **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **built: index and endpoint 2026-08-30, surface 2026-08-31. Its check passed in a running app** |
-| **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days |
+| **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days — **started: the model and the fan-out landed 2026-08-31 (T-1301). Not usable until T-1303** |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
 | **M14** | Custom themes | Somebody makes a colour scheme, it survives a restart, and a file carries it to another computer | **V3, not V2.** Three decisions come first — see `TASKS.md` *Parking lot* |

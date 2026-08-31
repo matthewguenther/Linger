@@ -35,6 +35,8 @@ function room(slug: string, position: number): Room {
     slug,
     name: slug,
     topic: null,
+    kind: "room",
+    member_ids: null,
     position,
     archived_at: null,
     last_message_id: null,

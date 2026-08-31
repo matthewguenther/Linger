@@ -13,6 +13,7 @@
 //! the client can always switch on `error.code`.
 
 mod auth;
+mod dms;
 mod export;
 mod health;
 mod invites;
@@ -92,6 +93,7 @@ pub fn router(state: AppState) -> Router {
         .merge(invites::router())
         .merge(server::router())
         .merge(rooms::router())
+        .merge(dms::router())
         .merge(messages::router())
         .merge(uploads::router())
         .merge(media::router())

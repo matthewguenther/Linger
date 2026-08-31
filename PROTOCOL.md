@@ -102,19 +102,38 @@ GET  /server             → { name, accent_key, icon_key, member_count, created
                              storage_used_bytes, storage_limit_bytes, file_expiry_days }
 PATCH /server            (host only) { name?, accent_key?, icon_key? }   # accent_key from PALETTE
 
-GET  /rooms              → Room[]
+GET  /rooms              → Room[]                       # public rooms only
 POST /rooms              (host only) { slug, name, topic? }         → Room
 PATCH /rooms/:id         (host only) { name?, topic?, position? }   → Room
 POST /rooms/:id/archive  (host only)                                → Room
+
+GET  /dms                → Room[]                       # the DMs you are in
+POST /dms                { user_ids }                   → Room
 ```
 
 ```ts
+type RoomKind = "room" | "dm"
+
 type Room = {
   id: string; slug: string; name: string; topic: string | null;
+  kind: RoomKind; member_ids: string[] | null;
   position: number; archived_at: number | null;
   last_message_id: string | null;   // client compares to read marker
 }
 ```
+
+**`GET /rooms` never returns a DM and `GET /dms` never returns a room.** They are two
+lists because they are two things: rooms are the server's, in an order the host sets,
+and everybody sees the same ones; a DM is yours, and the set of them is different for
+every person on the server. Keeping them apart means a surface that draws rooms cannot
+accidentally draw somebody's DM by forgetting a filter — it never had it to begin with.
+
+`kind` says which one you are holding. `member_ids` is the people in a DM, and it is
+`null` for a room — a room's members are everybody, and a list of every account on the
+server is a different thing wearing the same field. A DM's `slug` and `name` are
+generated and are not for drawing: a DM is named by who is in it (SPEC §4.13), so a
+client draws `member_ids` and ignores both. The `dm-` slug prefix is reserved and
+`POST /rooms` refuses it.
 
 **The three storage figures** are read-only and every member sees them; the status bar
 draws the first two (SPEC §5.6). `storage_used_bytes` counts stored objects *and*
@@ -126,6 +145,32 @@ starred files and files on pinned messages never expire whatever it says (SPEC �
 They are not on `PATCH /server`. Both knobs are environment variables set in the
 deployment (`LINGER_POOL_BYTES`, `LINGER_FILE_EXPIRY_DAYS`), not rows a host edits from
 inside the app — see `docs/decisions.md`.
+
+### 3.1 DMs
+
+```
+GET  /dms                → Room[]
+POST /dms   { user_ids } → Room
+```
+
+`POST /dms` is **create-or-find**: the same set of people always gives the same DM, so
+asking twice is not how you end up with two conversations with the same three people
+(SPEC §4.13). `user_ids` is everybody *else* — the caller is always a member and does
+not name themselves; naming yourself, or the same person twice, is
+`VALIDATION_FAILED`, and so is an empty list, because a DM with only you in it is not a
+conversation. Two to eight people in total. An id that is not a member of this server
+is `NOT_FOUND`.
+
+**Membership is fixed at creation.** There is no endpoint to add or remove somebody:
+a different set of people is a different DM. Adding one later would mean deciding what
+they can read of what was already said, and that decision is a permission system in its
+first disguise (AGENTS rule 10).
+
+Everything else about a DM is a room. `GET /rooms/:id/messages`, `POST` to it,
+reactions, uploads, typing and presence all work unchanged and are addressed by the
+same `room_id`. **A non-member gets `NOT_FOUND` from every one of them** — not
+`FORBIDDEN`, which would confirm the DM exists. There is nothing a non-member can ask
+that distinguishes "a DM you are not in" from "no such room".
 
 ---
 
@@ -605,7 +650,8 @@ type Frame = { op: string; d: unknown; s?: number }
 S→C  { "op": "hello",  "d": { "heartbeat_interval_ms": 30000 } }
 C→S  { "op": "identify", "d": { "token": "<access_jwt>", "client": "linger-desktop/0.1.0" } }
 S→C  { "op": "ready",  "d": { "session_id", "user", "users": User[],
-                              "rooms": Room[], "presence": PresenceEntry[] },
+                              "rooms": Room[], "dms": Room[],
+                              "presence": PresenceEntry[] },
                               "s": 0 }
 ```
 
@@ -648,7 +694,7 @@ Beyond that, the client must re-identify and refetch.
 | `room.leave` | `{ room_id, user_id }` |
 | `user.update` | `User` — the current state of this person, **whether or not the client already had them**. A display name, style or status change, and equally somebody who was not on the roster a moment ago: the client's fold appends when the id is unknown |
 | `user.remove` | `{ user_id }` — this person is off the server. The mirror of `user.update`, and it names an id rather than carrying a `User` because there is no state left to describe: `User` has no `deactivated_at` field and is not going to grow one to carry a tombstone |
-| `room.create` / `room.update` | `Room` |
+| `room.create` / `room.update` | `Room` — a DM's `room.create` reaches its members and nobody else, which is how the other members find out it exists |
 | `typing` | `{ room_id, user_id }` |
 | `knock` | `{ from_user_id }` — **sent to that one person's sessions and nobody else's** (SPEC §4.9) |
 
@@ -663,11 +709,31 @@ type PresenceEntry = {
 
 ### Fan-out rules
 
-- Presence and occupancy go to every connected client. At this scale, no filtering.
-- `room.enter` is sent only to clients currently in that room. The receiving
-  client applies its own mute rules and quiet hours before playing anything (SPEC §4.1).
-- Message events go to all clients; the client decides what to render. There are no
-  per-room permissions in V1, so there is nothing to filter on.
+**Every frame that names a room is filtered by that room's membership.** A public room's
+members are everybody on the server, so this changes nothing for rooms; a DM's members
+are the people in it, and nobody else's session is sent the frame at all. It is not a
+client-side decision and never was one — a client that receives a frame has already been
+told the thing.
+
+- **A frame that names a room the receiver cannot see is not sent.** That covers
+  `message.create`, `message.update`, `message.delete`, `reaction.update`,
+  `room.occupancy`, `room.enter`, `room.leave`, `room.create`, `room.update` and
+  `typing`. The server resolves the audience when it publishes; there is no filtering
+  left for anybody downstream to forget.
+- **A new frame type is members-only until somebody says otherwise.** The mapping from
+  frame to room is exhaustive in `linger-server`, so a frame added later does not
+  compile until its author has said whether it names a room. Defaulting the other way is
+  how a leak gets added by somebody who was not thinking about DMs at all.
+- **`presence.update` is redacted, not withheld.** Somebody in a DM is in a room, and
+  a receiver who cannot see that room is sent the same entry with `room_id: null` — so
+  they still see the person is around, and are not told where. Dropping the frame would
+  make that person appear offline to everybody outside the conversation, which is a
+  worse answer and a slower leak.
+- `room.enter` is sent only to clients currently in that room, *and* only to members
+  of it. The receiving client applies its own mute rules and quiet hours before playing
+  anything (SPEC §4.1).
+- `user.update` and `user.remove` go to every connected client. They are about a person,
+  not a place.
 - `knock` is the one **addressed** frame: it goes to every session the target
   has open and to no other member, the sender included. The address is not on
   the wire — the receiver is the only one who gets the frame, so a field naming

@@ -54,6 +54,16 @@ pub const MAX_LINK_REDIRECTS: usize = 3;
 /// Ceiling on `GET /media?limit=` (PROTOCOL §6).
 pub const MAX_MEDIA_PAGE: u32 = 100;
 
+/// How many people can be in one DM, counting the person who made it
+/// (SPEC §4.13, PROTOCOL §3.1).
+///
+/// The same ceiling as the rest of the product — SPEC §2's dinner party of
+/// eight. A group DM that wants to be bigger than the server is a room, and the
+/// floor of two is what stops a DM with only yourself in it, which is a text
+/// file wearing a conversation's clothes.
+pub const MIN_DM_MEMBERS: usize = 2;
+pub const MAX_DM_MEMBERS: usize = 8;
+
 /// Search (SPEC §4.12, PROTOCOL §6).
 ///
 /// A query longer than this is a paste, not a search, and every extra token is
