@@ -51,11 +51,14 @@ struct PageQuery {
 
 async fn page(
     State(state): State<AppState>,
-    _auth: AuthedUser,
+    auth: AuthedUser,
     Path(room_id): Path<RoomId>,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<Vec<Message>>, ApiError> {
-    repo::rooms::expect(&state.db.read, room_id).await?;
+    // A DM this person is not in answers exactly like a room that does not
+    // exist (PROTOCOL §3.1) — 404, not 403, because "you may not read this"
+    // confirms there is something to read.
+    repo::rooms::visible_to(&state.db.read, room_id, auth.id).await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
 
     let Some(around) = query.around else {
@@ -105,7 +108,7 @@ async fn create(
         return Err(ApiError::rate_limited(retry));
     }
 
-    let room = repo::rooms::expect(&state.db.read, room_id).await?;
+    let room = repo::rooms::visible_to(&state.db.read, room_id, auth.id).await?;
     if room.archived_at.is_some() {
         return Err(ApiError::validation("That room is archived."));
     }
@@ -201,13 +204,28 @@ async fn check_attachments(
     Ok(())
 }
 
+/// A message this person is allowed to touch at all.
+///
+/// Every route below takes a message id straight from the caller, and a message
+/// id is a bare UUID with nothing in it that says which room it belongs to — so
+/// without this, a DM's message could be edited, deleted, pinned, reacted to or
+/// used as a read marker by anybody who came by the id (SPEC §4.13). The room
+/// check is the same one the room routes make, and it answers the same way: a
+/// message in a DM you are not in is `NOT_FOUND`, exactly like a message that
+/// was never there.
+async fn reachable(state: &AppState, id: MessageId, user_id: UserId) -> Result<Message, ApiError> {
+    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
+    repo::rooms::visible_to(&state.db.read, message.room_id, user_id).await?;
+    Ok(message)
+}
+
 async fn edit(
     State(state): State<AppState>,
     auth: AuthedUser,
     Path(id): Path<MessageId>,
     Json(req): Json<EditMessageRequest>,
 ) -> Result<Json<Message>, ApiError> {
-    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
+    let message = reachable(&state, id, auth.id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
     }
@@ -251,7 +269,7 @@ async fn delete(
     auth: AuthedUser,
     Path(id): Path<MessageId>,
 ) -> Result<StatusCode, ApiError> {
-    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
+    let message = reachable(&state, id, auth.id).await?;
     if message.deleted_at.is_some() {
         return Ok(StatusCode::NO_CONTENT); // idempotent
     }
@@ -275,8 +293,13 @@ async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn set_pin(state: &AppState, id: MessageId, pinned: bool) -> Result<Json<Message>, ApiError> {
-    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
+async fn set_pin(
+    state: &AppState,
+    id: MessageId,
+    user_id: UserId,
+    pinned: bool,
+) -> Result<Json<Message>, ApiError> {
+    let message = reachable(state, id, user_id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
     }
@@ -294,18 +317,18 @@ async fn set_pin(state: &AppState, id: MessageId, pinned: bool) -> Result<Json<M
 
 async fn pin(
     State(state): State<AppState>,
-    _auth: AuthedUser,
+    auth: AuthedUser,
     Path(id): Path<MessageId>,
 ) -> Result<Json<Message>, ApiError> {
-    set_pin(&state, id, true).await
+    set_pin(&state, id, auth.id, true).await
 }
 
 async fn unpin(
     State(state): State<AppState>,
-    _auth: AuthedUser,
+    auth: AuthedUser,
     Path(id): Path<MessageId>,
 ) -> Result<Json<Message>, ApiError> {
-    set_pin(&state, id, false).await
+    set_pin(&state, id, auth.id, false).await
 }
 
 async fn add_reaction(
@@ -318,7 +341,7 @@ async fn add_reaction(
             "Reactions come from the fixed set of 12.",
         ));
     }
-    let message = repo::messages::expect(&state.db.read, &state.config, id).await?;
+    let message = reachable(&state, id, auth.id).await?;
     if message.deleted_at.is_some() {
         return Err(ApiError::not_found("That message is gone."));
     }
@@ -334,7 +357,7 @@ async fn add_reaction(
     .execute(&state.db.write)
     .await?;
 
-    publish_reaction(&state, id, &key).await?;
+    publish_reaction(&state, id, message.room_id, &key).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -348,6 +371,10 @@ async fn remove_reaction(
             "Reactions come from the fixed set of 12.",
         ));
     }
+    // Taking a reaction back needs the same check putting one on does: without
+    // it, a non-member with an id could still make the server fan out a
+    // `reaction.update` for a DM's message.
+    let message = reachable(&state, id, auth.id).await?;
     sqlx::query("DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND key = ?")
         .bind(id.to_vec())
         .bind(auth.id.to_vec())
@@ -355,18 +382,31 @@ async fn remove_reaction(
         .execute(&state.db.write)
         .await?;
 
-    publish_reaction(&state, id, &key).await?;
+    publish_reaction(&state, id, message.room_id, &key).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn publish_reaction(state: &AppState, id: MessageId, key: &str) -> Result<(), ApiError> {
+/// `reaction.update` is the one frame that belongs to a room without naming
+/// one — it names a message. So the room is resolved here and travels with the
+/// frame rather than in it (`Gateway::publish_in`): a client that gets the
+/// frame is holding the message already, and a `room_id` on the wire would be a
+/// field that exists only to be got wrong.
+async fn publish_reaction(
+    state: &AppState,
+    id: MessageId,
+    room_id: RoomId,
+    key: &str,
+) -> Result<(), ApiError> {
     let group = repo::messages::reaction_group(&state.db.read, id, key).await?;
-    state.gateway.publish(ServerEvent::ReactionUpdate {
-        message_id: id,
-        key: group.key,
-        count: group.count,
-        user_ids: group.user_ids,
-    });
+    state.gateway.publish_in(
+        room_id,
+        ServerEvent::ReactionUpdate {
+            message_id: id,
+            key: group.key,
+            count: group.count,
+            user_ids: group.user_ids,
+        },
+    );
     Ok(())
 }
 
@@ -376,7 +416,7 @@ async fn put_read_marker(
     Path(room_id): Path<RoomId>,
     Json(req): Json<UpdateReadMarkerRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let message = repo::messages::expect(&state.db.read, &state.config, req.last_read_id).await?;
+    let message = reachable(&state, req.last_read_id, auth.id).await?;
     if message.room_id != room_id {
         return Err(ApiError::validation("That message isn't in that room."));
     }

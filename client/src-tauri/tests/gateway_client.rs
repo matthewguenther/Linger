@@ -143,6 +143,7 @@ fn ready_frame(session_id: &str) -> Value {
         user: user.clone(),
         users: vec![user],
         rooms: Vec::new(),
+        dms: Vec::new(),
         presence: Vec::new(),
     };
     json!({ "op": "ready", "d": data, "s": 0 })

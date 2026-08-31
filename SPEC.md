@@ -379,6 +379,49 @@ the text somebody wrote around it, which is theirs.
 - Clicking a hit opens that room and goes to that message.
 - Rate limit: 30 searches per person per minute.
 
+### 4.13 DMs and group DMs
+
+**The first private space in the product**, and the reason it needs its own section is
+not the feature — it is that every other surface was written assuming everybody can see
+everything. A DM is a room with members. That is the whole model.
+
+**Not a permission system.** A DM has members and nothing else: no roles, no per-DM
+settings, no admin view. The host is a member of a DM or they cannot see it, and there
+is no override — a host who can read everybody's DMs is the thing people leave other
+apps to get away from, and "trusted friend running the server" is not an argument, it
+is the position that makes the feature pointless.
+
+**Membership is fixed when the DM is made.** Asking for a DM with the same set of
+people twice gives you the same DM, so there is no way to end up with four
+conversations with the same three people. Adding somebody later would mean deciding
+whether they can read what was said before they arrived, and that question is a
+permission system in its first disguise: a new set of people is a new DM.
+
+**Two to eight people.** The same ceiling as the rest of the product (§2's dinner party
+of eight), and a group DM that wants to be bigger is a room. You cannot DM yourself —
+a note to yourself is a text file, and every messaging app that added one did it
+because it had somewhere to put a feature, not because anybody asked.
+
+**A DM is a room everywhere it can be.** It holds messages, files and reactions the way
+a room does; typing and presence work inside it the way they do in a room. What differs
+is who it is fanned out to, and that is the whole of the implementation.
+
+**Where the leaks are.** Every surface that lists things has to ask *whose*: the room
+list, the message stream, the media collection, search, the export, notifications, link
+previews, and the media origin. A surface that forgets is not a bug that looks like a
+bug — it silently shows somebody a conversation they were not in. So membership is
+checked in one place per surface, and a frame the gateway does not have a reason to
+send is not sent.
+
+**Presence does not leak a DM's existence.** Somebody in a DM is *in a room* — but a
+person who cannot see that DM is told only that they are around, never which room. The
+alternative, dropping the presence update entirely, would make them look offline to
+everybody they are not currently talking to.
+
+**No unread counts, still** (§4.2). A DM holding something new gets the same weight
+change a room gets, and no number appears anywhere. Feeling more urgent is not an
+argument; it is exactly the argument that puts a badge on everything.
+
 ---
 
 ## 5. Design system — "Console"
@@ -545,7 +588,7 @@ says what replaced it: a status somebody typed.
 
 - Voice rooms (WebRTC mesh + coturn), push-to-talk, per-user gain
 - Ambient voice: a room you leave running, not a call you join
-- DMs and group DMs
+- DMs and group DMs (§4.13)
 - Search (§4.12)
 - Knock (§4.9)
 - Mobile client

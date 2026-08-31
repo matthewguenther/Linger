@@ -109,7 +109,7 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 | M6 — styling, themes, fonts | 2026-08-27 | Names drawn from custom properties, the two-click style picker, dark/light/system + evening warmth, twelve faces vendored — contrast ≥4.5:1 guarded in CI against four backgrounds | [m6.md](docs/tasks/m6.md) |
 | M7 — packaging and updates | tasks 2026-08-27 | Signed updater behind two Rust commands, tag → draft release with Linux and Windows installers, the shipped CSP stops at the app's own server, the server image publishes to ghcr for x86-64 and ARM64. **Its check is still open** — see *Human checks* | [m7.md](docs/tasks/m7.md) |
 | M8 — export | tasks 2026-08-28 | Any member can take a zip of the whole server — a file per room, every upload, an index — built in the background and downloaded from the media origin. **One human check is still open** — see *Human checks* | [m8.md](docs/tasks/m8.md) |
-| M9 — knock | tasks 2026-08-29 | `POST /knock` addressed to one person's sessions, a card that fades on its own, the sound player the entrance sounds will extend. **Its check is half-open** — see *Human checks*, HC-6 | still in this file, below |
+| M9 — knock | tasks 2026-08-29 | `POST /knock` addressed to one person's sessions, a card that fades on its own, the sound player the entrance sounds will extend. **Its check is half-open** — see *Human checks*, HC-6 | [m9.md](docs/tasks/m9.md) |
 | M10 — search | 2026-08-31 | An FTS5 index kept by triggers, `GET /search` with no query language to trip over, and a destination in the rail that lands you on a hit six months back — `around=` on the messages endpoint, and a room that knows when it is behind its own newest message | [m10.md](docs/tasks/m10.md) |
 
 **Everything a person still has to do by hand lives in one place now:
@@ -160,8 +160,9 @@ anybody installed**, and says so at startup. **Updates are signed; installers
 are not** — that is a decision, not a gap
 ([`docs/decisions.md`](docs/decisions.md)), and macOS is deliberately not built
 at all until T-705.
-M9 adds knock (below): `POST /knock` addressed to one person's sessions, the
-fading cards, and `lib/sound.ts` — the player entrance sounds will extend.
+M9 adds knock (see [m9.md](docs/tasks/m9.md)): `POST /knock` addressed to one
+person's sessions, the fading cards, and `lib/sound.ts` — the player entrance
+sounds will extend.
 M10 adds the whole of search (see [m10.md](docs/tasks/m10.md)): the `message_fts`
 index kept by triggers in `0004_search.sql` (**nothing in Rust writes to it**),
 `GET /search` over `repo::search` with the query rebuilt rather than forwarded,
@@ -321,10 +322,10 @@ Recorded in the *Parking lot* too.
 
 ---
 
-## V2 — M9 and M10 built, the rest planned
+## V2 — M9 and M10 built, M11 started
 
-**M9 (knock) landed 2026-08-29** and **M10 (search) landed 2026-08-31** — the
-index, the endpoint and the surface, all three archived in
+**M9 (knock) landed 2026-08-29** and **M10 (search) landed 2026-08-31**, and
+both are archived — [`docs/tasks/m9.md`](docs/tasks/m9.md) and
 [`docs/tasks/m10.md`](docs/tasks/m10.md). Everything below is still planned and
 not started. **Nothing below M10 is next.** V1 is done except the things in
 *Human checks*, and those come first — a release nobody has installed is not a
@@ -353,79 +354,13 @@ self-contained, and make the app better next week rather than next quarter.
 Build order, cheapest and safest first:
 
 ```
-M9 knock (built) → M10 search (built) → M11 DMs → M12 voice → M13 ambient voice
+M9 knock (built) → M10 search (built) → M11 DMs (started, T-1301 of 3)
+  → M12 voice → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
 it is on the *Backburner* instead. Desktop has to be finished and used by real
 people first.
-
----
-
-### M9 — knock ✅ *(both tasks landed 2026-08-29)*
-
-*Milestone check: a knock crosses two machines, shows up as something that
-fades on its own, and leaves nothing behind.* **Half-open:** everything but the
-two machines is done and tested. The two-machine half is **HC-6**.
-
-SPEC §4.9 was the whole spec and the hard part was what it *refuses*: no
-message, no thread, no unread state, nothing to dismiss. A knock that leaves a
-notification sitting there has become a message, and the feature is gone. What
-shipped keeps that: nothing is stored at either end, and the card has no
-controls on it at all.
-
-- ✅ **T-1101 · Knock, server side** — effort: **low** — Matt, 2026-08-29
-  `POST /knock` is mounted, and `crates/linger-server/tests/knock.rs` covers all
-  three acceptance cases plus three more: a stranger is `NOT_FOUND`, knocking
-  yourself is `VALIDATION_FAILED`, and the schema still has no table with
-  "knock" in its name.
-
-  **What this changed structurally.** The gateway bus used to carry a bare
-  `ServerEvent` and fan it to everybody; a knock is the first frame with an
-  audience of one. The bus now carries a small `Fanout { event, to }` and
-  `Gateway::publish_to` sets `to`. `publish` is unchanged and every existing
-  caller is untouched. Two things worth knowing next time somebody adds an
-  addressed frame:
-
-  - **The address is not on the wire.** `knock` carries `from_user_id` only.
-    The receiver is the only person who gets the frame, so a `target_user_id`
-    field would carry nothing and would be one more thing to get wrong.
-  - **It is sequenced, like everything else.** That means a resume inside the
-    120s window replays it. That is deliberate: an unsequenced frame is
-    *dropped* by the Tauri core (`gateway.rs` ignores frames without `s`), so a
-    control-frame knock would never reach the frontend at all.
-
-  A knock at somebody who is not connected lands nowhere and returns 204. That
-  is the design, not a gap — nothing is queued, because nothing is stored.
-
-- ✅ **T-1102 · Knock, client side** — effort: **medium** — Matt, 2026-08-29
-  You knock from the person's card in the roster, one control, one click, no
-  confirmation. What arrives is `client/src/knock/KnockCards.tsx`: a card in the
-  bottom-right that appears, is never focusable, and takes itself off after
-  `KNOCK_TTL_MS` (8s). It has no buttons, `pointer-events: none`, and
-  `aria-live="polite"` so a screen reader hears it without anything stealing
-  focus.
-
-  **The sound is `client/src/lib/sound.ts`, and it is the one T-901 extends —
-  do not write a second.** It owns the gate (global mute, plus quiet hours
-  22:00–08:00 listener-local, default **on**) and plays a knock synthesized from
-  an oscillator, so this task did not have to reach into T-903's curation for an
-  asset. What T-901 adds to *this* file: bundled `.opus` playback, the
-  5-min-per-listener cooldown, and per-user mute. Both switches are in settings
-  under `sound`.
-
-  **A knock lives in the gateway store**, as `GatewayState.knocks`, next to
-  `typing` and for the same reason: it is transient state with no server copy.
-  Not a second store (AGENTS: local state plus one gateway store). Cards from
-  every signed-in server are drawn, not just the active one.
-
-  **Verified on this machine, not on two.** One real client signed in, a second
-  member knocking over the real endpoint: the card appeared, faded on its own,
-  and left nothing in the stream or the roster; knocking from the card reached
-  the other person's socket; the fourth knock inside an hour showed "That's
-  three this hour. Give them a bit." **Still unverified:** the sound by ear (the
-  test ran at 07:50, inside quiet hours, so it correctly stayed silent), and the
-  acceptance criterion's *two machines*. Both belong in a human check.
 
 ---
 
@@ -445,14 +380,128 @@ words, an export containing a conversation you were not in.
 all. No roles, no per-room settings, no admin view of other people's DMs — the
 host is a member of a DM or they cannot see it, and there is no override.
 
-- ⬜ **T-1301 · The model and the endpoints** — effort: **high**
-  `rooms.kind` (`room` | `dm`), a `room_members` table, create-or-find a DM for
-  a set of people (asking twice for the same set gives the same DM), and listing
-  the ones you are in. Then the part that matters: **every gateway fan-out grows
-  a membership filter**, and the default for a new frame type must be "members
-  only" rather than "everybody".
-  *Accept:* integration tests where a third member's socket never receives a DM
-  frame, cannot fetch its messages by id, and cannot list it.
+**The spec section is written** — SPEC §4.13 and PROTOCOL §3.1, both landed with
+T-1301, which is also where the answers to the questions this raised are written
+down: two to eight people, membership fixed when the DM is made, no DM with
+yourself, and a `NOT_FOUND` rather than a `FORBIDDEN` for everything a
+non-member asks.
+
+**⚠ T-1301 landed the model and the fan-out. DMs still leak** through search,
+media, export, notifications and link previews until **T-1303**. Do not run a
+server where people use DMs before then — see T-1301's note.
+
+- ✅ **T-1301 · The model and the endpoints** — effort: **high** — Matt, 2026-08-31
+  `rooms.kind` and `room_members` in `migrations/0005_dms.sql`, `GET`/`POST
+  /dms` in `routes/dms.rs` over `repo::dms`, and the membership filter in the
+  gateway. **SPEC §4.13 and PROTOCOL §3.1 were written in the same commit** —
+  neither existed, and M11 had nothing but a one-line scope entry to build from.
+
+  **A DM is a room.** Same table, same messages, same attachments, same
+  reactions, same presence — `rooms.kind` says which it is, and the entire
+  difference is who the frames go to. A parallel structure would mean a second
+  code path through every surface that draws a conversation, and the second path
+  is the one somebody forgets.
+
+  **Create-or-find is the database's job, not Rust's.** `rooms.member_key` is
+  the member ids sorted, hex, comma-joined, and it is `UNIQUE`. Sorting is what
+  makes asking for Callie-and-Dave find the row made by asking for
+  Dave-and-Callie; the constraint is what makes two people asking in the same
+  instant produce one DM and a conflict rather than two DMs. A check-then-insert
+  in Rust cannot promise the second one, and the race is one nobody would ever
+  reproduce from a bug report.
+
+  ### The fan-out, which is the part that mattered
+
+  `Gateway::visible_to` **returns the frame to send rather than a boolean**, and
+  that change is the whole design. Four rules in one place: an addressed frame
+  reaches the person it names; a frame about a room reaches that room's members;
+  `room.enter` narrows again to people standing there; and `presence.update`
+  naming a room the receiver cannot see is **redacted, not withheld** — the room
+  goes, the person stays. Withholding it would make somebody look offline to
+  everybody they are not currently talking to, which is both wrong and a slower
+  way of leaking the same thing.
+
+  **`room_of` has no wildcard arm, on purpose.** It maps a `ServerEvent` to the
+  room it is about, and a frame type added later does not compile until its
+  author has said which it is. That is the task's "the default for a new frame
+  type must be members only" made structural: a `_ => None` meaning "everybody
+  sees this" is how a DM leaks in a change that was about something else.
+
+  **The audience index is in memory, and that needed care.** The fan-out is not
+  async — presence and room focus are decided while a socket is being torn down,
+  with nowhere to await a query — so `Gateway.dm_members` is a snapshot. Three
+  things keep it true and there is no fourth, because membership is fixed when a
+  DM is made: it is loaded at startup, written when a DM is created, and
+  reloaded when somebody is removed or restored. **The startup load is a hard
+  failure** (`AppState::build` returns `Err`), because an empty index does not
+  fail safe — it makes every DM on the server look like a public room.
+
+  **`reaction.update` is the one frame that belongs to a room without naming
+  one.** It names a message. So the route resolves the room and passes it
+  alongside the frame (`publish_in`) rather than putting a `room_id` on the
+  wire, which would be a field that exists only to be got wrong.
+
+  ### Five ways in that were not the obvious one
+
+  The room list and the message page are the doors people think of. These are
+  the ones found by asking "what else takes an id":
+
+  - **A message id is a bare UUID** and says nothing about its room, so edit,
+    delete, pin, unpin, react, unreact and the read marker were each a way to
+    touch a DM's message with a guessed id. They all go through one `reachable`
+    helper now. `remove_reaction` had no lookup at all and needed one added.
+  - **`room.focus` and `typing.start` are client frames**, so a broken or lying
+    client can send them. Focusing a DM you are not in would have put you in its
+    occupancy in front of the people who *are* in it — the outward direction was
+    already covered, this is the inward one.
+  - **The host's own controls.** `PATCH /rooms/:id` and the archive are
+    host-only, and being the host is not membership. Renaming or archiving
+    somebody's conversation is small, and it is still the host reaching inside a
+    private space.
+  - **A notify rule naming a room** is a way to ask whether a DM exists, one
+    guessed id at a time.
+  - **Every refusal is `NOT_FOUND`, never `FORBIDDEN`.** "You may not see this"
+    confirms there is something to see.
+
+  ### Two things worth knowing before the next task
+
+  - **A DM's `slug` and `name` are generated and mean nothing.** `rooms.slug` is
+    `NOT NULL UNIQUE` and much of the server addresses rooms by it, so a DM
+    needs one — but a DM is named by who is in it, and a name computed from its
+    members is wrong for everybody in it (Callie's DM with Dave is "Dave" to
+    Callie and "Callie" to Dave). T-1302 draws `member_ids`. The `dm-` prefix is
+    reserved in `validate::room_slug`.
+  - **Removal is a soft delete, so the membership row survives it.** That is
+    deliberate: `restore` puts somebody back into the DMs they were in without
+    anything having had to remember what they were. `repo::rooms::members`
+    drops deactivated accounts, and it is the single place that decides.
+
+  ### What is tested, and how I know the tests work
+
+  `crates/linger-server/tests/dms.rs` — fourteen, over real WebSockets for the
+  socket half. All three acceptance criteria have one: a non-member cannot list
+  a DM (including in `ready`), cannot fetch its messages, and their socket never
+  receives a frame naming it.
+
+  **The tests were checked by breaking the code.** Stubbing `can_see_room` to
+  return `true` fails the two gateway tests; stubbing `repo::rooms::visible_to`
+  to return `Ok` fails four REST ones. A security test that cannot fail is
+  decoration, and both halves of this one are real.
+
+  One test is deliberately shaped to catch a filter that drops everything: after
+  proving a stranger sees nothing from a DM, it posts in a public room and
+  asserts the same stranger still hears it.
+
+  ### ⚠ What is still open — DMs are not safe to use yet
+
+  **T-1303 has not landed, and until it does a DM leaks through every surface
+  that was not part of this task**: search returns other people's words, the
+  media grid shows their files, the export contains conversations you were not
+  in, and notifications and link previews are unchecked. That is the intended
+  shape of the milestone, not an oversight — T-1303 is the security-critical
+  half and it does every surface together, with a test each. But **nobody should
+  run a server where people use DMs until it is done.** No client can make a DM
+  before T-1302, so the exposure today is to somebody with `curl` and an account.
 
 - ⬜ **T-1302 · DMs in the client** — effort: **high**
   A section of the rail under the rooms, started from a person's card in the
@@ -467,6 +516,11 @@ host is a member of a DM or they cannot see it, and there is no override.
   gets forgotten. Media grid, search, export, notifications, link previews and
   the media origin all have to respect membership. An export contains the DMs
   you are in and no others.
+  **Until this lands, a DM is private on the gateway and in the message routes
+  and nowhere else** (T-1301). Start from `repo::rooms::visible_to` — every
+  surface below needs the same question asked, and the ones that list things
+  need it as a `JOIN` rather than a check, because a check is something a later
+  query can be written without.
   *Accept:* a test per surface, each one asserting a non-member gets nothing —
   and a test that a **removed** member stops seeing a DM they used to be in.
 

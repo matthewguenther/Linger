@@ -47,12 +47,22 @@ impl AppState {
             }
             Storage::S3 => (Arc::new(S3Store::open(&config)?), None),
         };
+        // Who is in each DM, before anything can connect (SPEC §4.13). The `?`
+        // is load-bearing: an empty audience index does not fail safe, it makes
+        // every DM on the server look like a public room, so a server that
+        // cannot read this must not come up at all.
+        let gateway = Arc::new(Gateway::new());
+        gateway
+            .reload_dms(&db.read)
+            .await
+            .map_err(|_| anyhow::anyhow!("could not load DM membership from the database"))?;
+
         Ok(Self {
             db,
             config,
             jwt: Arc::new(jwt),
             limiter: Arc::new(RateLimiter::new()),
-            gateway: Arc::new(Gateway::new()),
+            gateway,
             setup: Arc::new(SetupState::new(user_count == 0)),
             storage,
             local,

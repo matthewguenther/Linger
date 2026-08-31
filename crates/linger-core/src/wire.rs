@@ -318,6 +318,20 @@ pub struct UpdateServerRequest {
     pub icon_key: Option<String>,
 }
 
+/// A room, or a DM (SPEC §4.13).
+///
+/// One type rather than two, because a DM *is* a room in every way except who
+/// it is fanned out to: same messages, same files, same reactions, same
+/// presence. A second type would mean a second code path through every surface
+/// that draws a conversation, and the second path is the one somebody forgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum RoomKind {
+    Room,
+    Dm,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Room {
@@ -325,12 +339,33 @@ pub struct Room {
     pub slug: String,
     pub name: String,
     pub topic: Option<String>,
+    /// Which of the two this is. A client draws a `Dm` by who is in it, not by
+    /// its `slug` or `name` — both are generated for a DM and mean nothing.
+    pub kind: RoomKind,
+    /// The people in a DM, and `None` for a room.
+    ///
+    /// `None` rather than "everybody, listed": a room's members are every
+    /// account on the server, and putting that list here would be a copy of the
+    /// roster that goes stale the moment somebody joins. The absence is the
+    /// information.
+    pub member_ids: Option<Vec<UserId>>,
     pub position: i32,
     #[ts(type = "number | null")]
     pub archived_at: Option<i64>,
     /// The client compares this to its read marker for the "left off here" line
     /// and the label-weight change. No count is ever computed server-side.
     pub last_message_id: Option<MessageId>,
+}
+
+/// Ask for a DM with these people (PROTOCOL §3.1).
+///
+/// `user_ids` is everybody *else*. The caller is always a member and never
+/// names themselves — a request that did would have to decide what naming
+/// yourself twice means, and there is no useful answer.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateDmRequest {
+    pub user_ids: Vec<UserId>,
 }
 
 // ---------------------------------------------------------------------------

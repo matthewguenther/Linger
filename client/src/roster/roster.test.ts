@@ -61,6 +61,8 @@ const garage: Room = {
   slug: "garage",
   name: "Garage",
   topic: null,
+  kind: "room",
+  member_ids: null,
   position: 0,
   archived_at: null,
   last_message_id: null,

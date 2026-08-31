@@ -113,6 +113,12 @@ async fn remove_user(
     // Written first, then enforced: a socket closed before the column is
     // committed could reconnect into an account that is still live.
     state.gateway.close_sessions_for(id).await;
+    // A removed member stops being in the DMs they were in (SPEC §4.13). The
+    // membership rows survive on purpose — `restore_user` puts them back
+    // without anything having had to remember what they were — so it is the
+    // deactivation that ends it, and the gateway's audience index has to be
+    // told, because it is a snapshot rather than a query.
+    state.gateway.reload_dms(&state.db.read).await?;
     state
         .gateway
         .publish(ServerEvent::UserRemove { user_id: id });
@@ -132,6 +138,10 @@ async fn restore_user(
         .bind(id.to_vec())
         .execute(&state.db.write)
         .await?;
+
+    // Back into the DMs they were in, which is the other half of the rows
+    // having survived removal.
+    state.gateway.reload_dms(&state.db.read).await?;
 
     // `user.update` is "here is this person, whether or not you had them"
     // (PROTOCOL §8), so every connected client grows the card back on its own.
@@ -408,7 +418,10 @@ async fn put_notify_rule(
 ) -> Result<StatusCode, ApiError> {
     repo::users::expect(&state.db.read, &state.config, rule.target_user_id).await?;
     if let Some(room) = rule.room_id {
-        repo::rooms::expect(&state.db.read, room).await?;
+        // A rule naming a DM you are not in is a way to ask whether that DM
+        // exists, one guessed id at a time. It answers like any other room you
+        // cannot see: not found.
+        repo::rooms::visible_to(&state.db.read, room, auth.id).await?;
     }
     // SQLite treats NULLs as distinct in primary keys, so "delete then insert"
     // is the only reliable upsert for the all-rooms (NULL) rule.

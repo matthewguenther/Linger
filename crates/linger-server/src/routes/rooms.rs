@@ -5,7 +5,7 @@ use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use linger_core::gateway::ServerEvent;
-use linger_core::wire::{CreateRoomRequest, Room, UpdateRoomRequest};
+use linger_core::wire::{CreateRoomRequest, Room, RoomKind, UpdateRoomRequest};
 use linger_core::RoomId;
 
 use crate::auth::{AuthedUser, HostUser};
@@ -70,13 +70,30 @@ async fn create(
     Ok(Json(room))
 }
 
+/// A DM is not a room the host administers (SPEC §4.13).
+///
+/// `POST /rooms`, `PATCH /rooms/:id` and the archive are host-only, and being
+/// the host is not membership in anybody's conversation. Renaming a DM,
+/// re-ordering it or archiving it are all things a host could otherwise do to a
+/// conversation they are not in — small acts, but each one is the host reaching
+/// inside a private space, which is the thing this feature exists to make
+/// impossible. `NOT_FOUND` rather than `FORBIDDEN`, for the usual reason: the
+/// refusal must not confirm the DM is there.
+fn only_a_room(room: &Room) -> Result<(), ApiError> {
+    if room.kind == RoomKind::Room {
+        Ok(())
+    } else {
+        Err(ApiError::not_found("No such room on this server."))
+    }
+}
+
 async fn update(
     State(state): State<AppState>,
     _host: HostUser,
     Path(id): Path<RoomId>,
     Json(req): Json<UpdateRoomRequest>,
 ) -> Result<Json<Room>, ApiError> {
-    repo::rooms::expect(&state.db.read, id).await?;
+    only_a_room(&repo::rooms::expect(&state.db.read, id).await?)?;
     if let Some(name) = &req.name {
         let trimmed = name.trim();
         if trimmed.is_empty() || trimmed.chars().count() > 48 {
@@ -118,7 +135,7 @@ async fn archive(
     _host: HostUser,
     Path(id): Path<RoomId>,
 ) -> Result<Json<Room>, ApiError> {
-    repo::rooms::expect(&state.db.read, id).await?;
+    only_a_room(&repo::rooms::expect(&state.db.read, id).await?)?;
     sqlx::query("UPDATE rooms SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
         .bind(now_ms())
         .bind(id.to_vec())
