@@ -47,6 +47,7 @@ import type { User } from "../generated/User";
 import type { UserStatus } from "../generated/UserStatus";
 import type { UserId } from "../generated/UserId";
 import { considerFrame } from "../notify/notify";
+import { voiceFrame } from "./ipc";
 import { playKnock } from "./sound";
 import type { AuthedApi } from "./api";
 
@@ -764,6 +765,13 @@ async function attachListeners(): Promise<void> {
       // belongs out here with the other one. `playKnock` applies the mute and
       // the quiet hours itself, so a knock at 3am is a card and nothing more.
       if (frame.op === "knock") playKnock();
+      // Voice is the core's business, not this page's (ARCHITECTURE §2). These
+      // two frames are handed straight over — the fold above ignores them, and
+      // deliberately: nothing the store holds changes because a peer connection
+      // did, and the voice surface (T-1404) will read the core's own events.
+      if (frame.op === "voice.state" || frame.op === "voice.signal") {
+        void voiceFrame(server, frame);
+      }
     }),
   ]);
   await listening;

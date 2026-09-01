@@ -58,6 +58,19 @@ tauri-plugin-opener = "2.5.4"
 # package to anybody's build.
 tauri-plugin-notification = "2"
 
+# Voice (SPEC §4.14, ARCHITECTURE §2, T-1402). Audio lives in Rust rather than
+# in the WebView, and this is the transport half of that: peer connections,
+# offer/answer, ICE and RTP.
+#
+# **It needs nothing installed.** `webrtc` is pure Rust down to the crypto
+# (`ring` via rustls), so it adds no system package to anybody's build — which
+# was the open question before it went in, and the reason the microphone half
+# is not here yet: `cpal` needs ALSA's headers on Linux and an Opus encoder
+# needs libopus. See `voice::audio`.
+webrtc = "0.14"
+async-trait = "0.1"
+bytes = "1"
+
 # Signed in-app updates (T-701). `rustls-tls` for the same reason the gateway
 # picked it: no box needs libssl headers to build the shell. `zip` is what
 # unpacks the NSIS bundle on Windows. Both are the crate's defaults today —
@@ -74,6 +87,9 @@ tauri-plugin-updater = { version = "2.10.1", default-features = false, features 
 #   `linux-native` (kernel keyutils) is deliberately NOT enabled: it would
 #   "succeed" on a headless box while losing the secret at logout, hiding the
 #   no-wallet case the client is required to handle honestly.
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["async-secret-service", "crypto-rust", "tokio"] }
 

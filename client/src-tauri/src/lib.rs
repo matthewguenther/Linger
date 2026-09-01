@@ -4,14 +4,16 @@
 
 pub mod gateway;
 mod secrets;
+pub mod voice;
 mod updates;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use linger_core::gateway::{ClientFrame, ServerFrame};
+use linger_core::RoomId;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use secrets::{SessionWrite, SessionsLoad, StoredSession};
 
@@ -119,6 +121,76 @@ struct WindowEvents {
     server: String,
 }
 
+/// Sends one server's voice signalling back down its gateway connection.
+///
+/// The engine does not know what a server is — it produces `ClientFrame`s and
+/// this puts them on the right socket, which is the same thing the frontend's
+/// `gateway_send` does for everything else.
+struct VoiceWire {
+    app: AppHandle,
+    server: String,
+}
+
+impl voice::Signaller for VoiceWire {
+    fn send(&self, frame: ClientFrame) {
+        // The connection is Tauri state rather than something this holds: a
+        // signaller that owned a handle would keep a dead socket alive after a
+        // reconnect replaced it, and voice would go quiet with everything
+        // looking fine.
+        let connections = self.app.state::<Connections>();
+        connections.with(|held| {
+            if let Some(handle) = held.get(&self.server) {
+                handle.send(frame);
+            }
+        });
+    }
+}
+
+/// One peer's connection state, on its way to the window.
+#[derive(Clone, Serialize)]
+struct VoicePeerEvent<'a> {
+    server: &'a str,
+    peer: &'a str,
+    state: &'a str,
+}
+
+/// Tells the window when a peer connects, fails or goes.
+struct VoiceWatcher {
+    app: AppHandle,
+    server: String,
+}
+
+impl voice::Watcher for VoiceWatcher {
+    fn peer_state(&self, peer: &str, state: &str) {
+        let _ = self.app.emit(
+            VOICE_PEER_EVENT,
+            VoicePeerEvent {
+                server: &self.server,
+                peer,
+                state,
+            },
+        );
+    }
+}
+
+/// The event a voice peer's state change arrives on.
+pub const VOICE_PEER_EVENT: &str = "voice:peer";
+
+type VoiceEngine = voice::Engine<VoiceWire, VoiceWatcher>;
+
+/// One voice engine per server. A person can be signed into several and is in
+/// voice on at most one, but which one is theirs to decide, and an engine per
+/// server is what makes "leave the one you were in" a local question.
+#[derive(Default)]
+struct VoiceEngines(Mutex<HashMap<String, std::sync::Arc<VoiceEngine>>>);
+
+impl VoiceEngines {
+    fn with<T>(&self, f: impl FnOnce(&mut HashMap<String, std::sync::Arc<VoiceEngine>>) -> T) -> T {
+        let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut held)
+    }
+}
+
 impl gateway::Events for WindowEvents {
     fn status(&self, status: gateway::Status) {
         // A failed emit means the window is gone. There is nobody to tell.
@@ -213,6 +285,74 @@ fn gateway_send(connections: State<'_, Connections>, base_url: String, frame: Cl
     connections.with(|held| held.get(&base_url).is_some_and(|handle| handle.send(frame)))
 }
 
+/// Get (or build) the voice engine for one server.
+fn engine_for(app: &AppHandle, base_url: &str) -> std::sync::Arc<VoiceEngine> {
+    let engines = app.state::<VoiceEngines>();
+    engines.with(|held| {
+        std::sync::Arc::clone(held.entry(base_url.to_string()).or_insert_with(|| {
+            std::sync::Arc::new(voice::Engine::new(
+                std::sync::Arc::new(VoiceWire {
+                    app: app.clone(),
+                    server: base_url.to_string(),
+                }),
+                std::sync::Arc::new(VoiceWatcher {
+                    app: app.clone(),
+                    server: base_url.to_string(),
+                }),
+                // No ICE servers yet. Host candidates alone reach another
+                // machine on the same network and nothing beyond it — which is
+                // the whole reason T-1403 (a TURN server in the deploy) is its
+                // own task, and why this list being empty is a gap rather than
+                // a default.
+                Vec::new(),
+            ))
+        }))
+    })
+}
+
+/// Join voice in a room (SPEC §4.14).
+///
+/// The mesh is not built here: it is built when the server answers with a
+/// `voice.state`, which is the same path a peer arriving later takes. One code
+/// path for "I joined" and "somebody joined" is what stops the two drifting.
+#[tauri::command]
+async fn voice_join(app: AppHandle, base_url: String, session_id: String, room_id: RoomId) {
+    let engine = engine_for(&app, &base_url);
+    engine.set_session(session_id).await;
+    engine.join(room_id).await;
+}
+
+/// Leave voice, and tear the mesh down whether or not the server answers.
+#[tauri::command]
+async fn voice_leave(app: AppHandle, base_url: String) {
+    let engine = engine_for(&app, &base_url);
+    engine.leave().await;
+}
+
+/// Hand the engine a voice frame that arrived on the gateway.
+///
+/// The frontend routes these rather than the gateway client doing it directly,
+/// for the same reason every other frame goes to the frontend first: the store
+/// is the one place that knows which server is which and what state it is in.
+#[tauri::command]
+async fn voice_frame(app: AppHandle, base_url: String, frame: ServerFrame) {
+    let engine = engine_for(&app, &base_url);
+    match frame.event {
+        linger_core::gateway::ServerEvent::VoiceState { room_id, peers } => {
+            engine.on_state(room_id, &peers).await;
+        }
+        linger_core::gateway::ServerEvent::VoiceSignal {
+            from,
+            kind,
+            payload,
+        } => {
+            engine.on_signal(&from, kind, &payload).await;
+        }
+        // Everything else is the frontend's business, not the engine's.
+        _ => {}
+    }
+}
+
 /// Entry point shared by main.rs and (later) mobile.
 pub fn run() {
     tauri::Builder::default()
@@ -229,6 +369,7 @@ pub fn run() {
         // so the page goes through `updates.rs` or not at all.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Connections::default())
+        .manage(VoiceEngines::default())
         .invoke_handler(tauri::generate_handler![
             sessions_load,
             session_save,
@@ -237,6 +378,9 @@ pub fn run() {
             gateway_disconnect,
             gateway_token,
             gateway_send,
+            voice_join,
+            voice_leave,
+            voice_frame,
             updates::app_version,
             updates::update_check,
             updates::update_install
