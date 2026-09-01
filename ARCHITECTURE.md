@@ -634,7 +634,7 @@ project. V1's remaining work is still five things a person has to do by hand
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
 | **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **built: index and endpoint 2026-08-30, surface 2026-08-31. Its check passed in a running app** |
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days — **built 2026-08-31.** Its check passed surface by surface against a running server; the two-machine half is a human check |
-| **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks — **signalling landed 2026-09-01 (T-1401): the frames, no audio.** Everything from T-1402 needs real networks |
+| **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks — **signalling and transport landed 2026-09-01 (T-1401, T-1402 part one): frames, peer connections, ICE. No microphone — blocked on two system packages, see TASKS** |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
 | **M14** | Custom themes | Somebody makes a colour scheme, it survives a restart, and a file carries it to another computer | **V3, not V2.** Three decisions come first — see `TASKS.md` *Parking lot* |
 

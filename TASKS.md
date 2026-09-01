@@ -374,7 +374,7 @@ Build order, cheapest and safest first:
 
 ```
 M9 knock (built) → M10 search (built) → M11 DMs (built)
-  → M12 voice (signalling built, audio not) → M13 ambient voice
+  → M12 voice (signalling + transport built; no microphone) → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -406,10 +406,16 @@ loopback and prove nothing at all.
 
 **The signalling landed 2026-09-01 (T-1401)** and it is the one piece of M12
 that a single machine *can* prove, because there is no audio in it: the frames
-are exercised by two real WebSocket clients in-process. Everything from T-1402
-on is the part that needs real networks. **SPEC §4.14 is written** — read it
+are exercised by two real WebSocket clients in-process. **T-1402's transport
+half landed the same day** — real peer connections, real ICE, no microphone.
+Everything past that needs real networks. **SPEC §4.14 is written** — read it
 before the rest of this milestone, because the decision it records ("voice
 happens in a room, not in a call") is what the other four tasks assume.
+
+**⚠ Two system packages are missing and block the rest of T-1402**:
+`libasound2-dev` (for `cpal`) and `libopus-dev` or `cmake` (for the Opus
+encoder). Installing them needs a password. Until then there is no audio, so
+nothing in M12 can be listened to — see T-1402.
 
 - ✅ **T-1401 · Signalling over the gateway** — effort: **high** — Matt, 2026-09-01
   Three client frames (`voice.join`, `voice.leave`, `voice.signal`) and two
@@ -499,12 +505,85 @@ happens in a room, not in a call") is what the other four tasks assume.
   be wrong" applies in full: WebRTC generated from memory works on localhost and
   dies behind real NAT.
 
-- ⬜ **T-1402 · The audio path** — effort: **treacherous**
-  `webrtc-rs` peer connections in the Tauri core, `cpal` capture and playback, a
-  full mesh (V2 is eight people, so mesh is fine and an SFU is not needed).
-  **Coordinate with Matt before starting.**
+- ⏳ **T-1402 · The audio path** — effort: **treacherous** — Matt, 2026-09-01
+  **The transport half landed; the microphone half is blocked on two packages
+  nobody has installed.** Read this whole entry before picking it up.
+
+  ### What is built and runs
+
+  `client/src-tauri/src/voice/` — real `RTCPeerConnection`s, a full mesh, real
+  DTLS, real ICE, real RTP, driven by T-1401's frames. Three Tauri commands
+  (`voice_join`, `voice_leave`, `voice_frame`) and a `voice:peer` event; the
+  frontend forwards the two voice frames to the core and does nothing else with
+  them, because audio lives in Rust (ARCHITECTURE §2).
+
+  **`webrtc` needs nothing installed.** That was the open question and the
+  answer is good: it is pure Rust down to the crypto, builds in about thirty
+  seconds, and adds no system package to anybody's build.
+
+  `mesh.rs` is the part worth reading. It is pure — a peer list in, a plan out —
+  because that is where the bugs live that only show up on a bad network: a peer
+  dropped and never rebuilt, two clients that both offer, a reconnect that
+  leaves one side waiting for an answer nobody will send.
+
+  **The lower session id offers.** Both ends read the same `voice.state` and run
+  the same comparison, so no pair sends two offers at each other — that is
+  *glare*, and it leaves both sides waiting on an offer the other discarded.
+  "Whoever joined later offers" needs an order both sides agree on, and a
+  reconnect is exactly when they stop agreeing.
+
+  **Candidates that arrive before the answer are held, not dropped.** ICE
+  trickles, so the far end starts sending them before its answer has been
+  applied here. Adding one to a connection with no remote description is an
+  error and dropping it is a call that takes the long way round or never
+  connects — and on a good network you never notice, which is what makes it
+  exactly the kind of bug AGENTS warns about.
+
+  ### ⚠ What is blocked, and on what
+
+  **Two system packages, and installing them needs a password:**
+
+  ```
+  sudo apt install libasound2-dev   # cpal: ALSA headers, for the microphone
+  sudo apt install libopus-dev      # or cmake, to build libopus from source
+  ```
+
+  `cpal` fails at `alsa-sys`'s build script without the first. The `opus` crate
+  vendors libopus and builds it with cmake, which is also not installed. Neither
+  is optional: WebRTC audio *is* Opus, and there is no mature pure-Rust encoder.
+
+  **CI will need them too** — `.github/workflows/ci.yml`'s `tauri-shell` job
+  installs the webview deps and will need these beside them. They are
+  deliberately not added yet, because a package CI installs for code that does
+  not exist is a line nobody can explain later. Add them in the same commit as
+  the code that needs them, and update the README's system-dependency list in
+  the same breath (AGENTS: a new system dependency is a README change).
+
+  ### What is left, in order
+
+  1. `cpal` capture → `audio::Source`, and `audio::Sink` → `cpal` playback.
+     The seam is already there and it is one 20 ms frame at 48 kHz mono, which
+     is what Opus and WebRTC both want — so this is filling a hole, not
+     designing one.
+  2. Opus encode on the way out, decode on the way in.
+  3. The loop that pulls frames from the source into each peer's track, and the
+     `on_track` handler that pushes received audio at the sink. `Engine::outbound`
+     hands out the track; nothing drives it yet.
+  4. Mixing several peers on playback. `Sink::play` takes the peer it came from
+     so that decision is still open.
+
+  ### What none of this proves
+
+  **Nothing here has been across two machines.** Both ends of every test are on
+  loopback with no NAT between them, which AGENTS §"Where you will be wrong"
+  names as the arrangement that works right up until somebody is behind
+  carrier-grade NAT — and TASKS says it in fewer words: *do not test this on one
+  machine*. `Engine::new` takes an ICE server list and it is **empty**, so today
+  there is not even STUN: host candidates reach another machine on the same
+  network and nothing beyond it. That is T-1403.
+
   *Accept:* four people, four networks, one hour, no drops. Anything less than
-  that is not evidence.
+  that is not evidence. **Unchanged, and not met.**
 
 - ⬜ **T-1403 · A TURN server in the deploy** — effort: **high**
   coturn in `deploy/`, credentials that are not shared secrets in a compose
