@@ -679,6 +679,9 @@ Beyond that, the client must re-identify and refetch.
 | `presence.update` | `{ state, away_message? }` | Where you are, and nothing about what you are doing (SPEC §4.3). |
 | `room.focus` | `{ room_id \| null }` | fires on focus; `null` = left the room |
 | `typing.start` | `{ room_id }` | server rate-limits to 1 per 4s per room |
+| `voice.join` | `{ room_id }` | join voice in that room; leaves the one you were in |
+| `voice.leave` | `{}` | no room id: you are in at most one |
+| `voice.signal` | `{ to, kind, payload }` | pass one WebRTC message to one peer |
 
 ### Server → client
 
@@ -697,6 +700,8 @@ Beyond that, the client must re-identify and refetch.
 | `room.create` / `room.update` | `Room` — a DM's `room.create` reaches its members and nobody else, which is how the other members find out it exists |
 | `typing` | `{ room_id, user_id }` |
 | `knock` | `{ from_user_id }` — **sent to that one person's sessions and nobody else's** (SPEC §4.9) |
+| `voice.state` | `{ room_id, peers: [{ session_id, user_id }] }` — who is in voice in that room, whole every time |
+| `voice.signal` | `{ from, kind, payload }` — one peer's WebRTC message, **addressed to one session** |
 
 ```ts
 type PresenceEntry = {
@@ -706,6 +711,54 @@ type PresenceEntry = {
   away_message: string | null;
 }
 ```
+
+### Voice signalling
+
+The server's whole part in voice is **introducing two clients to each other** (SPEC
+§4.14). Audio never touches it: `payload` is a WebRTC offer, answer or ICE candidate,
+and it crosses this server as an opaque string that nothing here parses, validates or
+stores. It is a post office, not a participant.
+
+```ts
+type VoicePeer   = { session_id: string; user_id: string }
+type VoiceSignal = "offer" | "answer" | "candidate"
+```
+
+**A peer is a session, not a person.** A peer connection is between two *clients*, and
+one person signed in on a laptop and a desktop is two of them. Session ids survive a
+resume and change on a fresh `identify`, which is exactly the identity a WebRTC session
+has.
+
+**`voice.state` is the whole list every time**, never a delta. It is sent to a room's
+members whenever anybody joins or leaves, and a client can act on the newest one it has
+without replaying what came before. Getting it twice is harmless; missing one is not,
+which is why it is a snapshot.
+
+**Who offers is decided by the ids, not by who arrived first.** Of any two peers, the
+one whose `session_id` sorts **lower** sends the offer. Both sides read the same
+`voice.state` and reach the same answer, so exactly one offer is made and no pair ever
+sends two offers at each other. "Whoever joined later offers" would need an order both
+sides agree on, and a reconnect is precisely when they stop agreeing.
+
+**`voice.signal` only reaches a peer in the same voice room.** Both the sender and `to`
+have to be in voice in one room, and it has to be the same one. Without that rule this
+frame is a way to send an arbitrary string to any session on the server, which is a
+side channel nobody asked for and nothing else here has.
+
+A signal to a session that is not there is **dropped, not refused**. Somebody's client
+closing is the ordinary end of a call, and it happens mid-exchange all the time; an
+error frame for it would be noise about a thing that is not wrong.
+
+**Leaving is implicit as well as explicit.** A session that ends leaves the voice room
+it was in and the other peers are told — as are the peers of a session whose resume
+window lapses, which is what stops a dead client sitting in the list looking connected.
+A session that *resumes* keeps its place: it is the same client, its peers are still
+connected to it, and it replays whatever it missed.
+
+**Limits.** `payload` is at most `MAX_VOICE_PAYLOAD_BYTES`; anything larger is not an
+SDP this server needs to carry. Signals are rate-limited per session
+(`RATE_VOICE_SIGNAL`) — generously, because trickle ICE arrives in bursts across every
+peer at once, and a limit tight enough to be interesting would break a normal join.
 
 ### Fan-out rules
 
@@ -717,8 +770,8 @@ told the thing.
 
 - **A frame that names a room the receiver cannot see is not sent.** That covers
   `message.create`, `message.update`, `message.delete`, `reaction.update`,
-  `room.occupancy`, `room.enter`, `room.leave`, `room.create`, `room.update` and
-  `typing`. The server resolves the audience when it publishes; there is no filtering
+  `room.occupancy`, `room.enter`, `room.leave`, `room.create`, `room.update`,
+  `typing` and `voice.state`. The server resolves the audience when it publishes; there is no filtering
   left for anybody downstream to forget.
 - **A new frame type is members-only until somebody says otherwise.** The mapping from
   frame to room is exhaustive in `linger-server`, so a frame added later does not

@@ -7,6 +7,8 @@ import type { Room } from "./Room";
 import type { RoomId } from "./RoomId";
 import type { User } from "./User";
 import type { UserId } from "./UserId";
+import type { VoicePeer } from "./VoicePeer";
+import type { VoiceSignalKind } from "./VoiceSignalKind";
 
 /**
  * A server frame: an event plus its sequence number. `hello`, `heartbeat_ack`,
@@ -16,4 +18,4 @@ export type ServerFrame = { s?: number, } & ({ "op": "hello", "d": { heartbeat_i
 /**
  * Number of frames replayed after the resume.
  */
-replayed: number, } } | { "op": "invalid_session", "d": { reason: string, } } | { "op": "heartbeat_ack" } | { "op": "message.create", "d": Message } | { "op": "message.update", "d": Message } | { "op": "message.delete", "d": { id: MessageId, room_id: RoomId, } } | { "op": "reaction.update", "d": { message_id: MessageId, key: string, count: number, user_ids: Array<UserId>, } } | { "op": "presence.update", "d": PresenceEntry } | { "op": "room.occupancy", "d": { room_id: RoomId, user_ids: Array<UserId>, } } | { "op": "room.enter", "d": { room_id: RoomId, user_id: UserId, entrance_sound: string | null, } } | { "op": "room.leave", "d": { room_id: RoomId, user_id: UserId, } } | { "op": "user.update", "d": User } | { "op": "user.remove", "d": { user_id: UserId, } } | { "op": "room.create", "d": Room } | { "op": "room.update", "d": Room } | { "op": "typing", "d": { room_id: RoomId, user_id: UserId, } } | { "op": "knock", "d": { from_user_id: UserId, } });
+replayed: number, } } | { "op": "invalid_session", "d": { reason: string, } } | { "op": "heartbeat_ack" } | { "op": "message.create", "d": Message } | { "op": "message.update", "d": Message } | { "op": "message.delete", "d": { id: MessageId, room_id: RoomId, } } | { "op": "reaction.update", "d": { message_id: MessageId, key: string, count: number, user_ids: Array<UserId>, } } | { "op": "presence.update", "d": PresenceEntry } | { "op": "room.occupancy", "d": { room_id: RoomId, user_ids: Array<UserId>, } } | { "op": "room.enter", "d": { room_id: RoomId, user_id: UserId, entrance_sound: string | null, } } | { "op": "room.leave", "d": { room_id: RoomId, user_id: UserId, } } | { "op": "user.update", "d": User } | { "op": "user.remove", "d": { user_id: UserId, } } | { "op": "room.create", "d": Room } | { "op": "room.update", "d": Room } | { "op": "typing", "d": { room_id: RoomId, user_id: UserId, } } | { "op": "voice.state", "d": { room_id: RoomId, peers: Array<VoicePeer>, } } | { "op": "voice.signal", "d": { from: string, kind: VoiceSignalKind, payload: string, } } | { "op": "knock", "d": { from_user_id: UserId, } });

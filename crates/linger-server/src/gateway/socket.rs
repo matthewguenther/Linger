@@ -9,7 +9,9 @@ use axum::extract::State;
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 use linger_core::gateway::{ClientFrame, ReadyData, ServerEvent, ServerFrame};
-use linger_core::limits::{HEARTBEAT_INTERVAL_MS, RATE_TYPING_PER_ROOM};
+use linger_core::limits::{
+    HEARTBEAT_INTERVAL_MS, MAX_VOICE_PAYLOAD_BYTES, RATE_TYPING_PER_ROOM, RATE_VOICE_SIGNAL,
+};
 use linger_core::UserId;
 use tokio::sync::{mpsc, oneshot};
 
@@ -62,8 +64,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let (close_tx, mut close_rx) = oneshot::channel::<()>();
 
     // First frame decides the path: identify (new session) or resume.
-    let user_id = match handshake(&state, &sink, &mut ws_rx, close_tx).await {
-        Some(user_id) => user_id,
+    let (user_id, session_id) = match handshake(&state, &sink, &mut ws_rx, close_tx).await {
+        Some(both) => both,
         None => {
             drop(sink);
             let _ = writer.await;
@@ -81,6 +83,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     // Reader loop until close, error, liveness timeout, or the session hanging
     // up on us. `biased` so a close that lands at the same moment as a frame
     // wins: the last thing a removed member should get is one more message.
+    // Whether this socket ended by saying goodbye or by going quiet. It is the
+    // difference between leaving a call and dropping out of one — see the
+    // `voice_part` below.
+    let mut said_goodbye = false;
     loop {
         let received = tokio::select! {
             biased;
@@ -89,7 +95,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         };
         let frame = match received {
             Err(_) | Ok(None) | Ok(Some(Err(_))) => break,
-            Ok(Some(Ok(Message::Close(_)))) => break,
+            Ok(Some(Ok(Message::Close(_)))) => {
+                said_goodbye = true;
+                break;
+            }
             Ok(Some(Ok(Message::Text(text)))) => text,
             Ok(Some(Ok(_))) => continue, // binary/ping/pong: nothing for us
         };
@@ -97,10 +106,25 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         let Ok(frame) = serde_json::from_str::<ClientFrame>(frame.as_str()) else {
             continue;
         };
-        handle_client_frame(&state, user_id, frame, &sink).await;
+        handle_client_frame(&state, user_id, &session_id, frame, &sink).await;
     }
 
     // Socket gone. The session task survives for the resume window.
+    //
+    // **Voice does not**, if the client said goodbye (SPEC §4.14). A closed
+    // socket and a dropped one mean different things and voice is the one place
+    // it matters: being cut off might be two seconds of bad wifi, and holding
+    // the seat is what stops a blip tearing down every peer connection. Closing
+    // the app is not, and a seat that outlives its client leaves everybody else
+    // talking to somebody who is not there — the two ends disagreeing, which is
+    // exactly the half-connected state T-1401 is about.
+    //
+    // The session itself still survives either way, so a client that says
+    // goodbye and then resumes is resumed; it simply has to join voice again,
+    // which is what it asked for by leaving.
+    if said_goodbye {
+        state.gateway.voice_part(&session_id);
+    }
     if let Some(entry) = find_session_for_cleanup(&state, user_id) {
         let _ = entry.send(Ctl::Detach).await;
     }
@@ -126,13 +150,17 @@ fn find_session_for_cleanup(state: &AppState, user_id: UserId) -> Option<mpsc::S
         .map(|e| e.value().ctl.clone())
 }
 
-/// Run the handshake; `Some(user_id)` once a session is attached.
+/// Run the handshake; `Some((user_id, session_id))` once a session is attached.
+///
+/// The session id comes back out because voice needs it (SPEC §4.14): a peer
+/// connection is between two clients, so the frames that route between them are
+/// addressed by session and not by person.
 async fn handshake(
     state: &AppState,
     sink: &mpsc::Sender<String>,
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     closer: oneshot::Sender<()>,
-) -> Option<UserId> {
+) -> Option<(UserId, String)> {
     let first = tokio::time::timeout(HANDSHAKE_TIMEOUT, ws_rx.next())
         .await
         .ok()??;
@@ -187,7 +215,7 @@ async fn handshake(
             // conversation by forgetting a filter.
             let dms = repo::rooms::dms_for(&state.db.read, user_id).await.ok()?;
             let ready = ReadyData {
-                session_id,
+                session_id: session_id.clone(),
                 user,
                 users,
                 rooms,
@@ -205,7 +233,7 @@ async fn handshake(
             })
             .await
             .ok()?;
-            Some(user_id)
+            Some((user_id, session_id))
         }
         ClientFrame::Resume {
             session_id,
@@ -246,7 +274,7 @@ async fn handshake(
             })
             .await
             .ok()?;
-            Some(user_id)
+            Some((user_id, session_id))
         }
         _ => None,
     }
@@ -255,6 +283,7 @@ async fn handshake(
 async fn handle_client_frame(
     state: &AppState,
     user_id: UserId,
+    session_id: &str,
     frame: ClientFrame,
     sink: &mpsc::Sender<String>,
 ) {
@@ -317,6 +346,61 @@ async fn handle_client_frame(
                     .publish(ServerEvent::Typing { room_id, user_id });
             }
         }
+        // --- voice (SPEC §4.14, PROTOCOL §8, T-1401) -----------------------
+        //
+        // Every one of these is ignored rather than refused when it is wrong.
+        // These are client frames and the gateway has no way to answer one; a
+        // client sending them is either broken or lying, and neither deserves
+        // a reply. The same rule `room.focus` and `typing.start` follow.
+        ClientFrame::VoiceJoin { room_id } => {
+            // Voice in a room you cannot see would put you in its `voice.state`
+            // in front of its members — the outward direction is covered by the
+            // fan-out, this is the inward one (SPEC §4.13).
+            if repo::rooms::visible_to(&state.db.read, room_id, user_id)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            state.gateway.voice_join(session_id, user_id, room_id);
+        }
+        ClientFrame::VoiceLeave => state.gateway.voice_part(session_id),
+        ClientFrame::VoiceSignal { to, kind, payload } => {
+            if payload.len() > MAX_VOICE_PAYLOAD_BYTES {
+                return;
+            }
+            if state
+                .limiter
+                .check(&format!("voice:{session_id}"), RATE_VOICE_SIGNAL)
+                .is_err()
+            {
+                return;
+            }
+            // Both ends have to be in voice, in the same room. Without this the
+            // frame is a way to hand an arbitrary string to any session on the
+            // server, which is a side channel nothing else here has and nobody
+            // asked for (PROTOCOL §8).
+            let Some((mine, _)) = state.gateway.voice_seat_of(session_id) else {
+                return;
+            };
+            let Some((theirs, _)) = state.gateway.voice_seat_of(&to) else {
+                // Their client closed mid-exchange, which is the ordinary end
+                // of a call. Dropped, not refused.
+                return;
+            };
+            if mine != theirs {
+                return;
+            }
+            state.gateway.publish_to_session(
+                &to,
+                ServerEvent::VoiceSignal {
+                    from: session_id.to_string(),
+                    kind,
+                    payload,
+                },
+            );
+        }
+
         // Handshake ops after the handshake: ignore.
         ClientFrame::Identify { .. } | ClientFrame::Resume { .. } => {}
     }

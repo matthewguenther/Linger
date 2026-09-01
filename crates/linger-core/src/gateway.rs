@@ -51,6 +51,52 @@ pub enum ClientFrame {
     RoomFocus { room_id: Option<RoomId> },
     #[serde(rename = "typing.start")]
     TypingStart { room_id: RoomId },
+    /// Turn your microphone on in a room you are already in (SPEC §4.14).
+    /// Joining voice somewhere else leaves wherever you were.
+    #[serde(rename = "voice.join")]
+    VoiceJoin { room_id: RoomId },
+    /// No room id: you are in voice in at most one room, so there is only one
+    /// thing this could mean.
+    #[serde(rename = "voice.leave")]
+    VoiceLeave,
+    /// One WebRTC message for one peer.
+    ///
+    /// `payload` is an offer, an answer or an ICE candidate, and the server
+    /// does not parse it — it forwards it to `to` and that is the whole of its
+    /// involvement in voice (PROTOCOL §8).
+    #[serde(rename = "voice.signal")]
+    VoiceSignal {
+        /// The peer's session id, from `voice.state`.
+        to: String,
+        kind: VoiceSignalKind,
+        payload: String,
+    },
+}
+
+/// What a `voice.signal` is carrying. The server routes on the frame and never
+/// looks inside `payload`, so this exists for the receiving client's benefit —
+/// it says which of the three things to do with the string without parsing it
+/// to find out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum VoiceSignalKind {
+    Offer,
+    Answer,
+    Candidate,
+}
+
+/// One client in a voice room (SPEC §4.14).
+///
+/// Keyed by session rather than by person: a peer connection is between two
+/// *clients*, and somebody signed in on a laptop and a desktop is two of them.
+/// `user_id` is there so a client can draw a name against a peer without
+/// looking anything up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VoicePeer {
+    pub session_id: String,
+    pub user_id: UserId,
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +197,28 @@ pub enum ServerEvent {
     Typing {
         room_id: RoomId,
         user_id: UserId,
+    },
+    /// Who is in voice in a room (SPEC §4.14) — **the whole list, every time**.
+    ///
+    /// A snapshot rather than a delta, because a client that missed one still
+    /// ends up right after the next one: getting this twice is harmless and
+    /// missing one is not. It names a room, so it reaches that room's members
+    /// and nobody else — a DM's voice room is as private as the DM (§4.13).
+    #[serde(rename = "voice.state")]
+    VoiceState {
+        room_id: RoomId,
+        peers: Vec<VoicePeer>,
+    },
+    /// One peer's WebRTC message, on its way to one other peer.
+    ///
+    /// Addressed to a single session, like `knock` is addressed to a single
+    /// person — and unlike `knock`, the sender is named, because answering it
+    /// is the entire point.
+    #[serde(rename = "voice.signal")]
+    VoiceSignal {
+        from: String,
+        kind: VoiceSignalKind,
+        payload: String,
     },
     /// A nudge from one person to one person (SPEC §4.9, T-1101).
     ///

@@ -437,6 +437,45 @@ everybody they are not currently talking to.
 change a room gets, and no number appears anywhere. Feeling more urgent is not an
 argument; it is exactly the argument that puts a badge on everything.
 
+### 4.14 Voice rooms
+
+**Voice happens *in a room*, not in a call.** You are already in the room (§4.1);
+joining voice is turning your microphone on where you already are. There is no separate
+voice channel to switch to, no call object, and nothing to be invited to — those are all
+the same idea, which is that talking is an event with a beginning and an end. It is not,
+and §4.9's knock is the same argument in miniature.
+
+That is also why M13's ambient voice is a small step rather than a rewrite: a room you
+leave running is what this already is.
+
+**No ringing and no calling.** Nobody's client makes a noise because somebody else
+turned a microphone on. You join, and the people in the room can see you have — the
+same weight of signal as walking into the room, drawn the same quiet way.
+
+**Full mesh, up to eight.** Every pair of clients connects directly to each other. At
+eight people that is 28 connections and a laptop does not notice; a selective forwarding
+server would be a second piece of infrastructure for every host to run and the scale
+that needs one is a scale this product refuses. The ceiling is the same one everything
+else has (§2).
+
+**Voice follows the room's membership.** A voice room inside a DM is as private as the
+DM (§4.13) — who is in voice is a fact about a room, so it reaches the room's members
+and nobody else. Nothing about voice is a way to find out a conversation exists.
+
+**Nothing is recorded, ever.** Not by the server, not by a client, not "for
+transcription", not opt-in. Audio passes between clients and the server never sees it —
+the server's whole part in voice is introducing two clients to each other. There is no
+feature here to add later; a room where the microphone might be being recorded is a
+different product.
+
+**Your microphone is yours.** Push-to-talk and mute are per-person and local; nobody can
+mute anybody else, and nobody can turn anybody's microphone on. A permission that lets
+one person silence another is a role by another name (§2).
+
+**Leaving is leaving.** Closing the app, losing the network, or joining voice somewhere
+else all end it, and the people you were talking to see you go. You are in voice in at
+most one room at a time, for the same reason you are in one room at a time.
+
 ---
 
 ## 5. Design system — "Console"
@@ -601,7 +640,7 @@ says what replaced it: a status somebody typed.
 
 ### V2
 
-- Voice rooms (WebRTC mesh + coturn), push-to-talk, per-user gain
+- Voice rooms (WebRTC mesh + coturn), push-to-talk, per-user gain (§4.14)
 - Ambient voice: a room you leave running, not a call you join
 - DMs and group DMs (§4.13)
 - Search (§4.12)
