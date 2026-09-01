@@ -336,7 +336,7 @@ Recorded in the *Parking lot* too.
 
 ---
 
-## V2 — M9, M10 and M11 built; voice is what is left
+## V2 — M9, M10 and M11 built; voice is started
 
 **Three of the five are built and archived** — knock on 2026-08-29
 ([`m9.md`](docs/tasks/m9.md)), search and DMs on 2026-08-31
@@ -353,9 +353,9 @@ say out loud.
 
 **Read this before touching any of it:** SPEC §6 lists what V2 is; anything not
 on that list is not V2, it is scope creep. Voice is the one left that adds a
-whole category of thing this product does not have, and it has decisions in it
-that are **Matt's, not an implementing session's**. Those are called out per
-milestone and repeated in the *Parking lot*.
+whole category of thing this product does not have, and **T-1402 says to
+coordinate with Matt before starting** — that is where audio, real networks and
+`webrtc-rs` all arrive at once.
 
 **Numbering.** V1 used `T-1xx`–`T-8xx` for milestones M1–M8, plus `T-9xx` for
 the V1 work that came off the critical path — and for small V1 changes that land
@@ -374,7 +374,7 @@ Build order, cheapest and safest first:
 
 ```
 M9 knock (built) → M10 search (built) → M11 DMs (built)
-  → M12 voice → M13 ambient voice
+  → M12 voice (signalling built, audio not) → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -404,12 +404,100 @@ keeping audio out of the page removes it from the critical path entirely.
 **Do not test this on one machine.** Two processes on one laptop connect over
 loopback and prove nothing at all.
 
-- ⬜ **T-1401 · Signalling over the gateway** — effort: **high**
-  Offer, answer and ICE candidate frames; who is in voice in which room; join
-  and leave. No audio yet — this task ends with two clients having exchanged
-  everything they need and nothing playing.
-  *Accept:* two clients complete a full exchange across a forced reconnect
-  without the session ending up half-connected.
+**The signalling landed 2026-09-01 (T-1401)** and it is the one piece of M12
+that a single machine *can* prove, because there is no audio in it: the frames
+are exercised by two real WebSocket clients in-process. Everything from T-1402
+on is the part that needs real networks. **SPEC §4.14 is written** — read it
+before the rest of this milestone, because the decision it records ("voice
+happens in a room, not in a call") is what the other four tasks assume.
+
+- ✅ **T-1401 · Signalling over the gateway** — effort: **high** — Matt, 2026-09-01
+  Three client frames (`voice.join`, `voice.leave`, `voice.signal`) and two
+  server ones (`voice.state`, `voice.signal`), all in `gateway/`. **No audio
+  anywhere** — the payloads are opaque strings and nothing in this server parses
+  one. **SPEC §4.14 and PROTOCOL §8's voice section were written in the same
+  commit**; voice had a one-line scope entry and nothing else.
+
+  **Voice happens *in a room*, not in a call.** You are already in the room, and
+  joining voice is turning your microphone on where you are. That is the
+  decision the rest follows from: no call object, nothing to be invited to, no
+  ringing — and M13's "a room you leave running" becomes a small step rather
+  than a rewrite, because a room you leave running is what this already is.
+
+  ### A peer is a session, not a person
+
+  A peer connection is between two *clients*, and somebody signed in on a laptop
+  and a desktop is two of them. So the seat is keyed by session id, and
+  `voice.signal` is addressed to a session — which needed `publish_to_session`,
+  narrower than the `publish_to` a knock uses. `visible_to` grew a rule 0 for
+  it.
+
+  **Who offers is decided by the ids, not by who arrived first.** Of any pair,
+  the lower `session_id` sends the offer. Both ends read the same `voice.state`
+  and reach the same answer, so no pair ever sends two offers at each other.
+  "Whoever joined later offers" needs an order both sides agree on, and a
+  reconnect is exactly when they stop agreeing. `voice.state` is sorted by
+  session id so a client can read the answer off the list rather than derive it.
+
+  ### The half-connected state, which is what the criterion is about
+
+  Two ways to get there, opposite directions, and each has a test.
+
+  **A dropped socket must keep its seat.** A blip is two seconds of bad wifi,
+  and tearing down every peer connection over it is worse than waiting. So the
+  seat is released when the *session* ends, not when the socket does — which is
+  also why a resumed session finds its peers still there and replays the
+  signals sent while it was away.
+
+  **A closed socket must lose its seat**, and this is the part that was wrong
+  first. Saying goodbye and being cut off are different things, and the code did
+  not distinguish them: closing the app held a seat for the full 120-second
+  resume window, so everybody else was talking to somebody who had left. The
+  reader loop now notices a WebSocket close frame and releases the seat there.
+  The *session* still survives either way — a client that says goodbye and then
+  resumes is resumed, it simply has to join voice again, which is what leaving
+  means.
+
+  ### Three rules that keep the frame from being something else
+
+  - **Both ends must be in voice, in the same room.** Without that check
+    `voice.signal` is a way to hand an arbitrary string to any session on the
+    server — a side channel nothing else here has.
+  - **A signal to a session that is gone is dropped, not refused.** Somebody's
+    client closing mid-exchange is the ordinary end of a call; an error frame
+    would be noise about a thing that is not wrong.
+  - **`voice.state` names a room, so it is filtered like every other frame that
+    does.** Voice in a DM is as private as the DM (SPEC §4.13) — and `room_of`
+    having no wildcard arm is what forced that decision rather than leaving it
+    to be remembered. It did not compile until both new frames were classified.
+
+  ### Tests
+
+  `crates/linger-server/tests/voice.rs` — eleven, over real WebSockets, with
+  the acceptance criterion as one of them: a full offer→answer→candidate
+  exchange that survives a forced disconnect, including a signal sent into the
+  gap and replayed on resume.
+
+  **Checked by breaking the code.** Removing the same-room check fails the
+  cross-room test; releasing the seat on every socket close fails the resume
+  test; removing the DM check on `voice.join` fails the outsider test.
+
+  **One test was passing for the wrong reason and one mutation was aimed at the
+  wrong line.** The DM-outsider test wrapped its assertion in `if let Some(state)
+  = …`, so it passed by never running; it now asserts whether or not a frame
+  arrives, because "no frame" is the right answer and "a frame naming Dave" is
+  the wrong one. And the mutation meant for `voice.join`'s visibility check hit
+  `typing.start`'s identical block first — the test only proved itself once the
+  mutation was aimed properly.
+
+  ### What this does not do
+
+  No audio, by design — that is T-1402, and it is the treacherous one.
+  **Nothing was tested across two machines**, because there is nothing to hear
+  yet; the frames are what this task delivers and they are exercised by two real
+  WebSocket clients in-process. The moment audio exists, AGENTS §"Where you will
+  be wrong" applies in full: WebRTC generated from memory works on localhost and
+  dies behind real NAT.
 
 - ⬜ **T-1402 · The audio path** — effort: **treacherous**
   `webrtc-rs` peer connections in the Tauri core, `cpal` capture and playback, a

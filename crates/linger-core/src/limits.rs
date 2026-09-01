@@ -92,6 +92,19 @@ pub const MAX_DISPLAY_NAME_CHARS: usize = 32;
 pub const MIN_PASSWORD_CHARS: usize = 8;
 pub const INVITE_CODE_CHARS: usize = 12;
 
+/// Voice signalling (SPEC §4.14, PROTOCOL §8).
+///
+/// An SDP offer for one audio track is a couple of kilobytes; an ICE candidate
+/// is a line. Sixteen kilobytes is far above either and far below anything
+/// worth relaying, and the server never parses what is inside it — the cap is
+/// the only thing it has to say about the contents.
+pub const MAX_VOICE_PAYLOAD_BYTES: usize = 16 * 1024;
+
+/// How many people can be in one voice room. The same ceiling as everything
+/// else (SPEC §2), and the number that makes a full mesh reasonable: eight
+/// people is 28 connections, which a laptop does not notice.
+pub const MAX_VOICE_PEERS: usize = 8;
+
 /// Gateway (PROTOCOL §8).
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 pub const RESUME_BUFFER_FRAMES: usize = 500;
@@ -111,5 +124,11 @@ pub const RATE_SEARCH: (u32, u64) = (30, 60);
 /// Link previews are cached server-side, so this only bounds the misses.
 pub const RATE_LINK_PREVIEW: (u32, u64) = (60, 60);
 pub const RATE_TYPING_PER_ROOM: (u32, u64) = (1, 4);
+/// Voice signalling, per session. Deliberately loose: trickle ICE produces a
+/// burst of candidates for every peer at once, so joining a room of eight can
+/// legitimately be a hundred frames in a second or two. A limit tight enough to
+/// be interesting would break an ordinary join, and the frame it is protecting
+/// is a few kilobytes the server forwards without reading.
+pub const RATE_VOICE_SIGNAL: (u32, u64) = (300, 10);
 /// Read-marker updates are debounced client-side to once per 5s per room.
 pub const READ_MARKER_DEBOUNCE_MS: u64 = 5_000;

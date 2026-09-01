@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
-use linger_core::gateway::{ServerEvent, ServerFrame};
-use linger_core::limits::{RESUME_BUFFER_FRAMES, RESUME_WINDOW_MS};
+use linger_core::gateway::{ServerEvent, ServerFrame, VoicePeer};
+use linger_core::limits::{MAX_VOICE_PEERS, RESUME_BUFFER_FRAMES, RESUME_WINDOW_MS};
 use linger_core::wire::{PresenceEntry, PresenceState};
 use linger_core::{RoomId, UserId};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -48,6 +48,20 @@ pub struct Gateway {
     /// start the server if it does, because the failure mode of an empty map is
     /// every DM on the server looking like a public room.
     dm_members: DashMap<RoomId, Arc<[UserId]>>,
+    /// Which voice room each session is in, if any (SPEC §4.14).
+    ///
+    /// Keyed by session rather than by person: a peer connection is between two
+    /// clients, and one person on a laptop and a desktop is two of them. In
+    /// memory and nowhere else — voice is entirely a fact about who is
+    /// connected right now, so a restart ending every call is correct rather
+    /// than a gap, in the same way presence is (ARCHITECTURE §5).
+    voice: DashMap<String, VoiceSeat>,
+}
+
+/// One session's place in a voice room.
+struct VoiceSeat {
+    room_id: RoomId,
+    user_id: UserId,
 }
 
 /// One event on the bus, plus who it is for.
@@ -63,6 +77,9 @@ pub struct Gateway {
 struct Fanout {
     event: ServerEvent,
     to: Option<UserId>,
+    /// Narrower than `to`: one session, not one person. Voice signalling is the
+    /// only thing that uses it.
+    to_session: Option<String>,
     /// Which room this frame is about, if any. Worked out from the event by
     /// `room_of` for every frame that names a room, and passed in for
     /// `reaction.update`, which names a message instead.
@@ -87,10 +104,20 @@ fn room_of(event: &ServerEvent) -> Option<RoomId> {
         | ServerEvent::Typing { room_id, .. } => Some(*room_id),
         ServerEvent::RoomCreate(r) | ServerEvent::RoomUpdate(r) => Some(r.id),
 
+        // Who is in voice is a fact about a room, so it reaches that room's
+        // members and nobody else — a DM's voice room is as private as the DM
+        // (SPEC §4.13, §4.14).
+        ServerEvent::VoiceState { room_id, .. } => Some(*room_id),
+
         // A reaction names a message, not a room — so it is published with the
         // room it belongs to already resolved, on the `Fanout` rather than in
         // the frame. See `publish_in`.
         ServerEvent::ReactionUpdate { .. } => None,
+
+        // Addressed to one session, which is narrower than any room check
+        // could be: the routing already decided both peers are in the same
+        // voice room, and this frame goes to exactly one of them.
+        ServerEvent::VoiceSignal { .. } => None,
 
         // About a person, not a place.
         ServerEvent::PresenceUpdate(_)
@@ -148,6 +175,7 @@ impl Gateway {
             presence: DashMap::new(),
             conn_count: DashMap::new(),
             dm_members: DashMap::new(),
+            voice: DashMap::new(),
         }
     }
 
@@ -162,6 +190,7 @@ impl Gateway {
         let _ = self.bus.send(Arc::new(Fanout {
             event,
             to: None,
+            to_session: None,
             room,
         }));
     }
@@ -176,6 +205,7 @@ impl Gateway {
         let _ = self.bus.send(Arc::new(Fanout {
             event,
             to: None,
+            to_session: None,
             room: Some(room_id),
         }));
     }
@@ -222,6 +252,21 @@ impl Gateway {
         }
     }
 
+    /// Fan an event out to one *session* and no other — not even the same
+    /// person's other clients (SPEC §4.14).
+    ///
+    /// Narrower than [`Self::publish_to`], and voice is the only thing that
+    /// needs it: a peer connection is between two clients, so an answer meant
+    /// for the laptop is meaningless on the desktop.
+    pub fn publish_to_session(&self, session_id: &str, event: ServerEvent) {
+        let _ = self.bus.send(Arc::new(Fanout {
+            event,
+            to: None,
+            to_session: Some(session_id.to_string()),
+            room: None,
+        }));
+    }
+
     /// Fan an event out to one person's sessions and nobody else's (T-1101).
     ///
     /// All of them, not one: somebody signed in on a laptop and a desktop is
@@ -231,6 +276,7 @@ impl Gateway {
         let _ = self.bus.send(Arc::new(Fanout {
             event,
             to: Some(user_id),
+            to_session: None,
             room: None,
         }));
     }
@@ -253,6 +299,91 @@ impl Gateway {
         for ctl in open {
             let _ = ctl.send(Ctl::Close).await;
         }
+    }
+
+    // --- voice (SPEC §4.14, PROTOCOL §8, T-1401) ---------------------------
+
+    /// Who is in voice in a room, in a stable order.
+    ///
+    /// Sorted by session id, which is the same order both ends of a pair
+    /// compare when they work out who offers — so a client can read the answer
+    /// straight off the list rather than deriving it.
+    #[must_use]
+    fn voice_peers(&self, room_id: RoomId) -> Vec<VoicePeer> {
+        let mut peers: Vec<VoicePeer> = self
+            .voice
+            .iter()
+            .filter(|seat| seat.value().room_id == room_id)
+            .map(|seat| VoicePeer {
+                session_id: seat.key().clone(),
+                user_id: seat.value().user_id,
+            })
+            .collect();
+        peers.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        peers
+    }
+
+    /// Tell a room's members who is in voice there. The whole list, every time
+    /// (PROTOCOL §8) — a client that missed one is right again after the next.
+    fn announce_voice(&self, room_id: RoomId) {
+        self.publish(ServerEvent::VoiceState {
+            room_id,
+            peers: self.voice_peers(room_id),
+        });
+    }
+
+    /// Put a session into a room's voice, taking it out of wherever it was.
+    ///
+    /// Answers `false` when the room is full. The caller has already checked
+    /// that this person can see the room; this only knows about seats.
+    pub fn voice_join(&self, session_id: &str, user_id: UserId, room_id: RoomId) -> bool {
+        if let Some(seat) = self.voice.get(session_id) {
+            if seat.value().room_id == room_id {
+                return true; // Already there. Asking twice is not an error.
+            }
+        }
+        // Counted before the seat is taken, and only for a room this session is
+        // not already in — otherwise re-joining the room you are in could be
+        // refused by your own seat.
+        if self.voice_peers(room_id).len() >= MAX_VOICE_PEERS {
+            return false;
+        }
+        let left = self.voice_leave(session_id);
+        self.voice
+            .insert(session_id.to_string(), VoiceSeat { room_id, user_id });
+        if let Some(previous) = left {
+            self.announce_voice(previous);
+        }
+        self.announce_voice(room_id);
+        true
+    }
+
+    /// Take a session out of voice. Answers which room it left, if any.
+    ///
+    /// **Does not announce.** Callers that are only leaving announce it
+    /// themselves; `voice_join` needs to move the seat before announcing
+    /// either room, or a client can see itself in two rooms at once.
+    fn voice_leave(&self, session_id: &str) -> Option<RoomId> {
+        self.voice.remove(session_id).map(|(_, seat)| seat.room_id)
+    }
+
+    /// Leave voice and tell the room. The ordinary way out.
+    pub fn voice_part(&self, session_id: &str) {
+        if let Some(room_id) = self.voice_leave(session_id) {
+            self.announce_voice(room_id);
+        }
+    }
+
+    /// Where a session is in voice, and who it is.
+    ///
+    /// One lookup rather than two, because the routing check needs both and
+    /// wants them from the same instant — a seat that moves between two reads
+    /// is a signal delivered into the wrong room.
+    #[must_use]
+    pub fn voice_seat_of(&self, session_id: &str) -> Option<(RoomId, UserId)> {
+        self.voice
+            .get(session_id)
+            .map(|seat| (seat.value().room_id, seat.value().user_id))
     }
 
     /// Presence snapshot for `ready`, as this person is allowed to see it.
@@ -401,13 +532,23 @@ impl Gateway {
     /// thing (SPEC §4.13).
     ///
     /// Four rules, in order:
+    /// 0. A session-addressed frame reaches that one client and no other, not
+    ///    even the same person's.
     /// 1. An addressed frame reaches the person it names and nobody else.
     /// 2. A frame about a room reaches that room's members. For a public room
     ///    that is everybody, so this changes nothing except for DMs.
     /// 3. `room.enter` narrows further, to clients standing in that room.
     /// 4. `presence.update` naming a room the receiver cannot see loses the
     ///    room and keeps the person.
-    fn visible_to(&self, receiver: UserId, fanout: &Fanout) -> Option<ServerEvent> {
+    fn visible_to(
+        &self,
+        receiver: UserId,
+        session_id: &str,
+        fanout: &Fanout,
+    ) -> Option<ServerEvent> {
+        if let Some(target) = &fanout.to_session {
+            return (target == session_id).then(|| fanout.event.clone());
+        }
         if let Some(target) = fanout.to {
             return (target == receiver).then(|| fanout.event.clone());
         }
@@ -471,7 +612,7 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
             tokio::select! {
                 event = bus_rx.recv() => match event {
                     Ok(event) => {
-                        let Some(mine) = gateway.visible_to(user_id, &event) else {
+                        let Some(mine) = gateway.visible_to(user_id, &session_id, &event) else {
                             continue;
                         };
                         seq += 1;
@@ -564,6 +705,13 @@ fn spawn_session(gateway: Arc<Gateway>, session_id: String, user_id: UserId) -> 
             }
         }
         gateway.sessions.remove(&session_id);
+        // A session that is really gone leaves voice, and the people it was
+        // talking to are told. This is *here* rather than on socket close on
+        // purpose: a dropped socket has 120 seconds to come back, and a client
+        // that resumes is the same client with the same peers still connected
+        // to it. Hanging up on a reconnect would be the half-connected state
+        // this task exists to avoid.
+        gateway.voice_part(&session_id);
     });
 
     ctl_tx
