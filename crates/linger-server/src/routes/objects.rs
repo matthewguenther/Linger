@@ -10,7 +10,17 @@
 //!
 //! **Why serving is not authenticated.** An object key contains a UUIDv7 with
 //! 74 random bits, so the URL is the secret — the same arrangement every chat
-//! app uses, and the only one that lets an `<img>` tag work at all. What keeps
+//! app uses, and the only one that lets an `<img>` tag work at all.
+//!
+//! **That is also how a DM's files stay private** (SPEC §4.13, T-1303), and it
+//! is worth being explicit about because it is not the mechanism used anywhere
+//! else. There is no membership check here and there cannot be one: the browser
+//! fetching an image does not carry a session. What keeps a DM's photo out of a
+//! stranger's hands is that nothing ever hands them the URL — the message
+//! routes, the media grid, search and the export all filter by membership, and
+//! a key is not guessable. So a leak in any of those is a leak of the bytes as
+//! well, which is why they are tested one surface at a time in
+//! `tests/dm_leaks.rs` rather than trusted to a check here. What keeps
 //! a hostile upload harmless is not a login check but where it is served from
 //! and how: `/objects` answers only on the media host (`cdn.<domain>`, see
 //! `super::media_origin_gate`), so nothing served here is ever same-origin with

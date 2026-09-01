@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use linger_core::wire::{ExportJob, ExportState, Message, Room, User};
+use linger_core::wire::{ExportJob, ExportState, Message, Room, RoomKind, User};
 use linger_core::{ExportId, MessageId, RoomId, UserId};
 use sqlx::Row;
 
@@ -92,7 +92,7 @@ pub async fn start(state: &AppState, user_id: UserId) -> Result<ExportId, ApiErr
 
     let worker = state.clone();
     tokio::spawn(async move {
-        if let Err(err) = run(&worker, id).await {
+        if let Err(err) = run(&worker, id, user_id).await {
             tracing::error!(export = %id, error = %err, "export failed");
             let _ = sqlx::query(
                 "UPDATE exports SET state = 'failed', error = ?, finished_at = ? WHERE id = ?",
@@ -176,7 +176,7 @@ async fn set_progress(state: &AppState, id: ExportId, progress: f64) {
 }
 
 /// Build the archive, store it, mark the row complete.
-async fn run(state: &AppState, id: ExportId) -> anyhow::Result<()> {
+async fn run(state: &AppState, id: ExportId, asker: UserId) -> anyhow::Result<()> {
     sqlx::query("UPDATE exports SET state = 'running' WHERE id = ?")
         .bind(id.to_vec())
         .execute(&state.db.write)
@@ -187,7 +187,7 @@ async fn run(state: &AppState, id: ExportId) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(state.config.staging_dir()).await?;
     let scratch = tempfile::tempdir_in(state.config.staging_dir())?;
 
-    let plan = assemble(state, id, scratch.path()).await?;
+    let plan = assemble(state, id, asker, scratch.path()).await?;
     let filename = archive_name(state).await;
 
     // The zip itself is synchronous work on a lot of bytes, so it happens on a
@@ -274,7 +274,21 @@ struct Entry {
 
 /// Write every room, the media index and the read-me into `scratch`, and work
 /// out where each media file's bytes are.
-async fn assemble(state: &AppState, id: ExportId, scratch: &Path) -> anyhow::Result<Vec<Entry>> {
+/// `asker` is who the archive is for, and every row that goes into it is
+/// chosen with them in mind (SPEC §4.13).
+///
+/// An export is the promise that leaving is possible, and it has to carry a
+/// person's whole conversation — including the DMs they were in, because those
+/// are theirs as much as any room is. What it must not carry is the DMs they
+/// were *not* in, and an export is the worst place to get that wrong: it is a
+/// file that leaves the server, so a mistake here is not a screen somebody saw
+/// once, it is a copy they keep.
+async fn assemble(
+    state: &AppState,
+    id: ExportId,
+    asker: UserId,
+    scratch: &Path,
+) -> anyhow::Result<Vec<Entry>> {
     let config = &state.config;
     let users = crate::repo::users::all(&state.db.read, config)
         .await
@@ -282,11 +296,17 @@ async fn assemble(state: &AppState, id: ExportId, scratch: &Path) -> anyhow::Res
     let by_id: HashMap<UserId, User> = users.iter().map(|u| (u.id, u.clone())).collect();
     // `repo::rooms::all` does not filter archived rooms out, which is what an
     // archive wants: an archived room is still where a year of somebody's
-    // conversation is.
-    let rooms = crate::repo::rooms::all(&state.db.read)
+    // conversation is. It does filter DMs out, so they are added back here —
+    // this person's, and only this person's.
+    let mut rooms = crate::repo::rooms::all(&state.db.read)
         .await
         .map_err(anyhowed)?;
-    let media = media_rows(state).await?;
+    rooms.extend(
+        crate::repo::rooms::dms_for(&state.db.read, asker)
+            .await
+            .map_err(anyhowed)?,
+    );
+    let media = media_rows(state, asker).await?;
 
     // Every attachment gets its name inside the archive up front, so a message
     // can link to a file the loop has not reached yet.
@@ -301,17 +321,26 @@ async fn assemble(state: &AppState, id: ExportId, scratch: &Path) -> anyhow::Res
 
     let mut entries = Vec::new();
     tokio::fs::create_dir_all(scratch.join("rooms")).await?;
+    tokio::fs::create_dir_all(scratch.join("direct")).await?;
 
     // Rooms are two thirds of the work and media is the other third, roughly.
     let total = rooms.len().max(1) as f64;
     for (done, room) in rooms.iter().enumerate() {
-        let text = room_markdown(state, room, &by_id, &names)
+        let text = room_markdown(state, room, &by_id, &names, asker)
             .await
             .map_err(anyhowed)?;
-        let path = scratch.join("rooms").join(format!("{}.md", room.slug));
+        // DMs live in their own folder, named by who they are with. Mixing them
+        // into `rooms/` would put a private conversation next to the server's
+        // rooms in a file somebody opens a year from now with no other context.
+        let name = if room.kind == RoomKind::Dm {
+            format!("direct/{}.md", dm_slug(room, &by_id, asker))
+        } else {
+            format!("rooms/{}.md", room.slug)
+        };
+        let path = scratch.join(&name);
         tokio::fs::write(&path, text).await?;
         entries.push(Entry {
-            name: format!("rooms/{}.md", room.slug),
+            name,
             source: path,
             compress: true,
         });
@@ -319,7 +348,11 @@ async fn assemble(state: &AppState, id: ExportId, scratch: &Path) -> anyhow::Res
     }
 
     let index = scratch.join("media.md");
-    tokio::fs::write(&index, media_markdown(&media, &by_id, &names, &rooms)).await?;
+    tokio::fs::write(
+        &index,
+        media_markdown(&media, &by_id, &names, &rooms, asker),
+    )
+    .await?;
     entries.push(Entry {
         name: "media.md".to_string(),
         source: index,
@@ -411,15 +444,31 @@ struct MediaRow {
     created_at: i64,
 }
 
-async fn media_rows(state: &AppState) -> anyhow::Result<Vec<MediaRow>> {
-    let rows = sqlx::query(
+/// Every file in the archive.
+///
+/// The `LEFT JOIN` is what makes the visibility condition subtle: an attachment
+/// with no message is an upload nobody posted, and it is in no room at all —
+/// so a plain room check would silently drop every unposted file from every
+/// archive. It belongs to whoever uploaded it, and to nobody else: before this
+/// it went into *everybody's* archive, which meant a file somebody had picked
+/// out to send in a DM and not yet sent was already in the next export anybody
+/// asked for.
+async fn media_rows(state: &AppState, asker: UserId) -> anyhow::Result<Vec<MediaRow>> {
+    let rows = sqlx::query(&format!(
         "SELECT a.object_key, a.filename, a.mime, a.size_bytes, a.uploader_id,
                 a.starred_at, a.created_at, a.message_id, m.room_id
          FROM attachments a
          LEFT JOIN messages m ON m.id = a.message_id
          WHERE a.state = 'complete'
+           AND (
+             (a.message_id IS NULL AND a.uploader_id = ?)
+             OR {visible}
+           )
          ORDER BY a.created_at, a.id",
-    )
+        visible = crate::repo::rooms::visible_rooms("m"),
+    ))
+    .bind(asker.to_vec())
+    .bind(asker.to_vec())
     .fetch_all(&state.db.read)
     .await?;
 
@@ -449,16 +498,71 @@ async fn media_rows(state: &AppState) -> anyhow::Result<Vec<MediaRow>> {
 /// One room, in the order it happened.
 ///
 /// Walks forward in batches rather than loading the room, because "every
+/// What a DM is called inside an archive (SPEC §4.13).
+///
+/// A DM's `slug` is generated and means nothing, so an archive that used it
+/// would hold `direct/dm-01a058c3….md` — which satisfies "the export contains
+/// your DMs" and fails the point of one. The whole promise is that the archive
+/// opens in a text editor and needs nothing from Linger, and a filename nobody
+/// can read is a file nobody opens.
+///
+/// Usernames rather than display names: a username is `[a-z0-9_]` by
+/// definition (PROTOCOL §2), so it is already a safe filename, and it is the
+/// one name a person cannot change out from under an old archive.
+fn dm_slug(room: &Room, users: &HashMap<UserId, User>, asker: UserId) -> String {
+    let mut names: Vec<String> = room
+        .member_ids
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| *id != asker)
+        .map(|id| {
+            users
+                .get(&id)
+                .map_or_else(|| "gone".to_string(), |u| u.username.clone())
+        })
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        // Everybody else has left the server. The conversation is still yours.
+        return "just-you".to_string();
+    }
+    names.join("-")
+}
+
+/// How a conversation is titled in the archive and its index: `#garage` for a
+/// room, and who it is with for a DM.
+fn conversation_title(room: &Room, users: &HashMap<UserId, User>, asker: UserId) -> String {
+    if room.kind == RoomKind::Dm {
+        let names: Vec<&str> = room
+            .member_ids
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .filter(|id| **id != asker)
+            .filter_map(|id| users.get(id).map(|u| u.display_name.as_str()))
+            .collect();
+        if names.is_empty() {
+            "a direct message".to_string()
+        } else {
+            format!("direct message with {}", names.join(", "))
+        }
+    } else {
+        format!("#{}", room.slug)
+    }
+}
+
 /// message" includes the room with four years in it.
 async fn room_markdown(
     state: &AppState,
     room: &Room,
     users: &HashMap<UserId, User>,
     names: &HashMap<String, String>,
+    asker: UserId,
 ) -> Result<String, ApiError> {
     let mut out = String::new();
-    out.push_str(&format!("# #{}\n\n", room.slug));
-    if room.name != room.slug {
+    out.push_str(&format!("# {}\n\n", conversation_title(room, users, asker)));
+    if room.kind != RoomKind::Dm && room.name != room.slug {
         out.push_str(&format!("**{}**\n\n", room.name));
     }
     if let Some(topic) = &room.topic {
@@ -633,6 +737,7 @@ fn media_markdown(
     users: &HashMap<UserId, User>,
     names: &HashMap<String, String>,
     rooms: &[Room],
+    asker: UserId,
 ) -> String {
     let rooms: HashMap<RoomId, &Room> = rooms.iter().map(|room| (room.id, room)).collect();
     let mut out = String::from("# Media\n\nEverything ever shared here. Times are UTC.\n\n");
@@ -650,10 +755,10 @@ fn media_markdown(
         let who = users
             .get(&item.uploader_id)
             .map_or("somebody who is gone", |u| u.display_name.as_str());
-        let room = item
-            .room_id
-            .and_then(|id| rooms.get(&id))
-            .map_or_else(|| "—".to_string(), |room| format!("#{}", room.slug));
+        let room = item.room_id.and_then(|id| rooms.get(&id)).map_or_else(
+            || "—".to_string(),
+            |room| conversation_title(room, users, asker),
+        );
         let (y, m, d) = civil_date(item.created_at);
         out.push_str(&format!(
             "| [{}](media/{}) | {} | {y:04}-{m:02}-{d:02} {} | {} | {} | {} |\n",

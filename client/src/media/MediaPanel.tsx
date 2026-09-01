@@ -27,6 +27,7 @@ import type { User } from "../generated/User";
 import type { UserId } from "../generated/UserId";
 import { ApiError, type AuthedApi } from "../lib/api";
 import { openExternal } from "../lib/external";
+import { conversationLabel } from "../dm/dm";
 import { personStyle } from "../lib/names";
 import { fullTime } from "../stream/time";
 import {
@@ -57,6 +58,7 @@ const NO_FILTERS: Filters = { kind: null, author: null, from: "", to: "" };
 export default function MediaPanel({
   api,
   users,
+  me,
   rooms,
   onOpen,
   onClose,
@@ -66,6 +68,8 @@ export default function MediaPanel({
   api: AuthedApi;
   /** Everyone the gateway has told us about, for the person filter and names. */
   users: User[];
+  /** Who is looking, for naming a DM — it has no name of its own. */
+  me: UserId | null;
   rooms: Room[];
   /** Go to the moment an item came from. */
   onOpen: (roomId: RoomId, messageId: MessageId) => void;
@@ -123,7 +127,7 @@ export default function MediaPanel({
   }, [load]);
 
   const people = new Map(users.map((person) => [person.id, person]));
-  const roomNames = new Map(rooms.map((room) => [room.id, room.slug]));
+  const byId = new Map(rooms.map((room) => [room.id, room]));
   const shown = items ?? [];
   const last = shown.at(-1);
 
@@ -255,7 +259,11 @@ export default function MediaPanel({
                 <Tile
                   item={item}
                   who={people.get(item.author_id)}
-                  room={item.room_id === null ? undefined : roomNames.get(item.room_id)}
+                  room={
+                    item.room_id === null
+                      ? undefined
+                      : conversationLabel(byId.get(item.room_id), users, me)
+                  }
                   onOpen={() => {
                     if (item.room_id !== null && item.message_id !== null) {
                       onOpen(item.room_id, item.message_id);
@@ -353,7 +361,7 @@ function Tile({
           <span className="media-who name-color" style={personStyle(who)}>
             {name}
           </span>
-          {room === undefined ? null : <span>#{room}</span>}
+          {room === undefined ? null : <span>{room}</span>}
           <time dateTime={new Date(item.created_at).toISOString()}>
             {fullTime(item.created_at)}
           </time>

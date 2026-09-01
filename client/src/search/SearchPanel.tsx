@@ -28,6 +28,7 @@ import type { SearchHit } from "../generated/SearchHit";
 import type { User } from "../generated/User";
 import type { UserId } from "../generated/UserId";
 import { ApiError, type AuthedApi } from "../lib/api";
+import { conversationLabel } from "../dm/dm";
 import { personStyle } from "../lib/names";
 import { hitTime } from "../stream/time";
 import {
@@ -45,6 +46,7 @@ import "./search.css";
 export default function SearchPanel({
   api,
   users,
+  me,
   rooms,
   focusNonce,
   onOpen,
@@ -54,6 +56,8 @@ export default function SearchPanel({
   api: AuthedApi;
   /** Everyone the gateway has told us about, for the person filter and names. */
   users: User[];
+  /** Who is looking, for naming a DM — it has no name of its own. */
+  me: UserId | null;
   rooms: Room[];
   /**
    * Bumped every time `Ctrl`/`Cmd`+`K` is pressed. The panel is already open on
@@ -133,7 +137,10 @@ export default function SearchPanel({
   }, [typed, load]);
 
   const people = new Map(users.map((person) => [person.id, person]));
-  const roomNames = new Map(rooms.map((one) => [one.id, one.slug]));
+  // Rooms *and* the DMs you are in: since T-1303 a member's own DMs are in
+  // their search results, and a hit the client cannot name reads as one from a
+  // room that is gone.
+  const byId = new Map(rooms.map((one) => [one.id, one]));
   const shown = hits ?? [];
   const last = shown.at(-1);
   const filtered = room !== null || author !== null;
@@ -227,7 +234,7 @@ export default function SearchPanel({
                 <Hit
                   hit={hit}
                   who={people.get(hit.author_id)}
-                  room={roomNames.get(hit.room_id)}
+                  room={conversationLabel(byId.get(hit.room_id), users, me)}
                   onOpen={() => onOpen(hit.room_id, hit.message_id)}
                 />
               </li>
@@ -305,7 +312,7 @@ function Hit({
         <span className="search-who name-color" style={personStyle(who)}>
           {name}
         </span>
-        <span className="search-where">{gone ? "archived room" : `#${room}`}</span>
+        <span className="search-where">{gone ? "archived room" : room}</span>
         <time dateTime={new Date(hit.created_at).toISOString()}>{when}</time>
       </span>
       <span className="search-hit-body" aria-hidden="true">

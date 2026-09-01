@@ -63,14 +63,14 @@ describe("fileLine", () => {
 describe("hitLabel", () => {
   it("reads as a sentence: who, where, when, what", () => {
     const one = hit({ snippet: runs(["mounting it ", false], ["now", true]) });
-    expect(hitLabel(one, "Matt", "garage", "14 Mar 2026, 09:31")).toBe(
+    expect(hitLabel(one, "Matt", "#garage", "14 Mar 2026, 09:31")).toBe(
       "Matt in #garage, 14 Mar 2026, 09:31: mounting it now",
     );
   });
 
   it("falls back to the filename when the message had no words", () => {
     const one = hit({ snippet: [], matched_filenames: ["drive-cage.jpg"] });
-    expect(hitLabel(one, "Callie", "shop", "1 Feb 2026, 10:00")).toBe(
+    expect(hitLabel(one, "Callie", "#shop", "1 Feb 2026, 10:00")).toBe(
       "Callie in #shop, 1 Feb 2026, 10:00: file: drive-cage.jpg",
     );
   });
@@ -80,7 +80,7 @@ describe("hitLabel", () => {
       snippet: runs(["here it is", false]),
       matched_filenames: ["drive-cage.jpg"],
     });
-    expect(hitLabel(one, "Callie", "shop", "when")).toBe(
+    expect(hitLabel(one, "Callie", "#shop", "when")).toBe(
       "Callie in #shop, when: here it is, file: drive-cage.jpg",
     );
   });
@@ -91,7 +91,7 @@ describe("hitLabel", () => {
   });
 
   it("says so rather than nothing when there is neither", () => {
-    expect(hitLabel(hit({}), "Matt", "porch", "when")).toBe("Matt in #porch, when: no text");
+    expect(hitLabel(hit({}), "Matt", "#porch", "when")).toBe("Matt in #porch, when: no text");
   });
 });
 

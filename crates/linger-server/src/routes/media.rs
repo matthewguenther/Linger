@@ -43,7 +43,7 @@ struct MediaQuery {
 
 async fn page(
     State(state): State<AppState>,
-    _auth: AuthedUser,
+    auth: AuthedUser,
     AxumQuery(query): AxumQuery<MediaQuery>,
 ) -> Result<Json<Vec<MediaItem>>, ApiError> {
     // A range that ends before it starts is a mistake worth naming: silently
@@ -56,6 +56,7 @@ async fn page(
         }
     }
     let request = Query {
+        viewer: auth.id,
         kind: query.kind,
         author: query.author,
         before: query.before.as_deref().map(Cursor::parse).transpose()?,
@@ -72,26 +73,27 @@ async fn page(
 /// per-person star: the collection belongs to the room, not to a reader.
 async fn star(
     State(state): State<AppState>,
-    _auth: AuthedUser,
+    auth: AuthedUser,
     Path(id): Path<AttachmentId>,
 ) -> Result<StatusCode, ApiError> {
-    set(&state, id, Some(now_ms())).await
+    set(&state, id, auth.id, Some(now_ms())).await
 }
 
 async fn unstar(
     State(state): State<AppState>,
-    _auth: AuthedUser,
+    auth: AuthedUser,
     Path(id): Path<AttachmentId>,
 ) -> Result<StatusCode, ApiError> {
-    set(&state, id, None).await
+    set(&state, id, auth.id, None).await
 }
 
 async fn set(
     state: &AppState,
     id: AttachmentId,
+    viewer: UserId,
     starred_at: Option<i64>,
 ) -> Result<StatusCode, ApiError> {
-    if crate::repo::media::set_star(&state.db.write, id, starred_at).await? {
+    if crate::repo::media::set_star(&state.db.write, id, viewer, starred_at).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found("That isn't in the media collection."))

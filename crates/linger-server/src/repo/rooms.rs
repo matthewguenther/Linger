@@ -155,6 +155,40 @@ pub async fn members(db: &SqlitePool, room_id: RoomId) -> Result<Vec<UserId>, Ap
         .collect()
 }
 
+/// A SQL condition restricting rows to the rooms one person may see
+/// (SPEC §4.13). `alias` is the table alias of the `messages` row.
+///
+/// **This is the shape every listing query has to use**, rather than checking a
+/// room after the rows come back. The difference matters: a check is a line
+/// somebody can write the next query without, and it will be a query about
+/// something else entirely — the media grid growing a filter, the export
+/// growing a format. Folded into the `WHERE`, it cannot be left out without
+/// changing what the query obviously does.
+///
+/// Contributes one `?`, bound to the viewer's id. Public rooms are in it for
+/// everybody; a DM is in it for its members.
+///
+/// The viewer's own account is not checked for `deactivated_at` here, because a
+/// deactivated account cannot authenticate and so cannot be the viewer — the
+/// place that check *does* belong is [`members`], which answers who is in a DM
+/// rather than what one person can see.
+///
+/// **Every alias inside is chosen so the text contains no `m.` of its own.**
+/// `repo::media::link_groups` builds its inner query by replacing `m.` with
+/// `m2.` across the whole filter string, and an alias like `rm` would be
+/// rewritten to `rm2` and break the query. `visible_rooms_survives_realiasing`
+/// is the test that keeps that true.
+#[must_use]
+pub fn visible_rooms(alias: &str) -> String {
+    format!(
+        "{alias}.room_id IN (
+             SELECT r2.id FROM rooms r2
+             WHERE r2.kind = 'room'
+                OR r2.id IN (SELECT x.room_id FROM room_members x WHERE x.user_id = ?)
+         )"
+    )
+}
+
 /// Every DM on the server with its members, for the gateway's audience index
 /// (`Gateway::load_rooms`). Only called at startup and after a membership
 /// change, never per frame.
@@ -168,4 +202,34 @@ pub async fn all_dm_members(db: &SqlitePool) -> Result<Vec<(RoomId, Vec<UserId>)
         out.push((id, members(db, id).await?));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `repo::media::link_groups` re-aliases its filter string by replacing
+    /// `m.` with `m2.`, so anything this function emits has to survive that
+    /// with only the message alias rewritten. An alias ending in `m` would be
+    /// mangled into a name that is never declared, and the query would fail at
+    /// runtime rather than here.
+    #[test]
+    fn visible_rooms_survives_realiasing() {
+        let clause = visible_rooms("m");
+        let inner = clause.replace("m.", "m2.");
+        assert!(inner.starts_with("m2.room_id"));
+        assert_eq!(
+            inner.matches("m2.").count(),
+            1,
+            "the re-alias touched something other than the message alias: {inner}"
+        );
+        // And the subquery is untouched, so it still refers to aliases it declares.
+        assert!(inner.contains("SELECT x.room_id FROM room_members x WHERE x.user_id = ?"));
+        assert!(inner.contains("FROM rooms r2"));
+    }
+
+    #[test]
+    fn visible_rooms_takes_exactly_one_bind() {
+        assert_eq!(visible_rooms("m").matches('?').count(), 1);
+    }
 }
