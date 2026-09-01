@@ -35,8 +35,12 @@ use crate::error::ApiError;
 use crate::links;
 
 /// What `GET /media` was asked for, already validated.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Query {
+    /// Who is asking. **Not optional and not defaulted**, so a caller cannot
+    /// build one of these without saying whose collection it is (SPEC §4.13) —
+    /// which is why this struct no longer derives `Default`.
+    pub viewer: UserId,
     pub kind: Option<MediaKind>,
     pub author: Option<UserId>,
     pub before: Option<Cursor>,
@@ -190,10 +194,12 @@ async fn attachment_groups(
 ) -> Result<Vec<Group>, ApiError> {
     // An upload that is not on a message has not been shared with anybody yet,
     // and a message that was deleted took what it was carrying out of the room.
-    let mut sql = String::from(
+    let mut sql = format!(
         "SELECT a.*, m.room_id AS msg_room_id, m.body AS msg_body
          FROM attachments a JOIN messages m ON m.id = a.message_id
-         WHERE a.state = 'complete' AND m.deleted_at IS NULL",
+         WHERE a.state = 'complete' AND m.deleted_at IS NULL
+           AND {visible}",
+        visible = crate::repo::rooms::visible_rooms("m"),
     );
     if query.author.is_some() {
         sql.push_str(" AND a.uploader_id = ?");
@@ -226,6 +232,9 @@ async fn attachment_groups(
     );
 
     let mut request = sqlx::query(&sql);
+    // The viewer is bound first because the clause is first. Every query in
+    // this module puts it there, so there is one order to remember.
+    request = request.bind(query.viewer.to_vec());
     if let Some(author) = query.author {
         request = request.bind(author.to_vec());
     }
@@ -288,7 +297,14 @@ fn attachment_group(row: &SqliteRow, config: &Config) -> Result<Group, ApiError>
 /// every link on each of them. That is what keeps a message's links together
 /// when the page ends.
 async fn link_groups(db: &SqlitePool, query: &Query) -> Result<Vec<Group>, ApiError> {
-    let mut filters = String::from("m.deleted_at IS NULL");
+    // First, so it is bound first — and inside `filters` rather than beside it,
+    // because `filters` is what gets re-aliased into the inner query. A DM's
+    // links have to be excluded from both halves or the outer query happily
+    // draws links belonging to messages the inner one already refused.
+    let mut filters = format!(
+        "m.deleted_at IS NULL AND {}",
+        crate::repo::rooms::visible_rooms("m")
+    );
     if query.author.is_some() {
         filters.push_str(" AND m.author_id = ?");
     }
@@ -324,6 +340,7 @@ async fn link_groups(db: &SqlitePool, query: &Query) -> Result<Vec<Group>, ApiEr
     // The filters appear twice — once outside, once in the subquery — so every
     // bind is made twice, in the same order.
     for _ in 0..2 {
+        request = request.bind(query.viewer.to_vec());
         if let Some(author) = query.author {
             request = request.bind(author.to_vec());
         }
@@ -410,9 +427,12 @@ async fn link_groups(db: &SqlitePool, query: &Query) -> Result<Vec<Group>, ApiEr
 }
 
 async fn pin_groups(db: &SqlitePool, query: &Query) -> Result<Vec<Group>, ApiError> {
-    let mut sql = String::from(
+    let mut sql = format!(
         "SELECT m.id, m.room_id, m.author_id, m.body, m.created_at
-         FROM messages m WHERE m.pinned_at IS NOT NULL AND m.deleted_at IS NULL",
+         FROM messages m
+         WHERE m.pinned_at IS NOT NULL AND m.deleted_at IS NULL
+           AND {visible}",
+        visible = crate::repo::rooms::visible_rooms("m"),
     );
     if query.author.is_some() {
         sql.push_str(" AND m.author_id = ?");
@@ -429,6 +449,7 @@ async fn pin_groups(db: &SqlitePool, query: &Query) -> Result<Vec<Group>, ApiErr
     sql.push_str(" ORDER BY m.created_at DESC, hex(m.id) DESC LIMIT ?");
 
     let mut request = sqlx::query(&sql);
+    request = request.bind(query.viewer.to_vec());
     if let Some(author) = query.author {
         request = request.bind(author.to_vec());
     }
@@ -479,17 +500,30 @@ async fn pin_groups(db: &SqlitePool, query: &Query) -> Result<Vec<Group>, ApiErr
 
 /// Star or unstar an upload. Starred items sort first and never expire
 /// (SPEC §4.4) — the expiry sweep that reads this arrives with T-505.
+///
+/// `viewer` is not a permission — anybody can star anything they can see, and
+/// there is no per-person star. It is the visibility check: without it, a
+/// stranger holding an attachment id could star a file from a DM they are not
+/// in, and the answer (`true` or `false`) would tell them whether that id is
+/// real. That is a smaller leak than reading the conversation and it is the
+/// same leak, one bit at a time.
 pub async fn set_star(
     db: &SqlitePool,
     id: AttachmentId,
+    viewer: UserId,
     starred_at: Option<i64>,
 ) -> Result<bool, ApiError> {
-    let result = sqlx::query(
+    let result = sqlx::query(&format!(
         "UPDATE attachments SET starred_at = ?
-         WHERE id = ? AND state = 'complete' AND message_id IS NOT NULL",
-    )
+         WHERE id = ? AND state = 'complete' AND message_id IS NOT NULL
+           AND message_id IN (
+             SELECT m.id FROM messages m WHERE {visible}
+           )",
+        visible = crate::repo::rooms::visible_rooms("m"),
+    ))
     .bind(starred_at)
     .bind(id.to_vec())
+    .bind(viewer.to_vec())
     .execute(db)
     .await?;
     Ok(result.rows_affected() > 0)

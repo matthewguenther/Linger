@@ -420,6 +420,14 @@ bug — it silently shows somebody a conversation they were not in. So membershi
 checked in one place per surface, and a frame the gateway does not have a reason to
 send is not sent.
 
+Two of those are answered by something other than a check, and both are worth stating
+so nobody goes looking for the check and concludes it is missing. **Notifications** are
+decided from the frames a client receives, and a non-member receives none — so the
+gateway's filter is the notification's filter. **The media origin** serves bytes to a
+browser that carries no session and so cannot be filtered at all; what keeps a DM's
+files private is that no list hands a non-member the URL, and an object key is not
+guessable.
+
 **Presence does not leak a DM's existence.** Somebody in a DM is *in a room* — but a
 person who cannot see that DM is told only that they are around, never which room. The
 alternative, dropping the presence update entirely, would make them look offline to

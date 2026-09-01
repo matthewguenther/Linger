@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Room } from "../generated/Room";
 import type { User } from "../generated/User";
-import { dmLabel, dmWhere, orderDms, others, peopleIn } from "./dm";
+import { conversationLabel, dmLabel, dmWhere, orderDms, others, peopleIn } from "./dm";
 
 function person(id: string, name: string): User {
   return {
@@ -177,5 +177,36 @@ describe("dmWhere", () => {
 
   it("says something rather than nothing when it knows nobody", () => {
     expect(dmWhere(dm("d3", ["u-ghost"]), everyone, "u-ghost", "u-matt")).toBe("in a message");
+  });
+});
+
+describe("conversationLabel", () => {
+  const room: Room = {
+    id: "r-garage",
+    slug: "garage",
+    name: "garage",
+    topic: null,
+    kind: "room",
+    member_ids: null,
+    position: 0,
+    archived_at: null,
+    last_message_id: null,
+  };
+
+  it("gives a room its hash", () => {
+    expect(conversationLabel(room, everyone, "u-matt")).toBe("#garage");
+  });
+
+  // Since T-1303 a member's own DMs turn up in their search results and media
+  // grid, so both surfaces have to name one — and a DM has no slug worth
+  // drawing.
+  it("gives a DM its people", () => {
+    expect(conversationLabel(dm("d1", ["u-matt", "u-callie"]), everyone, "u-matt")).toBe(
+      "Callie",
+    );
+  });
+
+  it("says nothing about a conversation the client has not been told about", () => {
+    expect(conversationLabel(undefined, everyone, "u-matt")).toBeUndefined();
   });
 });

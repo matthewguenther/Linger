@@ -675,7 +675,8 @@ function Console({
         <MediaPanel
           api={api}
           users={gateway.users}
-          rooms={rooms}
+          me={gateway.me?.id ?? null}
+          rooms={[...rooms, ...dms]}
           onOpen={(roomId, messageId) => {
             setOpenRoomIds((held) => ({ ...held, [active.baseUrl]: roomId }));
             setJumpTo(messageId);
@@ -689,7 +690,11 @@ function Console({
         <SearchPanel
           api={api}
           users={gateway.users}
-          rooms={rooms}
+          me={gateway.me?.id ?? null}
+          // Rooms *and* your DMs: since T-1303 a member's own DMs are in their
+          // results, and a hit the panel cannot name reads as one from a room
+          // that is gone.
+          rooms={[...rooms, ...dms]}
           focusNonce={searchFocus}
           onOpen={(roomId, messageId) => {
             setOpenRoomIds((held) => ({ ...held, [active.baseUrl]: roomId }));

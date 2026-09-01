@@ -45,6 +45,10 @@ const MARK_END: &str = "\u{3}";
 #[derive(Debug, Clone)]
 pub struct Query {
     pub terms: Terms,
+    /// Who is searching. **Required**, so nobody can build a search that is
+    /// nobody's (SPEC §4.13) — the index covers every message on the server,
+    /// including DMs, and it is this that decides which of them come back.
+    pub viewer: UserId,
     pub room_id: Option<RoomId>,
     pub author_id: Option<UserId>,
     pub before: Option<MessageId>,
@@ -132,6 +136,12 @@ pub async fn page(db: &SqlitePool, query: &Query) -> Result<Vec<SearchHit>, ApiE
          WHERE message_fts MATCH ?
            AND m.deleted_at IS NULL",
     );
+    // The index holds every message on the server, DMs included — it is built
+    // by triggers on `messages` and has no idea what a room is. So this is the
+    // only thing standing between a search box and somebody else's private
+    // conversation, and it goes in before any of the optional filters so that
+    // an unfiltered search is still a filtered one.
+    sql.push_str(&format!(" AND {}", crate::repo::rooms::visible_rooms("m")));
     if query.room_id.is_some() {
         sql.push_str(" AND m.room_id = ?");
     }
@@ -151,7 +161,8 @@ pub async fn page(db: &SqlitePool, query: &Query) -> Result<Vec<SearchHit>, ApiE
         .bind(i64::from(SEARCH_SNIPPET_TOKENS))
         .bind(MARK_START)
         .bind(MARK_END)
-        .bind(query.terms.to_match());
+        .bind(query.terms.to_match())
+        .bind(query.viewer.to_vec());
     if let Some(room_id) = query.room_id {
         request = request.bind(room_id.to_vec());
     }

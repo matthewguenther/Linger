@@ -622,8 +622,8 @@ passes its check.
 | **M7** | Packaging: installers, signing, notarization, auto-update | A signed installer for each OS, and an update ships end-to-end | 3–5 days |
 | **M8** | Export | One archive contains every message and file, and it opens | 1 day |
 
-**V2 starts here.** Planned 2026-08-28. **M9 is built** (2026-08-29) and **M10
-is built** (2026-08-31); the rest is not started. The order below is not SPEC §6's listing order: knock and search
+**V2 starts here.** Planned 2026-08-28. **M9, M10 and M11 are built**
+(2026-08-29 and 2026-08-31); voice and ambient voice are not started. The order below is not SPEC §6's listing order: knock and search
 are small and self-contained, and voice is the largest and riskiest thing in the
 project. V1's remaining work is still five things a person has to do by hand
 (`TASKS.md`, *Human checks*), and M9's check is a sixth.
@@ -632,7 +632,7 @@ project. V1's remaining work is still five things a person has to do by hand
 |---|---|---|---|
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
 | **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **built: index and endpoint 2026-08-30, surface 2026-08-31. Its check passed in a running app** |
-| **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days — **the model, the fan-out and the client landed 2026-08-31 (T-1301, T-1302). Not usable until T-1303** |
+| **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days — **built 2026-08-31.** Its check passed surface by surface against a running server; the two-machine half is a human check |
 | **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
 | **M14** | Custom themes | Somebody makes a colour scheme, it survives a restart, and a file carries it to another computer | **V3, not V2.** Three decisions come first — see `TASKS.md` *Parking lot* |

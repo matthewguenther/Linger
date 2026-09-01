@@ -29,6 +29,21 @@ pub fn router() -> Router<AppState> {
     Router::new().route("/links/preview", post(preview))
 }
 
+/// Cards for links a client is about to draw.
+///
+/// **There is no room here, and no membership check** (SPEC §4.13, T-1303).
+/// This answers about URLs the caller already holds, with what a public web
+/// page says about itself — never with anything from this server, so a DM's
+/// contents cannot come back through it. The link *cards in the media grid* are
+/// the surface that could leak, and those are filtered where they are listed.
+///
+/// One thing this does share across the server: the preview cache is keyed by
+/// URL, so a URL somebody posted in a DM answers faster the second time anybody
+/// asks about it. Reading that would mean already knowing the exact URL, and
+/// the cache is deliberate — the server fetches once for everybody so that
+/// looking at a message never tells a website who read it (ARCHITECTURE §7).
+/// Splitting it per room would trade a privacy property people have for one
+/// nobody can use.
 async fn preview(
     State(state): State<AppState>,
     auth: AuthedUser,

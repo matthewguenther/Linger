@@ -85,6 +85,25 @@ export function dmWhere(
 }
 
 /**
+ * What to call any conversation, wherever both kinds appear in one list — the
+ * media grid and the search results (SPEC §4.4, §4.12).
+ *
+ * A room is its slug with a `#`; a DM is who is in it. Both surfaces draw
+ * whatever the server sends them, and since T-1303 the server sends a member
+ * their own DMs' files and words — so without this a DM hit reads as a room
+ * whose name the client could not find, which is what "archived room" used to
+ * mean there.
+ */
+export function conversationLabel(
+  room: Room | undefined,
+  users: User[],
+  meId: UserId | null,
+): string | undefined {
+  if (room === undefined) return undefined;
+  return room.kind === "dm" ? dmLabel(room, users, meId) : `#${room.slug}`;
+}
+
+/**
  * What the DM section calls itself when there is nothing in it.
  *
  * It says how to start one rather than that there are none — an empty list

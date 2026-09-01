@@ -72,7 +72,11 @@ export function hitLabel(
 ): string {
   const words = snippetText(hit.snippet).trim();
   const file = fileLine(hit.matched_filenames);
-  const where = room === undefined ? "" : ` in #${room}`;
+  // `room` arrives already written out — `#garage`, or the people in a DM
+  // (SPEC §4.13). It used to arrive as a bare slug and get its `#` here, which
+  // stopped being right the moment a hit could come from a conversation that
+  // is not a channel.
+  const where = room === undefined ? "" : ` in ${room}`;
   const said = words === "" ? (file ?? "no text") : words;
   const also = words === "" || file === null ? "" : `, ${file}`;
   return `${who}${where}, ${when}: ${said}${also}`;

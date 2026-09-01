@@ -62,7 +62,12 @@ async fn search(
     // loud: no results and "that room does not exist" look identical otherwise,
     // and only one of them means "try a different word".
     if let Some(room_id) = query.room_id {
-        repo::rooms::expect(&state.db.read, room_id).await?;
+        // A DM you are not in answers like a room that is not here. Without
+        // this, asking to search inside one would be a way to find out it
+        // exists — the results would be empty either way, and `NOT_FOUND`
+        // versus an empty page is the difference between "no such room" and
+        // "nothing matched in that room".
+        repo::rooms::visible_to(&state.db.read, room_id, auth.id).await?;
     }
     if let Some(author_id) = query.author_id {
         repo::users::expect(&state.db.read, &state.config, author_id).await?;
@@ -70,6 +75,7 @@ async fn search(
 
     let request = Query {
         terms,
+        viewer: auth.id,
         room_id: query.room_id,
         author_id: query.author_id,
         before: query

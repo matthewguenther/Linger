@@ -226,6 +226,30 @@ pub async fn join_member(server: &TestServer, host_access: &str, username: &str)
     resp.json().await.unwrap()
 }
 
+/// Sign in again as somebody who already has an account.
+///
+/// Needed by anything that removes a member and restores them: removal revokes
+/// every sign-in they had, so the way back in is the front door with their
+/// password (T-413).
+pub async fn sign_in(server: &TestServer, username: &str) -> AuthResponse {
+    let resp = reqwest::Client::new()
+        .post(server.url("/auth/login"))
+        .json(&serde_json::json!({
+            "username": username,
+            "password": "a perfectly fine password",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "sign-in failed: {}",
+        resp.text().await.unwrap()
+    );
+    resp.json().await.unwrap()
+}
+
 /// Host + one room, the most common fixture.
 pub async fn server_with_room(slug: &str) -> (TestServer, AuthResponse, linger_core::wire::Room) {
     let server = spawn_server().await;
