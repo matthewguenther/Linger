@@ -168,6 +168,37 @@
   align-self: flex-start;
 }
 
+/* A labelled control on one line: the voice device pickers (T-1404). The
+   label is metadata and the control is drawn like every other input here. */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.settings-row-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  color: var(--text-secondary);
+  min-width: 9ch;
+}
+
+.settings-select {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 4px 7px;
+  max-width: 34ch;
+}
+
+.settings-select:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---------------------------------------------------------------------------
    The style picker (T-602). Everything is drawn as itself: a face labelled in
    its own face, a weight shown at that weight, a swatch that is the color.

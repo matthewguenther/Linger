@@ -47,7 +47,15 @@ import type { User } from "../generated/User";
 import type { UserStatus } from "../generated/UserStatus";
 import type { UserId } from "../generated/UserId";
 import { considerFrame } from "../notify/notify";
-import { voiceFrame } from "./ipc";
+import {
+  type VoiceDeviceChoice,
+  voiceFrame,
+  voiceJoin,
+  voiceLeave,
+  voiceMute,
+  voiceVolume,
+} from "./ipc";
+import type { VoicePeer } from "../generated/VoicePeer";
 import { playKnock } from "./sound";
 import type { AuthedApi } from "./api";
 
@@ -176,6 +184,45 @@ export interface GatewayState {
    * leaves something sitting there has become a message.
    */
   knocks: Knock[];
+  /**
+   * This connection's session id, from `ready`. Voice is keyed by session
+   * (PROTOCOL §8: a peer is a client, not a person), so joining needs it.
+   */
+  sessionId: string | null;
+  /**
+   * Who is in voice, per room: the server's whole list every time
+   * (`voice.state` is a snapshot, never a delta). A room with nobody in
+   * voice has no entry. Filtered by the server before it gets here, so a
+   * DM's voice never reaches a non-member.
+   */
+  voice: Record<string, VoicePeer[]>;
+  /**
+   * Our own seat, while we have one. Local state: the server knows we are
+   * in voice, and nothing else here — mute, who we can hear, what our own
+   * microphone is doing — is ours and stays on this machine (SPEC §4.14).
+   */
+  myVoice: MyVoice | null;
+}
+
+/** Everything about being in voice that is this client's alone. */
+export interface MyVoice {
+  roomId: RoomId;
+  /** Sending silence. Yours; nobody else can set it. */
+  muted: boolean;
+  /**
+   * What the core says the microphone is doing: `opening` until the
+   * devices are open, `sending` while frames flow, `stopped` if the device
+   * went away mid-call (T-1405 will make that recover).
+   */
+  audio: string;
+  /** Peer session id → its connection state, as the core reports it. */
+  peers: Record<string, string>;
+  /** Peer session id → whether they are talking right now. */
+  speaking: Record<string, boolean>;
+  /** Whether *we* are — what the microphone is sending, after mute. */
+  talking: boolean;
+  /** Peer session id → how loud they play for us. 1 is as sent. */
+  volumes: Record<string, number>;
 }
 
 /** One knock, on its way to a card that fades. `id` is local to this client:
@@ -216,6 +263,9 @@ const EMPTY: GatewayState = {
   notifyRules: [],
   offlineAt: {},
   knocks: [],
+  sessionId: null,
+  voice: {},
+  myVoice: null,
 };
 
 /**
@@ -475,11 +525,36 @@ function apply(current: GatewayState, frame: ServerFrame): GatewayState {
         // connection dropped has stopped meaning anything by the time we are
         // back, so it goes with the rest of the transient state.
         knocks: [],
+        // A fresh `ready` is a fresh session, and a voice seat belongs to a
+        // session (PROTOCOL §8): the old one is gone at the server, so it
+        // goes here too. The next `voice.state` per room refills the map.
+        sessionId: frame.d.session_id,
+        voice: {},
+        myVoice: null,
         // `read` and `leftOff` survive: one is a copy of something the server
         // is holding for us, and the other is where this session started, which
         // a reconnect does not change.
         newest: newestFrom([...frame.d.rooms, ...frame.d.dms]),
       };
+    case "voice.state": {
+      // The whole list, every time (PROTOCOL §8). An empty one is nobody,
+      // and nobody is no entry rather than an empty entry, so "is anybody in
+      // voice here" is one lookup.
+      const { room_id, peers } = frame.d;
+      const voice = { ...current.voice };
+      if (peers.length === 0) delete voice[room_id];
+      else voice[room_id] = peers;
+      // If we thought we had a seat in this room and the server's list does
+      // not have our session in it, we do not. The server ends a seat when a
+      // session does (a lapsed resume window, say), and the core is told to
+      // let go by the listener that folds this frame.
+      const mine = current.myVoice;
+      const seated =
+        mine === null ||
+        mine.roomId !== room_id ||
+        peers.some((peer) => peer.session_id === current.sessionId);
+      return { ...current, voice, myVoice: seated ? mine : null };
+    }
     case "presence.update": {
       const entry = frame.d;
       const was = current.presence.find((p) => p.user_id === entry.user_id)?.state ?? "offline";
@@ -755,6 +830,7 @@ async function attachListeners(): Promise<void> {
     listen<{ server: string; frame: ServerFrame }>("gateway:frame", (event) => {
       const { server, frame } = event.payload;
       if (!links.has(server)) return;
+      const seated = stateOf(server).myVoice !== null;
       const next = apply(stateOf(server), frame);
       publish(server, next);
       // After the fold, never before: whether a message is worth interrupting
@@ -771,8 +847,50 @@ async function attachListeners(): Promise<void> {
       // did, and the voice surface (T-1404) will read the core's own events.
       if (frame.op === "voice.state" || frame.op === "voice.signal") {
         void voiceFrame(server, frame);
+        // The fold above drops our seat if the server's list no longer has
+        // us in it. The core still holds the devices, so tell it to let go —
+        // a microphone left open after the server has said you are gone is
+        // exactly the thing SPEC §4.14 is careful about.
+        if (frame.op === "voice.state" && seated && next.myVoice === null) {
+          void voiceLeave(server);
+        }
       }
     }),
+    // The core's own voice events (T-1402, T-1404): nothing on the wire,
+    // everything about this machine's seat. Folded into `myVoice` and
+    // ignored when we are not in voice, which is where a late event from a
+    // call that just ended lands.
+    listen<{ server: string; peer: string; state: string }>("voice:peer", (event) => {
+      const { server, peer, state } = event.payload;
+      const current = stateOf(server);
+      if (current.myVoice === null) return;
+      publish(server, {
+        ...current,
+        myVoice: { ...current.myVoice, peers: { ...current.myVoice.peers, [peer]: state } },
+      });
+    }),
+    listen<{ server: string; state: string }>("voice:audio", (event) => {
+      const { server, state } = event.payload;
+      const current = stateOf(server);
+      if (current.myVoice === null) return;
+      publish(server, { ...current, myVoice: { ...current.myVoice, audio: state } });
+    }),
+    listen<{ server: string; peer: string | null; speaking: boolean }>(
+      "voice:speaking",
+      (event) => {
+        const { server, peer, speaking } = event.payload;
+        const current = stateOf(server);
+        if (current.myVoice === null) return;
+        const mine = current.myVoice;
+        publish(server, {
+          ...current,
+          myVoice:
+            peer === null
+              ? { ...mine, talking: speaking }
+              : { ...mine, speaking: { ...mine.speaking, [peer]: speaking } },
+        });
+      },
+    ),
   ]);
   await listening;
 }
@@ -1381,6 +1499,89 @@ export function dismissKnock(server: string, id: string): void {
   const current = stateOf(server);
   if (!current.knocks.some((knock) => knock.id === id)) return;
   publish(server, { ...current, knocks: current.knocks.filter((knock) => knock.id !== id) });
+}
+
+// --- voice (SPEC §4.14, T-1404) ---------------------------------------------
+
+/** Who is in voice in a room, per the server's last word. Empty for nobody. */
+export function voicePeersIn(current: GatewayState, roomId: RoomId): VoicePeer[] {
+  return current.voice[roomId] ?? [];
+}
+
+/**
+ * Turn the microphone on in a room (SPEC §4.14: joining voice is turning your
+ * microphone on where you already are).
+ *
+ * You are in voice in at most one room, on one server, at a time — so any
+ * seat held anywhere else is given up first, and the server sees a leave
+ * before it sees the join. `startMuted` is for push-to-talk, which begins
+ * quiet and opens on the key: the mute is set before the devices open so
+ * not one frame of the room goes out before the key was held.
+ *
+ * Rejects with a sentence when the core cannot open the devices; nothing
+ * was joined in that case and the store says so.
+ */
+export async function joinVoice(
+  api: AuthedApi,
+  roomId: RoomId,
+  devices: VoiceDeviceChoice,
+  startMuted: boolean,
+): Promise<void> {
+  const server = api.baseUrl;
+  const current = stateOf(server);
+  if (current.sessionId === null) throw new Error("Not connected yet.");
+  for (const [other, state] of Object.entries(states)) {
+    if (state.myVoice !== null && (other !== server || state.myVoice.roomId !== roomId)) {
+      await leaveVoice(other);
+    }
+  }
+  publish(server, {
+    ...stateOf(server),
+    myVoice: {
+      roomId,
+      muted: startMuted,
+      audio: "opening",
+      peers: {},
+      speaking: {},
+      talking: false,
+      volumes: {},
+    },
+  });
+  try {
+    await voiceMute(server, startMuted);
+    await voiceJoin(server, current.sessionId, roomId, devices);
+  } catch (error) {
+    publish(server, { ...stateOf(server), myVoice: null });
+    throw error;
+  }
+}
+
+/** Turn the microphone off and let every peer go. Safe to call when not in voice. */
+export async function leaveVoice(server: string): Promise<void> {
+  const current = stateOf(server);
+  if (current.myVoice !== null) publish(server, { ...current, myVoice: null });
+  await voiceLeave(server);
+}
+
+/** Mute is yours, local, and instant (SPEC §4.14). Push-to-talk is this, on a key. */
+export function setVoiceMuted(server: string, muted: boolean): void {
+  const current = stateOf(server);
+  if (current.myVoice === null) return;
+  if (current.myVoice.muted !== muted) {
+    publish(server, { ...current, myVoice: { ...current.myVoice, muted } });
+  }
+  void voiceMute(server, muted);
+}
+
+/** How loud one peer plays for you. Never leaves this machine. */
+export function setVoiceVolume(server: string, peer: string, volume: number): void {
+  const current = stateOf(server);
+  if (current.myVoice === null) return;
+  publish(server, {
+    ...current,
+    myVoice: { ...current.myVoice, volumes: { ...current.myVoice.volumes, [peer]: volume } },
+  });
+  void voiceVolume(server, peer, volume);
 }
 
 /**

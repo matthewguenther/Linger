@@ -436,6 +436,150 @@ async fn a_tone_crosses_a_peer_connection() {
     );
 }
 
+/// Mute sends silence, not nothing, and the far end can tell the difference
+/// from a dead connection only because the frames keep coming. Unmuting
+/// brings the tone back on the same connection, with nothing renegotiated.
+///
+/// Also the proof of "who is speaking": B's watcher is told A started
+/// talking, then stopped when A muted, then started again.
+#[tokio::test(flavor = "multi_thread")]
+async fn muting_sends_silence_and_the_mark_follows() {
+    /// Records who was said to be speaking, in order.
+    #[derive(Default)]
+    struct Ears(Mutex<Vec<(Option<String>, bool)>>);
+    impl Watcher for Ears {
+        fn peer_state(&self, _peer: &str, _state: &str) {}
+        fn speaking(&self, peer: Option<&str>, speaking: bool) {
+            self.0
+                .lock()
+                .unwrap()
+                .push((peer.map(str::to_string), speaking));
+        }
+    }
+
+    let room = RoomId::new();
+    let (a, mut a_rx, _) = engine(A).await;
+    let (b_tx, mut b_rx) = mpsc::unbounded_channel();
+    let ears = Arc::new(Ears::default());
+    let b = Arc::new(Engine::new(
+        Arc::new(Wire(b_tx)),
+        Arc::clone(&ears),
+        Vec::new(),
+    ));
+    b.set_session(B.to_string()).await;
+    let recorder = Arc::new(Recorder::default());
+
+    a.join(
+        room,
+        Devices {
+            source: Arc::new(Tone::default()),
+            sink: Arc::new(Discard),
+        },
+    )
+    .await;
+    b.join(
+        room,
+        Devices {
+            source: Arc::new(Silence),
+            sink: Arc::clone(&recorder) as Arc<dyn Sink>,
+        },
+    )
+    .await;
+    while a_rx.try_recv().is_ok() {}
+    while b_rx.try_recv().is_ok() {}
+    let state = peers(&[A, B]);
+    a.on_state(room, &state).await;
+    b.on_state(room, &state).await;
+
+    // A generic pump that works for two engines with different watchers.
+    async fn carry(
+        a: &Arc<Engine<Wire, Log>>,
+        a_rx: &mut mpsc::UnboundedReceiver<ClientFrame>,
+        b: &Arc<Engine<Wire, Ears>>,
+        b_rx: &mut mpsc::UnboundedReceiver<ClientFrame>,
+    ) {
+        while let Ok(ClientFrame::VoiceSignal { kind, payload, .. }) = a_rx.try_recv() {
+            b.on_signal(A, kind, &payload).await;
+        }
+        while let Ok(ClientFrame::VoiceSignal { kind, payload, .. }) = b_rx.try_recv() {
+            a.on_signal(B, kind, &payload).await;
+        }
+    }
+
+    // Wait until B has heard `n` frames in all.
+    async fn heard_after(recorder: &Recorder, n: usize) -> bool {
+        for _ in 0..800 {
+            if recorder.frames().len() >= n {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        false
+    }
+    let mut ok = false;
+    for _ in 0..800 {
+        carry(&a, &mut a_rx, &b, &mut b_rx).await;
+        if recorder.frames().len() >= 25 {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(ok, "B never heard A");
+    assert!(
+        rms(&recorder.frames().last().unwrap().1) > 2000.0,
+        "not the tone"
+    );
+
+    // Mute: the frames keep arriving and they are quiet.
+    a.set_muted(true);
+    assert!(a.is_muted());
+    let before = recorder.frames().len();
+    assert!(
+        heard_after(&recorder, before + 25).await,
+        "muting stopped the frames"
+    );
+    let quiet = recorder.frames().last().unwrap().1.clone();
+    assert!(
+        rms(&quiet) < 200.0,
+        "mute is not silence: rms {}",
+        rms(&quiet)
+    );
+
+    // Unmute: the tone is back on the same connection.
+    a.set_muted(false);
+    let before = recorder.frames().len();
+    assert!(
+        heard_after(&recorder, before + 25).await,
+        "unmuting stopped the frames"
+    );
+    let loud = recorder.frames().last().unwrap().1.clone();
+    assert!(
+        rms(&loud) > 2000.0,
+        "the tone did not come back: rms {}",
+        rms(&loud)
+    );
+
+    // B's watcher saw A talk, go quiet, and talk again — each change once.
+    let marks = ears.0.lock().unwrap().clone();
+    let of_a: Vec<bool> = marks
+        .iter()
+        .filter(|(peer, _)| peer.as_deref() == Some(A))
+        .map(|(_, speaking)| *speaking)
+        .collect();
+    assert!(
+        of_a.starts_with(&[true, false, true]),
+        "the speaking mark did not follow the audio: {of_a:?}"
+    );
+    // And B, which sent only silence, was never said to be talking.
+    assert!(
+        !marks
+            .iter()
+            .any(|(peer, speaking)| peer.is_none() && *speaking),
+        "a silent microphone was marked as talking"
+    );
+}
+
 /// The microphone loop stops when the source does, and says so. Until
 /// T-1405, that is what "the microphone was unplugged" looks like.
 #[tokio::test(flavor = "multi_thread")]

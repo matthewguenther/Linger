@@ -1,0 +1,149 @@
+/**
+ * The voice surface, worked out as data (SPEC §4.14, T-1404).
+ *
+ * Everything the bar and the picker decide — who to draw, in what order,
+ * what to remember between runs — is here as pure functions and plain
+ * objects, so it can be tested instead of squinted at. The components draw
+ * what these return and call the store; they decide nothing themselves.
+ *
+ * Nothing in here counts anything (SPEC §4.2). A list of people in voice is
+ * a list of names, and the bar shows the names.
+ */
+import type { User } from "../generated/User";
+import type { VoicePeer } from "../generated/VoicePeer";
+import type { VoiceDeviceChoice } from "../lib/ipc";
+
+const INPUT_KEY = "linger.voice.input";
+const OUTPUT_KEY = "linger.voice.output";
+const PTT_KEY = "linger.voice.pushToTalk";
+
+/**
+ * The key you hold to talk, when push-to-talk is on. `Control` because it
+ * is on every keyboard, in the same place, and holding it while you speak
+ * does not type anything into the composer. Shortcuts that use it still
+ * work; the microphone is simply open for the moment they are pressed.
+ */
+export const PUSH_TO_TALK_KEY = "Control";
+
+/** What voice remembers on this machine between runs. */
+export interface VoicePrefs {
+  /** Devices by name, or the system default for `null`. */
+  devices: VoiceDeviceChoice;
+  /** Start every call muted and open the microphone only while the key is held. */
+  pushToTalk: boolean;
+}
+
+export const DEFAULT_VOICE_PREFS: VoicePrefs = {
+  devices: { input: null, output: null },
+  pushToTalk: false,
+};
+
+/** Read the preferences, tolerating storage that is absent or refuses. */
+export function loadVoicePrefs(): VoicePrefs {
+  try {
+    const input = window.localStorage.getItem(INPUT_KEY);
+    const output = window.localStorage.getItem(OUTPUT_KEY);
+    const ptt = window.localStorage.getItem(PTT_KEY);
+    return {
+      devices: {
+        input: input === null || input === "" ? null : input,
+        output: output === null || output === "" ? null : output,
+      },
+      pushToTalk: ptt === "true",
+    };
+  } catch {
+    return DEFAULT_VOICE_PREFS;
+  }
+}
+
+export function saveVoicePrefs(prefs: VoicePrefs): void {
+  try {
+    const store = window.localStorage;
+    if (prefs.devices.input === null) store.removeItem(INPUT_KEY);
+    else store.setItem(INPUT_KEY, prefs.devices.input);
+    if (prefs.devices.output === null) store.removeItem(OUTPUT_KEY);
+    else store.setItem(OUTPUT_KEY, prefs.devices.output);
+    store.setItem(PTT_KEY, prefs.pushToTalk ? "true" : "false");
+  } catch {
+    // Storage refused; the preference lasts for this run and no longer.
+  }
+}
+
+/** One seat in the bar: a session, drawn as the person holding it. */
+export interface Seat {
+  sessionId: string;
+  /** Undefined for somebody the store has never heard of. */
+  user: User | undefined;
+  /** What to draw when there is no user to draw. */
+  name: string;
+  isMe: boolean;
+}
+
+/**
+ * The seats in a room, you first and then by name, so the bar stops
+ * shuffling itself while you are looking at it.
+ *
+ * Two sessions of one person (a laptop and a desktop) are two seats: they
+ * are two connections, and each can be turned up or down on its own.
+ */
+export function seatsOf(
+  peers: readonly VoicePeer[],
+  users: readonly User[],
+  mySessionId: string | null,
+): Seat[] {
+  const byId = new Map(users.map((user) => [user.id, user]));
+  return peers
+    .map((peer): Seat => {
+      const user = byId.get(peer.user_id);
+      return {
+        sessionId: peer.session_id,
+        user,
+        name: user?.display_name ?? "somebody",
+        isMe: peer.session_id === mySessionId,
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.isMe) - Number(a.isMe) ||
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
+        a.sessionId.localeCompare(b.sessionId),
+    );
+}
+
+/** Everybody who is in voice anywhere we can see, as a set of user ids. */
+export function usersInVoice(voice: Readonly<Record<string, VoicePeer[]>>): Set<string> {
+  const out = new Set<string>();
+  for (const peers of Object.values(voice)) {
+    for (const peer of peers) out.add(peer.user_id);
+  }
+  return out;
+}
+
+/**
+ * The one line the bar says about your own microphone, or null when there
+ * is nothing worth a word. The mute button already says "muted"; this is for
+ * the states a button cannot carry.
+ */
+export function microphoneLine(audio: string, pushToTalk: boolean, muted: boolean): string | null {
+  switch (audio) {
+    case "opening":
+      return "opening the microphone…";
+    case "sending":
+      return pushToTalk && muted ? `hold ${PUSH_TO_TALK_KEY.toLowerCase()} to talk` : null;
+    case "stopped":
+      return "the microphone stopped — leave and join again";
+    default:
+      return audio.startsWith("encoder") ? "the microphone could not start" : null;
+  }
+}
+
+/** A volume as a label: 100% is as sent. Numerals are metadata, so the caller draws it mono. */
+export function volumeLabel(volume: number): string {
+  return `${Math.round(volume * 100)}%`;
+}
+
+/** Clamp a slider value into what the core accepts: silent to twice as sent. */
+export function clampVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return 1;
+  return Math.min(2, Math.max(0, volume));
+}

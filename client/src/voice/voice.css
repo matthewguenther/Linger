@@ -1,0 +1,117 @@
+/*
+ * The voice line under a room's header (SPEC §4.14, T-1404).
+ *
+ * Console rules (SPEC §5): a hairline, no bubbles, no glow, no rings. Who is
+ * talking is their name at full weight against everybody else at rest, the
+ * same move the roster makes for presence.
+ */
+.voice-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px var(--gutter);
+  border-bottom: 1px solid var(--hairline);
+  min-height: 30px;
+}
+
+/* Nobody in voice and you are not either: the one control, kept small, so
+   the way in is always there without taking a line from the conversation. */
+.voice-bar[data-empty="true"] {
+  padding-top: 2px;
+  padding-bottom: 2px;
+  min-height: 0;
+}
+
+.voice-label {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.voice-seats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.voice-seat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.voice-name {
+  font-size: var(--text-label-size);
+  font-weight: 500;
+  opacity: 0.62;
+  transition: opacity var(--motion-fast);
+}
+
+/* Talking: the name comes up to full. Nothing else moves. */
+.voice-seat[data-talking="true"] .voice-name {
+  opacity: 1;
+}
+
+.voice-seat[data-link="failed"] .voice-name,
+.voice-seat[data-link="disconnected"] .voice-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+}
+
+.voice-action {
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.voice-action:hover,
+.voice-action[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.voice-action:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.voice-line {
+  color: var(--text-muted);
+}
+
+.voice-problem {
+  color: var(--text-secondary);
+}
+
+/* Per-person volume: a short, plain range with the figure beside it. */
+.voice-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.voice-volume input[type="range"] {
+  width: 64px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.voice-volume input[type="range"]:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.voice-volume .meta {
+  min-width: 3.5ch;
+  text-align: right;
+}

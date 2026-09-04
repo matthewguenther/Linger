@@ -24,11 +24,13 @@
 pub mod audio;
 pub mod codec;
 pub mod device;
+pub mod level;
 pub mod mesh;
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use linger_core::gateway::{ClientFrame, VoicePeer, VoiceSignalKind};
@@ -75,6 +77,12 @@ pub trait Watcher: Send + Sync + 'static {
     /// — or a reason it could not start. Not a peer's business, so not
     /// `peer_state`.
     fn audio_state(&self, _state: &str) {}
+
+    /// Somebody started or stopped talking. `None` is you — what the
+    /// microphone is sending, after mute — so the surface can show that the
+    /// mic is live in the same way it shows everybody else. Fired on change
+    /// only (see `level::Gate`), so a quiet room sends nothing.
+    fn speaking(&self, _peer: Option<&str>, _speaking: bool) {}
 }
 
 /// One remote client, and the connection to it.
@@ -101,6 +109,10 @@ pub struct Engine<S: Signaller, W: Watcher> {
     /// Shared with the sending loop and every inbound track's reader, which
     /// is why it is an `Arc` rather than a field.
     inner: Arc<Mutex<Inner>>,
+    /// Mute is yours and local (SPEC §4.14). The sending loop reads it every
+    /// frame and sends silence while it is set — silence rather than nothing,
+    /// so the far end's decoder keeps its clock.
+    muted: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -128,6 +140,34 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
             watcher,
             ice_servers,
             inner: Arc::new(Mutex::new(Inner::default())),
+            muted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Stop or resume sending what the microphone hears. Local, instant, and
+    /// nobody else's to change (SPEC §4.14). Push-to-talk is this, toggled by
+    /// a key.
+    pub fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Relaxed);
+    }
+
+    /// Whether we are sending silence.
+    #[must_use]
+    pub fn is_muted(&self) -> bool {
+        self.muted.load(Ordering::Relaxed)
+    }
+
+    /// How loud one peer plays for you. Nothing crosses the wire.
+    pub async fn set_volume(&self, peer: &str, volume: f32) {
+        let sink = self
+            .inner
+            .lock()
+            .await
+            .devices
+            .as_ref()
+            .map(|d| Arc::clone(&d.sink));
+        if let Some(sink) = sink {
+            sink.set_volume(peer, volume).await;
         }
     }
 
@@ -159,6 +199,7 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
             Arc::clone(&self.inner),
             source,
             Arc::clone(&self.watcher),
+            Arc::clone(&self.muted),
         ));
         self.inner.lock().await.pump = Some(pump);
         self.signaller.send(ClientFrame::VoiceJoin { room_id });
@@ -381,9 +422,11 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
         // devices exist (the tests do this) is not a peer with no ears.
         let inner = Arc::clone(&self.inner);
         let from = them.to_string();
+        let ears = Arc::clone(&self.watcher);
         conn.on_track(Box::new(move |track, _receiver, _transceiver| {
             let inner = Arc::clone(&inner);
             let from = from.clone();
+            let ears = Arc::clone(&ears);
             Box::pin(async move {
                 let sink = inner
                     .lock()
@@ -392,7 +435,7 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
                     .as_ref()
                     .map(|d| Arc::clone(&d.sink));
                 let Some(sink) = sink else { return };
-                tokio::spawn(receive(track, from, sink));
+                tokio::spawn(receive(track, from, sink, ears));
             })
         }));
 
@@ -478,9 +521,19 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
 /// the CPU for identical bytes. The loop paces itself on the source — a
 /// microphone delivers a frame every 20 ms, and so do the stand-ins.
 ///
+/// Mute is applied here, by sending a frame of zeros in place of the real
+/// one. Silence rather than nothing, so the far end's decoder keeps its
+/// clock; and the level gate sees what is *sent*, so the "you are talking"
+/// mark goes out when the microphone does.
+///
 /// It ends when the source does. That is a microphone that went away, and
 /// until T-1405 makes it recover, the honest thing is to say so and stop.
-async fn pump<W: Watcher>(inner: Arc<Mutex<Inner>>, source: Arc<dyn Source>, watcher: Arc<W>) {
+async fn pump<W: Watcher>(
+    inner: Arc<Mutex<Inner>>,
+    source: Arc<dyn Source>,
+    watcher: Arc<W>,
+    muted: Arc<AtomicBool>,
+) {
     let mut encoder = match codec::Encoder::new() {
         Ok(encoder) => encoder,
         Err(error) => {
@@ -488,9 +541,19 @@ async fn pump<W: Watcher>(inner: Arc<Mutex<Inner>>, source: Arc<dyn Source>, wat
             return;
         }
     };
+    let mut gate = level::Gate::default();
+    let quiet = vec![0i16; audio::FRAME_SAMPLES];
     watcher.audio_state("sending");
     while let Some(frame) = source.frame().await {
-        let packet = match encoder.encode(&frame) {
+        let frame = if muted.load(Ordering::Relaxed) {
+            &quiet
+        } else {
+            &frame
+        };
+        if let Some(talking) = gate.update(level::rms(frame), Instant::now()) {
+            watcher.speaking(None, talking);
+        }
+        let packet = match encoder.encode(frame) {
             Ok(packet) => packet,
             Err(error) => {
                 eprintln!("voice: encode: {error}");
@@ -515,6 +578,9 @@ async fn pump<W: Watcher>(inner: Arc<Mutex<Inner>>, source: Arc<dyn Source>, wat
             let _ = track.write_sample(&sample).await;
         }
     }
+    if gate.is_on() {
+        watcher.speaking(None, false);
+    }
     watcher.audio_state("stopped");
 }
 
@@ -525,7 +591,15 @@ async fn pump<W: Watcher>(inner: Arc<Mutex<Inner>>, source: Arc<dyn Source>, wat
 /// about a gap: asking the decoder to conceal each missing frame, so a lost
 /// packet is a smear rather than a click, and the far end's clock keeps its
 /// place. A gap of more than a few is a pause, not loss, and is left alone.
-async fn receive(track: Arc<TrackRemote>, peer: String, sink: Arc<dyn Sink>) {
+///
+/// The level gate runs on what was decoded, so "they are talking" is judged
+/// on the same samples that reach the speaker.
+async fn receive<W: Watcher>(
+    track: Arc<TrackRemote>,
+    peer: String,
+    sink: Arc<dyn Sink>,
+    watcher: Arc<W>,
+) {
     let mut decoder = match codec::Decoder::new() {
         Ok(decoder) => decoder,
         Err(error) => {
@@ -533,6 +607,7 @@ async fn receive(track: Arc<TrackRemote>, peer: String, sink: Arc<dyn Sink>) {
             return;
         }
     };
+    let mut gate = level::Gate::default();
     let mut expected: Option<u16> = None;
     while let Ok((packet, _)) = track.read_rtp().await {
         let sequence = packet.header.sequence_number;
@@ -551,9 +626,19 @@ async fn receive(track: Arc<TrackRemote>, peer: String, sink: Arc<dyn Sink>) {
             continue;
         }
         match decoder.decode(&packet.payload) {
-            Ok(samples) => sink.play(&peer, &samples).await,
+            Ok(samples) => {
+                if let Some(talking) = gate.update(level::rms(&samples), Instant::now()) {
+                    watcher.speaking(Some(&peer), talking);
+                }
+                sink.play(&peer, &samples).await;
+            }
             Err(error) => eprintln!("voice: peer {peer}: decode: {error}"),
         }
+    }
+    // The track ended — they left, or the connection did. The mark must not
+    // stay lit on somebody who is gone.
+    if gate.is_on() {
+        watcher.speaking(Some(&peer), false);
     }
 }
 

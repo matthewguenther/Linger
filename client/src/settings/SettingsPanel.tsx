@@ -44,6 +44,8 @@ import {
   passwordReady,
   passwordRequest,
 } from "./settings";
+import { type VoiceDeviceList, voiceDevices } from "../lib/ipc";
+import { loadVoicePrefs, PUSH_TO_TALK_KEY, saveVoicePrefs, type VoicePrefs } from "../voice/voice";
 import "./settings.css";
 
 function problemText(error: unknown, fallback: string): string {
@@ -181,6 +183,7 @@ export default function SettingsPanel({
           </button>
         </section>
         <SoundSection />
+        <VoiceSection />
         <ExportSection api={api} />
         <UpdatesSection />
         <section className="settings-section">
@@ -334,6 +337,136 @@ function ExportSection({ api }: { api: AuthedApi }) {
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * Voice (SPEC §4.14, T-1404): which microphone and speakers, and whether the
+ * microphone waits for a key.
+ *
+ * Both are remembered on this machine and read at the next join. A device
+ * you pick that is not plugged in next time falls back to the system default
+ * rather than stopping you talking; the list here shows what is present now.
+ *
+ * Push-to-talk is off by default because a room is "a room you leave
+ * running" (SPEC §4.14) and a key you have to hold is the opposite of that.
+ * It is here for people who share a desk.
+ */
+function VoiceSection() {
+  const [prefs, setPrefs] = useState<VoicePrefs>(loadVoicePrefs);
+  // Null until the core answers; also null in a browser, where there is no
+  // core and nothing to pick for.
+  const [devices, setDevices] = useState<VoiceDeviceList | null>(null);
+  const [asked, setAsked] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    voiceDevices()
+      .then((list) => {
+        if (alive) setDevices(list);
+      })
+      .catch(() => {
+        // Enumeration failed: the pickers stay on "system default", which is
+        // what a join would use anyway.
+      })
+      .finally(() => {
+        if (alive) setAsked(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const change = (next: VoicePrefs): void => {
+    setPrefs(next);
+    saveVoicePrefs(next);
+  };
+
+  return (
+    <section className="settings-section">
+      <h3 className="panel-label">voice</h3>
+      <p className="settings-lead">
+        Talking happens in a room: <em>join voice</em> under a room's name turns your
+        microphone on there. Nothing is recorded, by anybody, ever.
+      </p>
+      {devices === null ? (
+        <p className="settings-lead settings-warmth-lead">
+          {asked ? "Devices are picked in the desktop app." : "Looking for devices…"}
+        </p>
+      ) : (
+        <>
+          <DevicePicker
+            label="microphone"
+            choices={devices.inputs}
+            fallback={devices.default_input}
+            value={prefs.devices.input}
+            onChange={(input) => change({ ...prefs, devices: { ...prefs.devices, input } })}
+          />
+          <DevicePicker
+            label="speakers"
+            choices={devices.outputs}
+            fallback={devices.default_output}
+            value={prefs.devices.output}
+            onChange={(output) => change({ ...prefs, devices: { ...prefs.devices, output } })}
+          />
+          <p className="settings-lead settings-warmth-lead">
+            A change applies the next time you join voice.
+          </p>
+        </>
+      )}
+      <p className="settings-lead settings-warmth-lead">
+        Push to talk starts every call muted and opens the microphone only while you hold{" "}
+        <span className="meta">{PUSH_TO_TALK_KEY.toLowerCase()}</span>.
+      </p>
+      <button
+        type="button"
+        className="settings-mini settings-toggle"
+        aria-pressed={prefs.pushToTalk}
+        onClick={() => change({ ...prefs, pushToTalk: !prefs.pushToTalk })}
+      >
+        {prefs.pushToTalk ? "push to talk" : "open microphone"}
+      </button>
+    </section>
+  );
+}
+
+/** One `<select>` of device names, with the system default as the first choice. */
+function DevicePicker({
+  label,
+  choices,
+  fallback,
+  value,
+  onChange,
+}: {
+  label: string;
+  choices: string[];
+  /** What "system default" is right now, so the option can say so. */
+  fallback: string | null;
+  value: string | null;
+  onChange: (name: string | null) => void;
+}) {
+  // A remembered device that is not plugged in today still shows, marked, so
+  // the choice is visible rather than silently replaced.
+  const missing = value !== null && !choices.includes(value);
+  return (
+    <label className="settings-row">
+      <span className="settings-row-label">{label}</span>
+      <select
+        className="settings-select"
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value === "" ? null : event.target.value)}
+      >
+        <option value="">
+          system default{fallback === null ? "" : ` (${fallback})`}
+        </option>
+        {choices.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+        {missing ? <option value={value}>{value} (not plugged in)</option> : null}
+      </select>
+    </label>
   );
 }
 

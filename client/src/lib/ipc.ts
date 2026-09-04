@@ -63,23 +63,69 @@ export async function forgetSession(baseUrl: string): Promise<SessionWrite> {
 // of these three calls.
 
 /**
+ * Which microphone and speakers to use, by the names `voiceDevices` gave.
+ * `null` is the system default. A name that is no longer present falls back
+ * to the default on the core's side rather than failing the join.
+ */
+export interface VoiceDeviceChoice {
+  input: string | null;
+  output: string | null;
+}
+
+/**
  * Join voice in a room. `sessionId` is this connection's, from `ready`.
  *
- * Joining opens the default microphone and speakers; on a machine with
- * neither this rejects with a sentence saying which, and nothing was joined.
+ * Joining opens the microphone and speakers; on a machine with neither this
+ * rejects with a sentence saying which, and nothing was joined.
  */
 export async function voiceJoin(
   baseUrl: string,
   sessionId: string,
   roomId: RoomId,
+  devices: VoiceDeviceChoice,
 ): Promise<void> {
-  if (!isTauri()) return;
-  await invoke("voice_join", { baseUrl, sessionId, roomId });
+  if (!isTauri()) throw new Error("Voice only works in the desktop app.");
+  await invoke("voice_join", {
+    baseUrl,
+    sessionId,
+    roomId,
+    input: devices.input,
+    output: devices.output,
+  });
 }
 
 export async function voiceLeave(baseUrl: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("voice_leave", { baseUrl });
+}
+
+/** Stop or resume sending the microphone. Local and yours alone (SPEC §4.14). */
+export async function voiceMute(baseUrl: string, muted: boolean): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("voice_mute", { baseUrl, muted });
+}
+
+/** How loud one peer (a session id) plays for you: 1 is as sent, 2 is the ceiling. */
+export async function voiceVolume(baseUrl: string, peer: string, volume: number): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("voice_volume", { baseUrl, peer, volume });
+}
+
+/** The sound devices on this machine, as the core sees them. */
+export interface VoiceDeviceList {
+  inputs: string[];
+  outputs: string[];
+  default_input: string | null;
+  default_output: string | null;
+}
+
+/**
+ * Enumerate the sound devices, for the picker in settings. Null outside the
+ * desktop app, where there is no core to ask and no voice to pick for.
+ */
+export async function voiceDevices(): Promise<VoiceDeviceList | null> {
+  if (!isTauri()) return null;
+  return invoke<VoiceDeviceList>("voice_devices");
 }
 
 /**

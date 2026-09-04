@@ -374,7 +374,7 @@ Build order, cheapest and safest first:
 
 ```
 M9 knock (built) → M10 search (built) → M11 DMs (built)
-  → M12 voice (the audio path is built; no STUN/TURN, no surface) → M13 ambient voice
+  → M12 voice (audio path + surface built; no STUN/TURN yet) → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -620,9 +620,9 @@ them, and cmake installs fine in user space.
     arrive; a burst of late packets is absorbed up to 200 ms and then the
     oldest are dropped. Fine on a LAN, and the first thing to revisit when
     real networks are in play.
-  - **Nothing pushes a frame to the WebView but state.** There is no way to
-    press *join* yet — that is T-1404. Until then the only callers are the
-    tests.
+  - **Nothing pushes a frame to the WebView but state.** The surface (T-1404,
+    landed the same day) reads three small events — a peer's connection
+    state, our microphone's state, who is talking — and nothing else crosses.
   - **A microphone that goes away ends the call's sending half** and says so
     (`voice:audio` → `stopped`). Recovering is T-1405.
 
@@ -637,10 +637,94 @@ them, and cmake installs fine in user space.
   the app rather than missing infrastructure.
   *Accept:* two clients connect where at least one is behind carrier-grade NAT.
 
-- ⬜ **T-1404 · The voice surface** — effort: **medium**
+- ✅ **T-1404 · The voice surface** — effort: **medium** — Matt, 2026-09-04
   Join and leave, who is speaking, per-person volume, push-to-talk, a device
   picker, mute. Console design system: no bubbles, no glow, no animated rings.
-  *Accept:* usable by somebody who has not read anything.
+  *Accept:* usable by somebody who has not read anything. **Built; the
+  "somebody" has not tried it yet** — that is HC-8, which no longer needs the
+  devtools.
+
+  ### Where it lives
+
+  **One line under the room's header** (`client/src/voice/VoiceBar.tsx`),
+  because voice happens in a room (SPEC §4.14) and a panel of its own would
+  say otherwise. Empty of everybody, it is one small control: `join voice`.
+  With anybody in, it is the word *voice*, the names, and — while you are in —
+  `mute` and `leave voice`. Somebody talking is their name at full weight
+  against everybody else at rest; no ring, no glow, no bar that bounces.
+
+  **A word on the roster card**, not a badge: `in #garage · voice`, at the
+  same weight as "in a room", because it is the same kind of fact.
+
+  **Settings → voice** holds the two things chosen once: the microphone and
+  speakers (by name, from the core's list, with the system default named as
+  such), and push-to-talk. A device you picked that is not plugged in today
+  shows as such and the default is used — the join is never refused over it.
+
+  ### What the store holds now
+
+  `GatewayState` grew three fields. `sessionId` from `ready`, because a seat
+  is a session and the join needs to say which. `voice`, room id → the
+  server's whole peer list, folded from `voice.state` (an empty list is no
+  entry). And `myVoice`, which is **local state and nothing else**: mute,
+  each peer's connection state, who is talking, our own volumes for people.
+  None of that is on the wire and none of it should be.
+
+  **The server's list is the truth about the seat.** A `voice.state` for our
+  room without our session in it drops `myVoice` *and* tells the core to
+  leave, so a microphone is never left open after the server has said we are
+  gone (a lapsed resume window, say). A fresh `ready` clears all three fields
+  for the same reason: it is a new session.
+
+  **One seat, anywhere.** `joinVoice` leaves any seat held on any server
+  first; the server sees a leave before the join.
+
+  ### What the core grew
+
+  - **Mute** is a flag the sending loop reads every frame; muted, it encodes a
+    frame of zeros — silence rather than nothing, so the far end's decoder
+    keeps its clock. `voice_mute` sets it. Push-to-talk is the same flag on a
+    key: `Control` held opens the microphone, released closes it, and losing
+    window focus closes it too, so an alt-tab mid-word does not leave it open.
+  - **Who is talking** is decided in Rust with the samples in hand
+    (`voice/level.rs`): RMS against a threshold with a 300 ms hangover, so a
+    breath between words does not flicker. Fired *on change only* as a
+    `voice:speaking` event (`peer: null` is you, after mute), so a quiet room
+    sends the window nothing.
+  - **Per-person volume** is a gain on the speaker's lane for that peer,
+    clamped at twice as sent. `voice_volume` sets it; it never crosses the
+    wire.
+  - **Devices by name**: `voice_devices` lists inputs, outputs and the two
+    defaults; `voice_join` takes an input and output name and falls back to
+    the default for a name that is gone.
+
+  ### Tested
+
+  - `tests/voice.rs::muting_sends_silence_and_the_mark_follows` — over a real
+    peer connection: the tone arrives, mute makes the frames quiet without
+    stopping them, unmute brings the tone back on the same connection, and
+    B's watcher saw A marked talking → quiet → talking, each change once, while
+    B's own silent microphone was never marked.
+  - `level.rs` unit tests for the gate: on once, no flicker inside a word,
+    off once after a real pause, nothing from silence.
+  - `gateway.voice.test.ts` (nine): the fold, the join order (mute before
+    join for push-to-talk, with the session id and the device names), leaving
+    another server's seat first, a refused join leaving nothing behind, the
+    server's list dropping our seat and the core being told, the three core
+    events folding in and being ignored without a seat, and a fresh `ready`
+    clearing everything.
+  - `voice.test.ts` for the pure parts: seat order (you first, then by name,
+    two sessions of one person as two seats), the microphone line, volume
+    labels and clamping, preferences round-tripping.
+  - The device listing test ran on real hardware and named the defaults.
+
+  ### Not done, on purpose
+
+  A device change mid-call is "leave and join again", said in words in
+  settings; switching live is T-1405's territory. The push-to-talk key is not
+  configurable. The speaking mark is a light, not voice activity detection
+  that gates the encoder — that is M13's, where it has to save CPU rather
+  than draw a name.
 
 - ⬜ **T-1405 · Devices that change under you** — effort: **high**
   Its own task because AGENTS says so: headphones unplugged mid-call, the OS
@@ -986,36 +1070,39 @@ it in four places and not found it.
 
 ### HC-8 · Hear somebody talk, from a second computer
 
-*The first half of M12's milestone check (T-1402). The other half — four
-networks — cannot be done until T-1403 puts STUN and TURN in the deploy, and
-there is nothing to press until T-1404 draws the surface.*
+*The first half of M12's milestone check (T-1402), and T-1404's "usable by
+somebody who has not read anything". The other half — four networks — cannot
+be done until T-1403 puts STUN and TURN in the deploy.*
 
 The audio path has run end to end in one process (a tone in one engine comes
-out of the other's speaker, over a real peer connection) and the microphone
-and speaker code has opened a real sound card. What it has never done is
-carry a voice between two machines.
-
-**Until T-1404 lands, this needs the devtools**, because nothing in the app
-calls `voiceJoin` yet. It is a one-liner, and the point of doing it before the
-surface exists is to find out whether the path works before a button is drawn
-on top of it.
+out of the other's speaker, over a real peer connection), the microphone and
+speaker code has opened a real sound card, and there is a button. What it has
+never done is carry a voice between two machines, or been pressed by anybody
+who did not build it.
 
 1. Two computers **on the same network** — the same wifi is fine. Different
    networks will not connect yet (no STUN, no TURN: T-1403). Both signed into
    the same server as different people, both in the same room.
-2. On each, open the WebView devtools and join voice in the room you are in.
-   The gateway store has the session id and the room id; `voiceJoin(server,
-   sessionId, roomId)` from `lib/ipc.ts` is the call.
-3. Talk. The other machine should play it within a fraction of a second.
+2. On each, press **join voice** under the room's name. Nothing else; if you
+   had to look anything up, T-1404 has not met its criterion — say what.
+3. Talk. The other machine should play it within a fraction of a second, and
+   your name should come up to full weight on their screen while you do.
    Listen for a delay that grows over a minute — that is a clock drift the
    200 ms ceiling should be hiding, and if it is not, say so.
-4. Unplug one machine's headphones mid-sentence. **Expect it to stop** — that
-   is T-1405, not a bug — and check that `voice:audio` said `stopped`.
-5. Close one app. The other's `voice:peer` should say `closed` within a few
-   seconds, and the room should go quiet rather than hiss.
+4. Press **mute**. The other side should hear nothing, and your name should
+   drop back to rest on their screen. Unmute; it comes back.
+5. Turn the other person down with the slider beside their name. Only your
+   side changes.
+6. In settings → voice, turn on **push to talk**, leave and join again. You
+   should be silent until you hold `ctrl`.
+7. Unplug one machine's headphones mid-sentence. **Expect it to stop** — that
+   is T-1405, not a bug — and the line under the header should say so.
+8. Close one app. On the other, the name should go within a few seconds, and
+   the room should go quiet rather than hiss.
 
 **Done when:** you have heard the other person, in the room, from a second
-computer. Write down the delay you noticed and whether it grew.
+computer, without reading anything first. Write down the delay you noticed
+and whether it grew.
 
 ---
 

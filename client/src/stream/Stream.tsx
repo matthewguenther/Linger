@@ -76,6 +76,7 @@ import { personStyle } from "../lib/names";
 import { occupancyLine, occupantsOf } from "../lib/occupancy";
 import { peopleList } from "../notify/rules";
 import PersonName from "../status/PersonName";
+import VoiceBar from "../voice/VoiceBar";
 import Markdown, { type MentionLookup } from "./Markdown";
 import { uploadFile } from "../lib/upload";
 import { linkTargets, mentionHandles, plainText } from "./markdown";
@@ -628,6 +629,10 @@ export default function Stream({
           </button>
         ) : null}
       </header>
+
+      {/* Voice happens in the room (SPEC §4.14), so its one line sits under
+          the room's header and nowhere else. */}
+      <VoiceBar api={api} room={room} users={users} />
 
       {strayed && since && leftOff !== null ? (
         <SinceYouWereGone
