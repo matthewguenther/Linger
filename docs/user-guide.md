@@ -120,9 +120,11 @@ system default is used and the picker says so.
 transcription". Audio goes between the people in the room, and the server's
 whole part is introducing them.
 
-Two things to know today: voice only works between computers **on the same
-network** until the host runs a relay (that is coming), and if your headphones
-come unplugged mid-sentence the microphone stops and you join again.
+Two things to know today: voice between computers on **different networks**
+needs the host to run the relay (the host guide says how), and if your
+headphones come unplugged mid-sentence, Linger moves to whatever your computer
+now uses within a second or two. If nothing comes back for twenty seconds the
+line under the room's name says the microphone stopped, and you join again.
 
 ## Finding things again
 

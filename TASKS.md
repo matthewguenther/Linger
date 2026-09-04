@@ -624,8 +624,9 @@ them, and cmake installs fine in user space.
   - **Nothing pushes a frame to the WebView but state.** The surface (T-1404,
     landed the same day) reads three small events — a peer's connection
     state, our microphone's state, who is talking — and nothing else crosses.
-  - **A microphone that goes away ends the call's sending half** and says so
-    (`voice:audio` → `stopped`). Recovering is T-1405.
+  - **A microphone that goes away is reopened** for about twenty seconds
+    before the sending half gives up and says so (`voice:audio` → `stopped`)
+    — T-1405, landed the same day.
 
   *Accept:* four people, four networks, one hour, no drops. Anything less than
   that is not evidence. **Unchanged, and not met** — see HC-8 for the first
@@ -806,11 +807,57 @@ them, and cmake installs fine in user space.
   that gates the encoder — that is M13's, where it has to save CPU rather
   than draw a name.
 
-- ⬜ **T-1405 · Devices that change under you** — effort: **high**
+- ✅ **T-1405 · Devices that change under you** — effort: **high** — Matt, 2026-09-04
   Its own task because AGENTS says so: headphones unplugged mid-call, the OS
   default device changing, a device that wants a different sample rate.
   *Accept:* unplug and replug headphones during a call; audio continues on the
-  new device without a restart.
+  new device without a restart. **Built; the unplugging is HC-8 step 7.**
+
+  ### How it works
+
+  Each device already had a thread of its own that opened it and held the
+  stream. That thread is now a **supervisor** (`Worker` in `voice/device.rs`):
+  the stream's error callback rings an `Alarm` the worker is waiting on, the
+  worker drops the dead stream and calls the same opener again — the
+  *default* device if that is what was asked for, which is how "the OS moved
+  to the headphones" becomes "audio continues on the headphones". Every half
+  second, forty times, then it gives up: about twenty seconds, long enough to
+  swap a plug and short enough that a room is not left wondering.
+
+  **Giving up is said out loud.** The microphone's give-up sends the sentinel
+  its `Source` already understood, so the engine's loop ends and the surface
+  shows `stopped` — the same as before, only twenty seconds later and only
+  when it is true. The speaker's give-up is silence. While the worker is still
+  trying, frames simply pause and resume; nothing above the seam sees it.
+
+  **The sample rate can change with the device.** The speaker's rate is an
+  atomic the worker rewrites on reopen, and every lane is *retuned* first —
+  queue emptied (it was for the old device), resampler rebuilt for the new
+  rate, your volume for that person kept. The microphone's framer is built
+  fresh per open, so it always resamples from whatever the new device runs at.
+
+  **The first open is not retried.** Somebody pressing `join voice` on a
+  machine with no microphone gets the error in words, now, not twenty
+  seconds of nothing.
+
+  ### Tested
+
+  The supervisor is generic over the stream and the opener, so the schedule
+  is proven with a stand-in and no device anywhere near it: a death is one
+  rebuild and a second ring for the same death is not another; a first-open
+  failure is the caller's answer and is not retried; a device that never comes
+  back is given up on exactly once after `attempts` failures; a run of
+  failures that recovers resets the count; a stop ends everything and a late
+  ring builds nothing. Lane retuning has a unit test. The three hardware tests
+  still pass on a real sound card.
+
+  ### What none of this proves
+
+  Nothing has been unplugged. Whether cpal on each OS actually reports a
+  vanished device through the error callback — rather than going quiet and
+  reporting nothing — is exactly the kind of fact AGENTS says only a real
+  machine can supply, and it is HC-8 step 7. If a platform goes quiet
+  instead, the fix is a watchdog on frame arrival, and it has a place to go.
 
 ---
 
@@ -1176,8 +1223,12 @@ who did not build it.
    side changes.
 6. In settings → voice, turn on **push to talk**, leave and join again. You
    should be silent until you hold `ctrl`.
-7. Unplug one machine's headphones mid-sentence. **Expect it to stop** — that
-   is T-1405, not a bug — and the line under the header should say so.
+7. Unplug one machine's headphones mid-sentence, then plug them back in (or
+   let the sound move to the built-in speakers). **Audio should continue
+   within a second or two** on whatever the system now uses (T-1405). If the
+   line under the header says the microphone stopped, that means twenty
+   seconds passed with no device coming back — say what you unplugged and
+   what the OS did.
 8. Close one app. On the other, the name should go within a few seconds, and
    the room should go quiet rather than hiss.
 
