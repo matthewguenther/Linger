@@ -14,10 +14,16 @@
 //!   will not do 48 kHz gets its native rate and a linear resampler at the
 //!   edge — good enough for a voice, and confined to one struct so T-1405 can
 //!   replace it without touching anything else.
-//! - **Hotplug and the default device changing** are *not* handled. A device
-//!   that disappears ends the stream: the microphone reports it and the
-//!   engine's sending loop stops. That is T-1405's job, and it is its own task
-//!   because getting it right is most of the work.
+//! - **Hotplug and the default device changing** (T-1405). A device that
+//!   disappears kills its stream, and the stream's error callback rings an
+//!   alarm the worker thread is waiting on. The worker drops the dead stream
+//!   and opens the device again — the *default* device, if that is what was
+//!   asked for, which is how "the OS switched to the headphones" becomes
+//!   "audio continues on the headphones". It tries every half second for
+//!   about twenty seconds and then gives up honestly: the microphone ends its
+//!   source (the engine says `stopped`), the speaker goes quiet. Nothing in
+//!   here can tell a device that was unplugged from one that went away for
+//!   good, so the timeout is the whole of that decision.
 //!
 //! **Threads.** A `cpal` stream is driven by a thread the library owns, and
 //! the stream handle itself is not something to hand between threads. So each
@@ -27,7 +33,9 @@
 //! through channels and one mutex, and never block.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -148,43 +156,50 @@ impl Microphone {
         // the engine falls further behind than that, because a queue that
         // grows is latency nobody asked for.
         let (tx, rx) = mpsc::channel::<Vec<i16>>(16);
-        let worker = Worker::start(move || {
-            let host = cpal::default_host();
-            let device = find(
-                wanted.as_deref(),
-                host.input_devices()?,
-                host.default_input_device(),
-                "input",
-            )?;
-            let config = match pick(device.supported_input_configs()?) {
-                Some(config) => config,
-                None => device.default_input_config()?,
-            };
-            let mut framer = Framer::new(config.channels(), config.sample_rate(), tx.clone());
-            let died = move |error: cpal::Error| {
-                eprintln!("voice: microphone: {error}");
-                // An empty frame is the sentinel `frame()` reads as "the
-                // device is gone". `blocking_send` is fine: this is cpal's
-                // thread, not the reactor's.
-                let _ = tx.blocking_send(Vec::new());
-            };
-            let stream = match config.sample_format() {
-                SampleFormat::I16 => device.build_input_stream(
-                    config.config(),
-                    move |data: &[i16], _| framer.push(data.iter().copied()),
-                    died,
-                    None,
-                )?,
-                SampleFormat::F32 => device.build_input_stream(
-                    config.config(),
-                    move |data: &[f32], _| framer.push(data.iter().map(|s| from_f32(*s))),
-                    died,
-                    None,
-                )?,
-                other => return Err(DeviceError::Format("input", other)),
-            };
-            Ok((stream, ()))
-        })?;
+        let sentinel = tx.clone();
+        let worker = Worker::start(
+            move |alarm: &Alarm| {
+                let host = cpal::default_host();
+                let device = find(
+                    wanted.as_deref(),
+                    host.input_devices()?,
+                    host.default_input_device(),
+                    "input",
+                )?;
+                let config = match pick(device.supported_input_configs()?) {
+                    Some(config) => config,
+                    None => device.default_input_config()?,
+                };
+                let mut framer = Framer::new(config.channels(), config.sample_rate(), tx.clone());
+                let alarm = alarm.clone();
+                let died = move |error: cpal::Error| {
+                    eprintln!("voice: microphone: {error}");
+                    alarm.ring();
+                };
+                let stream = match config.sample_format() {
+                    SampleFormat::I16 => device.build_input_stream(
+                        config.config(),
+                        move |data: &[i16], _| framer.push(data.iter().copied()),
+                        died,
+                        None,
+                    )?,
+                    SampleFormat::F32 => device.build_input_stream(
+                        config.config(),
+                        move |data: &[f32], _| framer.push(data.iter().map(|s| from_f32(*s))),
+                        died,
+                        None,
+                    )?,
+                    other => return Err(DeviceError::Format("input", other)),
+                };
+                Ok((stream, ()))
+            },
+            // Given up: an empty frame is the sentinel `frame()` reads as "the
+            // device is gone". `blocking_send` is fine on the worker thread.
+            move || {
+                let _ = sentinel.blocking_send(Vec::new());
+            },
+            Retry::default(),
+        )?;
         Ok(Self {
             frames: tokio::sync::Mutex::new(rx),
             _worker: worker,
@@ -196,9 +211,12 @@ impl Microphone {
 impl Source for Microphone {
     async fn frame(&self) -> Option<Vec<i16>> {
         let frame = self.frames.lock().await.recv().await?;
-        // The sentinel from the error callback: the device is gone, and so is
-        // this source. Returning `None` is what ends the engine's sending
-        // loop, which is the honest outcome until T-1405 makes it recover.
+        // The sentinel the worker sends when it has given up reopening the
+        // device: this source is over. Returning `None` is what ends the
+        // engine's sending loop and lights `stopped` on the surface. While the
+        // worker is still trying, frames simply pause — there is no sentinel
+        // and no `None`, and the first frame from the new device resumes the
+        // call where it was.
         if frame.is_empty() {
             return None;
         }
@@ -211,8 +229,10 @@ pub struct Speaker {
     lanes: Arc<Mutex<HashMap<String, Lane>>>,
     /// The device's rate. Frames arrive at `SAMPLE_RATE` and are resampled on
     /// the way into a lane if this differs, so the callback only ever copies.
-    rate: u32,
-    _worker: Worker<u32>,
+    /// Atomic because the device can change under us (T-1405) and come back
+    /// at another rate; the worker rewrites it, and the lanes, on reopen.
+    rate: Arc<AtomicU32>,
+    _worker: Worker,
 }
 
 /// One peer's audio, waiting to be played.
@@ -232,6 +252,13 @@ impl Lane {
             gain: 1.0,
         }
     }
+
+    /// The device changed: what was queued was for the old one, at the old
+    /// rate. Your volume for this person is not about the device, so it stays.
+    fn retune(&mut self, rate: u32) {
+        self.queue.clear();
+        self.resampler = (rate != SAMPLE_RATE).then(|| Linear::new(SAMPLE_RATE, rate));
+    }
 }
 
 impl Speaker {
@@ -240,48 +267,71 @@ impl Speaker {
     pub fn open(name: Option<&str>) -> Result<Self, DeviceError> {
         let wanted = name.map(str::to_owned);
         let lanes: Arc<Mutex<HashMap<String, Lane>>> = Arc::new(Mutex::new(HashMap::new()));
+        let rate = Arc::new(AtomicU32::new(SAMPLE_RATE));
         let shared = Arc::clone(&lanes);
-        let worker = Worker::start(move || {
-            let host = cpal::default_host();
-            let device = find(
-                wanted.as_deref(),
-                host.output_devices()?,
-                host.default_output_device(),
-                "output",
-            )?;
-            let config = match pick(device.supported_output_configs()?) {
-                Some(config) => config,
-                None => device.default_output_config()?,
-            };
-            let channels = usize::from(config.channels());
-            let rate = config.sample_rate();
-            let died = |error: cpal::Error| eprintln!("voice: speaker: {error}");
-            let stream = match config.sample_format() {
-                SampleFormat::I16 => {
-                    let lanes = Arc::clone(&shared);
-                    device.build_output_stream(
-                        config.config(),
-                        move |out: &mut [i16], _| mix(&lanes, channels, out, |s| s),
-                        died,
-                        None,
-                    )?
+        let shared_rate = Arc::clone(&rate);
+        let worker = Worker::start(
+            move |alarm: &Alarm| {
+                let host = cpal::default_host();
+                let device = find(
+                    wanted.as_deref(),
+                    host.output_devices()?,
+                    host.default_output_device(),
+                    "output",
+                )?;
+                let config = match pick(device.supported_output_configs()?) {
+                    Some(config) => config,
+                    None => device.default_output_config()?,
+                };
+                let channels = usize::from(config.channels());
+                let device_rate = config.sample_rate();
+                // Whatever was queued was for the device that just went; the
+                // new one may run at another rate. Retune every lane before a
+                // single callback fires on it.
+                {
+                    let mut lanes = lock(&shared);
+                    for lane in lanes.values_mut() {
+                        lane.retune(device_rate);
+                    }
                 }
-                SampleFormat::F32 => {
-                    let lanes = Arc::clone(&shared);
-                    device.build_output_stream(
-                        config.config(),
-                        move |out: &mut [f32], _| mix(&lanes, channels, out, to_f32),
-                        died,
-                        None,
-                    )?
-                }
-                other => return Err(DeviceError::Format("output", other)),
-            };
-            Ok((stream, rate))
-        })?;
+                shared_rate.store(device_rate, Ordering::Relaxed);
+                let alarm = alarm.clone();
+                let died = move |error: cpal::Error| {
+                    eprintln!("voice: speaker: {error}");
+                    alarm.ring();
+                };
+                let stream = match config.sample_format() {
+                    SampleFormat::I16 => {
+                        let lanes = Arc::clone(&shared);
+                        device.build_output_stream(
+                            config.config(),
+                            move |out: &mut [i16], _| mix(&lanes, channels, out, |s| s),
+                            died,
+                            None,
+                        )?
+                    }
+                    SampleFormat::F32 => {
+                        let lanes = Arc::clone(&shared);
+                        device.build_output_stream(
+                            config.config(),
+                            move |out: &mut [f32], _| mix(&lanes, channels, out, to_f32),
+                            died,
+                            None,
+                        )?
+                    }
+                    other => return Err(DeviceError::Format("output", other)),
+                };
+                Ok((stream, ()))
+            },
+            // Given up: nothing plays, and the lanes fill to their ceiling and
+            // then drop. There is no sink-side sentinel — the call continues
+            // in silence, which is what a room with no speakers is.
+            || eprintln!("voice: speaker: the output device did not come back"),
+            Retry::default(),
+        )?;
         Ok(Self {
             lanes,
-            rate: worker.info,
+            rate,
             _worker: worker,
         })
     }
@@ -295,11 +345,12 @@ const MAX_QUEUED_MS: u32 = 200;
 #[async_trait]
 impl Sink for Speaker {
     async fn play(&self, peer: &str, samples: &[i16]) {
-        let cap = (self.rate / 1000 * MAX_QUEUED_MS) as usize;
+        let rate = self.rate.load(Ordering::Relaxed);
+        let cap = (rate / 1000 * MAX_QUEUED_MS) as usize;
         let mut lanes = lock(&self.lanes);
         let lane = lanes
             .entry(peer.to_string())
-            .or_insert_with(|| Lane::new(self.rate));
+            .or_insert_with(|| Lane::new(rate));
         let scaled;
         let samples = if (lane.gain - 1.0).abs() < f32::EPSILON {
             samples
@@ -329,7 +380,7 @@ impl Sink for Speaker {
         // first frame arrives is not lost.
         lock(&self.lanes)
             .entry(peer.to_string())
-            .or_insert_with(|| Lane::new(self.rate))
+            .or_insert_with(|| Lane::new(self.rate.load(Ordering::Relaxed)))
             .gain = volume.clamp(0.0, MAX_GAIN);
     }
 }
@@ -524,60 +575,181 @@ impl Linear {
     }
 }
 
-/// A thread that owns one `cpal` stream for as long as the device is wanted.
+/// Something a worker can start and hold: a `cpal` stream, or a stand-in in
+/// the tests. `Send` because it is built and dropped on the worker's thread
+/// but the closure that builds it is handed across from the caller's.
+pub(crate) trait Playing: Send {
+    fn play(&self) -> Result<(), cpal::Error>;
+}
+
+impl Playing for cpal::Stream {
+    fn play(&self) -> Result<(), cpal::Error> {
+        StreamTrait::play(self)
+    }
+}
+
+/// What wakes a worker: its stream died, or its owner is done with it.
+enum Wake {
+    Died,
+    Stop,
+}
+
+/// The stream's way of telling the worker it is dead. Cloned into each
+/// stream's error callback; ringing it from anywhere is fine, and ringing it
+/// twice for one death is harmless because the worker drains extras.
+#[derive(Clone)]
+pub(crate) struct Alarm(std::sync::mpsc::Sender<Wake>);
+
+impl Alarm {
+    pub(crate) fn ring(&self) {
+        let _ = self.0.send(Wake::Died);
+    }
+}
+
+/// How hard a worker tries to get a device back before giving up.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Retry {
+    /// Between attempts, and after a death before the first one.
+    pub pause: Duration,
+    /// Failed reopenings tolerated in a row before giving up.
+    pub attempts: u32,
+}
+
+impl Default for Retry {
+    /// Half a second between tries, forty tries: about twenty seconds. Long
+    /// enough to swap headphones; short enough that a room does not spend a
+    /// minute wondering whether you can hear.
+    fn default() -> Self {
+        Self {
+            pause: Duration::from_millis(500),
+            attempts: 40,
+        }
+    }
+}
+
+/// A thread that owns one `cpal` stream for as long as the device is wanted,
+/// and gets it back when it dies (T-1405).
 ///
 /// Not joined on drop, on purpose. The last handle to a device can be let go
 /// of from anywhere — a cancelled task on the runtime, a track reader ending
 /// — and waiting for a sound card to close from inside the reactor is the
-/// kind of stall AGENTS says never to build. The thread notices the drop,
+/// kind of stall AGENTS says never to build. The thread hears the stop,
 /// closes the stream, and ends on its own.
 struct Worker<T = ()> {
+    #[allow(dead_code)]
     info: T,
-    stop: Option<std::sync::mpsc::Sender<()>>,
+    stop: Option<std::sync::mpsc::Sender<Wake>>,
 }
 
 impl<T: Send + 'static> Worker<T> {
     /// Run `build` on a fresh thread, start the stream it returns, and hold
-    /// both until this worker is dropped. Returns once the stream is playing
-    /// or the device refused, whichever comes first.
-    fn start<F>(build: F) -> Result<Self, DeviceError>
+    /// it until it dies or this worker is dropped. Returns once the first
+    /// stream is playing, or with the first attempt's error — the caller asked
+    /// to open a device *now*, and a device that is not there now is an answer.
+    ///
+    /// After that, a death is followed by another `build`, and another, on
+    /// `retry`'s schedule; `abandon` is called once if they all fail.
+    fn start<S, B, A>(build: B, abandon: A, retry: Retry) -> Result<Self, DeviceError>
     where
-        F: FnOnce() -> Result<(cpal::Stream, T), DeviceError> + Send + 'static,
+        S: Playing + 'static,
+        B: FnMut(&Alarm) -> Result<(S, T), DeviceError> + Send + 'static,
+        A: FnOnce() + Send + 'static,
     {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<T, DeviceError>>();
-        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        let (wake_tx, wake_rx) = std::sync::mpsc::channel::<Wake>();
+        let alarm = Alarm(wake_tx.clone());
         std::thread::Builder::new()
             .name("linger-audio".into())
-            .spawn(move || {
-                let (stream, info) = match build() {
-                    Ok(built) => built,
-                    Err(error) => {
-                        let _ = ready_tx.send(Err(error));
-                        return;
-                    }
-                };
-                if let Err(error) = stream.play() {
-                    let _ = ready_tx.send(Err(error.into()));
-                    return;
-                }
-                let _ = ready_tx.send(Ok(info));
-                // Sleeps until `stop` is used or dropped. The stream is
-                // dropped here, on the thread that built it.
-                let _ = stop_rx.recv();
-                drop(stream);
-            })?;
+            .spawn(move || supervise(build, abandon, retry, alarm, wake_rx, ready_tx))?;
         let info = ready_rx.recv().map_err(|_| DeviceError::Gone)??;
         Ok(Self {
             info,
-            stop: Some(stop_tx),
+            stop: Some(wake_tx),
         })
     }
 }
 
 impl<T> Drop for Worker<T> {
     fn drop(&mut self) {
-        // Dropping the sender is what wakes the thread.
-        self.stop.take();
+        // Said explicitly rather than by dropping the sender: the alarm clones
+        // inside the stream callbacks hold senders too, so the channel would
+        // not close on its own.
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(Wake::Stop);
+        }
+    }
+}
+
+/// The worker thread's whole life: build, play, wait; rebuild on a death,
+/// give up after enough failures in a row, leave when told.
+///
+/// Pure with respect to devices — it only ever calls `build` — so the tests
+/// drive it with a stand-in stream and a fake alarm and prove the schedule.
+fn supervise<S, T, B, A>(
+    mut build: B,
+    abandon: A,
+    retry: Retry,
+    alarm: Alarm,
+    wake: std::sync::mpsc::Receiver<Wake>,
+    ready: std::sync::mpsc::Sender<Result<T, DeviceError>>,
+) where
+    S: Playing,
+    B: FnMut(&Alarm) -> Result<(S, T), DeviceError>,
+    A: FnOnce(),
+{
+    let mut ready = Some(ready);
+    let mut failures: u32 = 0;
+    loop {
+        let built = build(&alarm).and_then(|(stream, info)| {
+            stream.play()?;
+            Ok((stream, info))
+        });
+        match built {
+            Ok((stream, info)) => {
+                failures = 0;
+                if let Some(ready) = ready.take() {
+                    let _ = ready.send(Ok(info));
+                }
+                // Hold the stream until something happens to it or to us.
+                let woke = wake.recv();
+                drop(stream);
+                match woke {
+                    Ok(Wake::Died) => {
+                        // One death can ring more than once; the rest are stale.
+                        while let Ok(Wake::Died) = wake.try_recv() {}
+                        if wait_or_stop(&wake, retry.pause) {
+                            return;
+                        }
+                    }
+                    Ok(Wake::Stop) | Err(_) => return,
+                }
+            }
+            Err(error) => {
+                // The very first open failing is the caller's answer, not
+                // something to retry behind their back.
+                if let Some(ready) = ready.take() {
+                    let _ = ready.send(Err(error));
+                    return;
+                }
+                failures += 1;
+                if failures >= retry.attempts {
+                    eprintln!("voice: device did not come back after {failures} tries: {error}");
+                    abandon();
+                    return;
+                }
+                if wait_or_stop(&wake, retry.pause) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Sleep for `pause`, unless a stop arrives first. True means stop.
+fn wait_or_stop(wake: &std::sync::mpsc::Receiver<Wake>, pause: Duration) -> bool {
+    match wake.recv_timeout(pause) {
+        Ok(Wake::Stop) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => true,
+        Ok(Wake::Died) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
     }
 }
 
@@ -709,6 +881,192 @@ mod tests {
             devices.outputs.contains(&output),
             "default output {output} is not in the list"
         );
+    }
+
+    // --- the reopen schedule (T-1405), with no device anywhere near it ---
+
+    /// A stream that is nothing but a handle. What matters is that it was
+    /// built, and how many times.
+    struct Fake;
+    impl Playing for Fake {
+        fn play(&self) -> Result<(), cpal::Error> {
+            Ok(())
+        }
+    }
+
+    use std::sync::atomic::AtomicUsize;
+
+    const FAST: Retry = Retry {
+        pause: Duration::from_millis(5),
+        attempts: 3,
+    };
+
+    /// Wait for a counter to reach a value, with a ceiling well past any
+    /// honest schedule so a hang fails rather than stalls the suite.
+    fn wait_until(counter: &AtomicUsize, at_least: usize) -> usize {
+        for _ in 0..400 {
+            let seen = counter.load(Ordering::SeqCst);
+            if seen >= at_least {
+                return seen;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        counter.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_dead_stream_is_built_again_and_a_stop_ends_it() {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let alarm_out: Arc<Mutex<Option<Alarm>>> = Arc::new(Mutex::new(None));
+        let (b, a) = (Arc::clone(&builds), Arc::clone(&alarm_out));
+        let worker = Worker::start(
+            move |alarm: &Alarm| {
+                b.fetch_add(1, Ordering::SeqCst);
+                *a.lock().unwrap() = Some(alarm.clone());
+                Ok((Fake, ()))
+            },
+            || panic!("gave up on a device that came back"),
+            FAST,
+        )
+        .expect("first open");
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+
+        // The device dies: the worker builds again after the pause.
+        alarm_out.lock().unwrap().as_ref().unwrap().ring();
+        assert_eq!(wait_until(&builds, 2), 2, "the stream was not rebuilt");
+
+        // Two rings for one death are one rebuild, not two.
+        let alarm = alarm_out.lock().unwrap().clone().unwrap();
+        alarm.ring();
+        alarm.ring();
+        assert_eq!(wait_until(&builds, 3), 3);
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            3,
+            "a stale ring caused a rebuild"
+        );
+
+        // Dropping the worker stops it; nothing is built afterwards even if
+        // the old stream's alarm still rings.
+        drop(worker);
+        std::thread::sleep(Duration::from_millis(20));
+        alarm.ring();
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            3,
+            "built after being stopped"
+        );
+    }
+
+    #[test]
+    fn the_first_open_failing_is_the_callers_answer() {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let b = Arc::clone(&builds);
+        let result: Result<Worker, _> = Worker::start(
+            move |_: &Alarm| -> Result<(Fake, ()), DeviceError> {
+                b.fetch_add(1, Ordering::SeqCst);
+                Err(DeviceError::NoDevice("input"))
+            },
+            || panic!("abandon is for later failures, not the first"),
+            FAST,
+        );
+        assert!(matches!(result, Err(DeviceError::NoDevice("input"))));
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            1,
+            "the first failure was retried"
+        );
+    }
+
+    #[test]
+    fn a_device_that_never_comes_back_is_given_up_on_once() {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let abandoned = Arc::new(AtomicUsize::new(0));
+        let alarm_out: Arc<Mutex<Option<Alarm>>> = Arc::new(Mutex::new(None));
+        let (b, a, gone) = (
+            Arc::clone(&builds),
+            Arc::clone(&alarm_out),
+            Arc::clone(&abandoned),
+        );
+        let _worker = Worker::start(
+            move |alarm: &Alarm| {
+                let n = b.fetch_add(1, Ordering::SeqCst);
+                *a.lock().unwrap() = Some(alarm.clone());
+                if n == 0 {
+                    Ok((Fake, ()))
+                } else {
+                    Err(DeviceError::NoDevice("output"))
+                }
+            },
+            move || {
+                gone.fetch_add(1, Ordering::SeqCst);
+            },
+            FAST,
+        )
+        .expect("first open");
+        alarm_out.lock().unwrap().as_ref().unwrap().ring();
+        // One good build, then `attempts` failures in a row, then it stops.
+        assert_eq!(
+            wait_until(&builds, 1 + FAST.attempts as usize),
+            1 + FAST.attempts as usize
+        );
+        assert_eq!(wait_until(&abandoned, 1), 1, "never gave up");
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            1 + FAST.attempts as usize,
+            "kept trying after giving up"
+        );
+        assert_eq!(
+            abandoned.load(Ordering::SeqCst),
+            1,
+            "gave up more than once"
+        );
+    }
+
+    #[test]
+    fn a_failure_run_that_recovers_resets_the_count() {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let alarm_out: Arc<Mutex<Option<Alarm>>> = Arc::new(Mutex::new(None));
+        let (b, a) = (Arc::clone(&builds), Arc::clone(&alarm_out));
+        let _worker = Worker::start(
+            move |alarm: &Alarm| {
+                let n = b.fetch_add(1, Ordering::SeqCst);
+                *a.lock().unwrap() = Some(alarm.clone());
+                // Good, then two failures, then good again — under the limit
+                // each time, so never abandoned.
+                if n == 1 || n == 2 {
+                    Err(DeviceError::NoDevice("output"))
+                } else {
+                    Ok((Fake, ()))
+                }
+            },
+            || panic!("gave up on a device that came back"),
+            FAST,
+        )
+        .expect("first open");
+        alarm_out.lock().unwrap().as_ref().unwrap().ring();
+        assert_eq!(
+            wait_until(&builds, 4),
+            4,
+            "did not recover after two failures"
+        );
+    }
+
+    #[test]
+    fn a_retuned_lane_keeps_its_volume_and_loses_its_queue() {
+        let mut lane = Lane::new(48_000);
+        lane.gain = 0.5;
+        lane.queue.extend([1i16, 2, 3]);
+        lane.retune(44_100);
+        assert!(lane.queue.is_empty());
+        assert!(lane.resampler.is_some());
+        assert!((lane.gain - 0.5).abs() < f32::EPSILON);
+        lane.retune(48_000);
+        assert!(lane.resampler.is_none());
     }
 
     // The tests below need a real audio device and are run by hand
