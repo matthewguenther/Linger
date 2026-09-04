@@ -59,10 +59,15 @@ export async function forgetSession(baseUrl: string): Promise<SessionWrite> {
 // Audio lives in the Tauri core, not in this page (ARCHITECTURE §2). So the
 // frontend's whole part in voice is saying "join", saying "leave", and handing
 // the core the two frames that are its business — the peer connections, the
-// negotiation and (once the microphone lands) the sound itself all happen on
-// the other side of these three calls.
+// negotiation, the microphone and the speakers all happen on the other side
+// of these three calls.
 
-/** Join voice in a room. `sessionId` is this connection's, from `ready`. */
+/**
+ * Join voice in a room. `sessionId` is this connection's, from `ready`.
+ *
+ * Joining opens the default microphone and speakers; on a machine with
+ * neither this rejects with a sentence saying which, and nothing was joined.
+ */
 export async function voiceJoin(
   baseUrl: string,
   sessionId: string,

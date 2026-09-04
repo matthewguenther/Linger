@@ -115,11 +115,11 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 
 **Everything a person still has to do by hand lives in one place now:
 [Human checks](#human-checks--things-only-you-can-do), at the bottom of this
-file.** Seven of them: five left over from closed V1 milestones, one from M9
-(hearing a knock on a second computer) and one from M11 (holding a DM across
-two, with a third person looking for it). They are not optional and they are
-not tasks an agent can take — each one needs somebody sitting in front of a
-real computer.
+file.** Eight of them: five left over from closed V1 milestones, one from M9
+(hearing a knock on a second computer), one from M11 (holding a DM across
+two, with a third person looking for it) and one from M12 (hearing somebody
+talk from a second computer). They are not optional and they are not tasks an
+agent can take — each one needs somebody sitting in front of a real computer.
 
 **The one thing that bit us in T-301:** a webview page is a cross-origin caller,
 so the server had to start sending CORS headers before the client could read a
@@ -374,7 +374,7 @@ Build order, cheapest and safest first:
 
 ```
 M9 knock (built) → M10 search (built) → M11 DMs (built)
-  → M12 voice (signalling + transport built; no microphone) → M13 ambient voice
+  → M12 voice (the audio path is built; no STUN/TURN, no surface) → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -407,15 +407,19 @@ loopback and prove nothing at all.
 **The signalling landed 2026-09-01 (T-1401)** and it is the one piece of M12
 that a single machine *can* prove, because there is no audio in it: the frames
 are exercised by two real WebSocket clients in-process. **T-1402's transport
-half landed the same day** — real peer connections, real ICE, no microphone.
-Everything past that needs real networks. **SPEC §4.14 is written** — read it
-before the rest of this milestone, because the decision it records ("voice
-happens in a room, not in a call") is what the other four tasks assume.
+half landed the same day, and its microphone half on 2026-09-04** — real peer
+connections, real ICE, and now a real microphone, Opus, and real speakers. A
+tone put into one engine comes out of the other in the test suite, and the
+device code has run against a real sound card. Everything past that needs
+real networks. **SPEC §4.14 is written** — read it before the rest of this
+milestone, because the decision it records ("voice happens in a room, not in a
+call") is what the other four tasks assume.
 
-**⚠ Two system packages are missing and block the rest of T-1402**:
-`libasound2-dev` (for `cpal`) and `libopus-dev` or `cmake` (for the Opus
-encoder). Installing them needs a password. Until then there is no audio, so
-nothing in M12 can be listened to — see T-1402.
+**Building the desktop shell now needs two more things on the box**: ALSA's
+headers (`libasound2-dev` on Debian, `alsa-lib` on Arch) for the microphone,
+and `cmake`, which builds the vendored Opus. CI and the release workflow have
+them; the README says so. Neither needs root on a machine that already has
+them, and cmake installs fine in user space.
 
 - ✅ **T-1401 · Signalling over the gateway** — effort: **high** — Matt, 2026-09-01
   Three client frames (`voice.join`, `voice.leave`, `voice.signal`) and two
@@ -506,10 +510,71 @@ nothing in M12 can be listened to — see T-1402.
   dies behind real NAT.
 
 - ⏳ **T-1402 · The audio path** — effort: **treacherous** — Matt, 2026-09-01
-  **The transport half landed; the microphone half is blocked on two packages
-  nobody has installed.** Read this whole entry before picking it up.
+  **The whole path is built** — transport on 2026-09-01, the microphone half
+  on 2026-09-04 — **and it has only ever run on one machine.** It stays ⏳
+  because its acceptance criterion is four networks, and that is HC-8 now.
+  Read this whole entry before picking anything up around it.
 
-  ### What is built and runs
+  ### The microphone half (2026-09-04)
+
+  Three files, and the seam `audio.rs` promised is filled without moving:
+
+  - **`voice/device.rs`** — `Microphone` (an `audio::Source`) and `Speaker`
+    (an `audio::Sink`) over `cpal`. Each owns one thread that opens the default
+    device, starts the stream, and sleeps until dropped, so the stream is
+    built and torn down on the same thread and the callbacks never block.
+    The speaker keeps one queue per peer and sums them in the output callback,
+    clamped, with a 200 ms ceiling per queue past which old audio is thrown
+    away — a queue that grows is delay on every word from then on. The
+    microphone prefers 48 kHz mono and either `i16` or `f32`; a device that
+    will not do 48 kHz gets a linear resampler at the edge, which is good
+    enough for a voice and small enough for T-1405 to replace whole.
+  - **`voice/codec.rs`** — Opus in both directions, VoIP mode with in-band FEC
+    on. A lost packet is *concealed* (libopus guesses from what came before)
+    rather than zeroed, so it is a smear and not a click — and it keeps the
+    far end's timeline the right length, which a zero-filled gap does not.
+  - **`voice/mod.rs`** — the loop that was missing. One encoder for the whole
+    mesh: a frame from the source is encoded once and written to every peer's
+    track, because eight peers hear the same voice and encoding it eight
+    times is eight times the CPU for the same bytes. `on_track` spawns a
+    reader per inbound track that decodes and hands frames to the sink, and
+    watches sequence numbers so a gap of one to four packets is concealed. The
+    sender's RTCP is now drained too, which the interceptors need for NACK to
+    do anything.
+
+  **Joining opens the devices, or fails in words.** `Engine::join` takes a
+  `Devices` pair and `voice_join` opens the defaults off the reactor; a machine
+  with no microphone gets an error string back rather than a seat in voice it
+  cannot use. Leaving drops the devices, which closes them. `Watcher` grew
+  `audio_state` — `sending`, then `stopped` if the microphone goes away — and
+  the shell forwards it as a `voice:audio` event for T-1404 to draw.
+
+  **Opus is built from vendored source, not linked from the system.** That is
+  what puts `cmake` on the build box list, and it is deliberate: a shipped
+  Windows binary has no system libopus to find, and one copy compiled the
+  same way everywhere is one fewer thing to be different between machines.
+  `cpal` is the other new build dependency (ALSA headers on Linux, nothing on
+  Windows or macOS).
+
+  ### What was tested, and how
+
+  - `tests/voice.rs::a_tone_crosses_a_peer_connection` is the one to know
+    about: A's source is a 440 Hz tone and B's sink records. What B records
+    has been Opus-encoded, packetised, encrypted, sent over a real peer
+    connection, decrypted, depacketised and decoded — and the test checks it
+    is loud and at 440 Hz. This is the closest one process gets to "somebody
+    heard somebody".
+  - The codec round-trips a tone and conceals a gap at full length; the
+    resampler, the downmix, the framer and the mixer each have a unit test.
+  - **Two tests need a real sound card and are `#[ignore]`d**
+    (`cargo test --lib -- --ignored voice::device`): the microphone delivers
+    25 frames in roughly half a second of wall time, and the speaker plays half
+    a second of tone and closes. **Both passed on 2026-09-04 on a real
+    machine** (PipeWire, a USB interface as default). CI cannot run them and a
+    test that skips itself quietly is not one that passed, so they stay
+    ignored rather than gated.
+
+  ### The transport half (2026-09-01)
 
   `client/src-tauri/src/voice/` — real `RTCPeerConnection`s, a full mesh, real
   DTLS, real ICE, real RTP, driven by T-1401's frames. Three Tauri commands
@@ -539,39 +604,6 @@ nothing in M12 can be listened to — see T-1402.
   connects — and on a good network you never notice, which is what makes it
   exactly the kind of bug AGENTS warns about.
 
-  ### ⚠ What is blocked, and on what
-
-  **Two system packages, and installing them needs a password:**
-
-  ```
-  sudo apt install libasound2-dev   # cpal: ALSA headers, for the microphone
-  sudo apt install libopus-dev      # or cmake, to build libopus from source
-  ```
-
-  `cpal` fails at `alsa-sys`'s build script without the first. The `opus` crate
-  vendors libopus and builds it with cmake, which is also not installed. Neither
-  is optional: WebRTC audio *is* Opus, and there is no mature pure-Rust encoder.
-
-  **CI will need them too** — `.github/workflows/ci.yml`'s `tauri-shell` job
-  installs the webview deps and will need these beside them. They are
-  deliberately not added yet, because a package CI installs for code that does
-  not exist is a line nobody can explain later. Add them in the same commit as
-  the code that needs them, and update the README's system-dependency list in
-  the same breath (AGENTS: a new system dependency is a README change).
-
-  ### What is left, in order
-
-  1. `cpal` capture → `audio::Source`, and `audio::Sink` → `cpal` playback.
-     The seam is already there and it is one 20 ms frame at 48 kHz mono, which
-     is what Opus and WebRTC both want — so this is filling a hole, not
-     designing one.
-  2. Opus encode on the way out, decode on the way in.
-  3. The loop that pulls frames from the source into each peer's track, and the
-     `on_track` handler that pushes received audio at the sink. `Engine::outbound`
-     hands out the track; nothing drives it yet.
-  4. Mixing several peers on playback. `Sink::play` takes the peer it came from
-     so that decision is still open.
-
   ### What none of this proves
 
   **Nothing here has been across two machines.** Both ends of every test are on
@@ -580,10 +612,23 @@ nothing in M12 can be listened to — see T-1402.
   carrier-grade NAT — and TASKS says it in fewer words: *do not test this on one
   machine*. `Engine::new` takes an ICE server list and it is **empty**, so today
   there is not even STUN: host candidates reach another machine on the same
-  network and nothing beyond it. That is T-1403.
+  network and nothing beyond it. That is T-1403, and it is the next thing.
+
+  **Three things are known to be missing and are not bugs:**
+
+  - **No jitter buffer beyond the speaker's queue.** Frames are played as they
+    arrive; a burst of late packets is absorbed up to 200 ms and then the
+    oldest are dropped. Fine on a LAN, and the first thing to revisit when
+    real networks are in play.
+  - **Nothing pushes a frame to the WebView but state.** There is no way to
+    press *join* yet — that is T-1404. Until then the only callers are the
+    tests.
+  - **A microphone that goes away ends the call's sending half** and says so
+    (`voice:audio` → `stopped`). Recovering is T-1405.
 
   *Accept:* four people, four networks, one hour, no drops. Anything less than
-  that is not evidence. **Unchanged, and not met.**
+  that is not evidence. **Unchanged, and not met** — see HC-8 for the first
+  half of it, which can be done today on one network.
 
 - ⬜ **T-1403 · A TURN server in the deploy** — effort: **high**
   coturn in `deploy/`, credentials that are not shared secrets in a compose
@@ -723,11 +768,11 @@ them.** They are repeated in the *Parking lot*.
 
 ## Human checks — things only you can do
 
-Seven things are built, tested, and **never once used by a person** — or, in
-HC-6 and HC-7's case, never used across two of them. Automated tests prove the
-code does what it says. They cannot prove that a window opens, that a 400 MB
-upload survives a real network, or that a sound is one you would want to hear.
-That is this list.
+Eight things are built, tested, and **never once used by a person** — or, in
+HC-6, HC-7 and HC-8's case, never used across two of them. Automated tests
+prove the code does what it says. They cannot prove that a window opens, that a
+400 MB upload survives a real network, or that a sound is one you would want to
+hear. That is this list.
 
 None of these are agent tasks. Each one needs you, a real computer, and a few
 minutes. The first five are ordered so that **doing the first one knocks out
@@ -936,6 +981,41 @@ a filter on it.
 
 **Done when:** a DM has crossed two machines and a third person has looked for
 it in four places and not found it.
+
+---
+
+### HC-8 · Hear somebody talk, from a second computer
+
+*The first half of M12's milestone check (T-1402). The other half — four
+networks — cannot be done until T-1403 puts STUN and TURN in the deploy, and
+there is nothing to press until T-1404 draws the surface.*
+
+The audio path has run end to end in one process (a tone in one engine comes
+out of the other's speaker, over a real peer connection) and the microphone
+and speaker code has opened a real sound card. What it has never done is
+carry a voice between two machines.
+
+**Until T-1404 lands, this needs the devtools**, because nothing in the app
+calls `voiceJoin` yet. It is a one-liner, and the point of doing it before the
+surface exists is to find out whether the path works before a button is drawn
+on top of it.
+
+1. Two computers **on the same network** — the same wifi is fine. Different
+   networks will not connect yet (no STUN, no TURN: T-1403). Both signed into
+   the same server as different people, both in the same room.
+2. On each, open the WebView devtools and join voice in the room you are in.
+   The gateway store has the session id and the room id; `voiceJoin(server,
+   sessionId, roomId)` from `lib/ipc.ts` is the call.
+3. Talk. The other machine should play it within a fraction of a second.
+   Listen for a delay that grows over a minute — that is a clock drift the
+   200 ms ceiling should be hiding, and if it is not, say so.
+4. Unplug one machine's headphones mid-sentence. **Expect it to stop** — that
+   is T-1405, not a bug — and check that `voice:audio` said `stopped`.
+5. Close one app. The other's `voice:peer` should say `closed` within a few
+   seconds, and the room should go quiet rather than hiss.
+
+**Done when:** you have heard the other person, in the room, from a second
+computer. Write down the delay you noticed and whether it grew.
 
 ---
 

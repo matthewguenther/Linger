@@ -16,7 +16,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use linger_client_lib::voice::{audio, Engine, Signaller, Watcher};
+use async_trait::async_trait;
+use linger_client_lib::voice::audio::{self, Devices, Discard, Silence, Sink, Tone};
+use linger_client_lib::voice::{Engine, Signaller, Watcher};
 use linger_core::gateway::{ClientFrame, VoicePeer, VoiceSignalKind};
 use linger_core::{RoomId, UserId};
 use tokio::sync::mpsc;
@@ -39,7 +41,10 @@ struct Log(Mutex<Vec<(String, String)>>);
 
 impl Watcher for Log {
     fn peer_state(&self, peer: &str, state: &str) {
-        self.0.lock().unwrap().push((peer.to_string(), state.to_string()));
+        self.0
+            .lock()
+            .unwrap()
+            .push((peer.to_string(), state.to_string()));
     }
 }
 
@@ -61,7 +66,11 @@ async fn engine(session: &str) -> Rig {
     // No ICE servers: on loopback there is nothing to traverse, and a STUN
     // lookup in a test is a network call that will one day fail in CI for
     // reasons that have nothing to do with the code.
-    let engine = Arc::new(Engine::new(Arc::new(Wire(tx)), Arc::clone(&log), Vec::new()));
+    let engine = Arc::new(Engine::new(
+        Arc::new(Wire(tx)),
+        Arc::clone(&log),
+        Vec::new(),
+    ));
     engine.set_session(session.to_string()).await;
     (engine, rx, log)
 }
@@ -113,8 +122,8 @@ async fn two_peers_negotiate_and_connect() {
     let (a, mut a_rx, a_log) = engine(A).await;
     let (b, mut b_rx, b_log) = engine(B).await;
 
-    a.join(room).await;
-    b.join(room).await;
+    a.join(room, Devices::silent()).await;
+    b.join(room, Devices::silent()).await;
     // The join frames themselves go nowhere here — there is no server — so the
     // test plays the part the server plays and tells both sides who is in.
     while a_rx.try_recv().is_ok() {}
@@ -153,8 +162,8 @@ async fn exactly_one_side_offers() {
     let room = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
     let (b, mut b_rx, _) = engine(B).await;
-    a.join(room).await;
-    b.join(room).await;
+    a.join(room, Devices::silent()).await;
+    b.join(room, Devices::silent()).await;
     while a_rx.try_recv().is_ok() {}
     while b_rx.try_recv().is_ok() {}
 
@@ -186,8 +195,8 @@ async fn a_peer_who_reconnects_gets_a_new_connection() {
     let room = RoomId::new();
     let (a, mut a_rx, a_log) = engine(A).await;
     let (b, mut b_rx, _) = engine(B).await;
-    a.join(room).await;
-    b.join(room).await;
+    a.join(room, Devices::silent()).await;
+    b.join(room, Devices::silent()).await;
     while a_rx.try_recv().is_ok() {}
     while b_rx.try_recv().is_ok() {}
 
@@ -200,7 +209,11 @@ async fn a_peer_who_reconnects_gets_a_new_connection() {
     const B2: &str = "bbb-session-2";
     a.on_state(room, &peers(&[A, B2])).await;
 
-    assert_eq!(a.peer_count().await, 1, "a is holding two peers for one person");
+    assert_eq!(
+        a.peer_count().await,
+        1,
+        "a is holding two peers for one person"
+    );
     assert!(
         a.outbound(B).await.is_none(),
         "the old connection was left open"
@@ -222,19 +235,19 @@ async fn a_peer_who_reconnects_gets_a_new_connection() {
 async fn leaving_closes_every_peer() {
     let room = RoomId::new();
     let (a, mut a_rx, a_log) = engine(A).await;
-    a.join(room).await;
+    a.join(room, Devices::silent()).await;
     while a_rx.try_recv().is_ok() {}
     a.on_state(room, &peers(&[A, B, "ccc-session"])).await;
     assert_eq!(a.peer_count().await, 2);
 
     a.leave().await;
     assert_eq!(a.peer_count().await, 0, "a peer survived leaving");
-    let closed = a_log
-        .states()
-        .iter()
-        .filter(|(_, s)| s == "closed")
-        .count();
-    assert!(closed >= 2, "not every peer was reported closed: {:?}", a_log.states());
+    let closed = a_log.states().iter().filter(|(_, s)| s == "closed").count();
+    assert!(
+        closed >= 2,
+        "not every peer was reported closed: {:?}",
+        a_log.states()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -242,7 +255,7 @@ async fn a_state_for_a_room_we_are_not_in_is_ignored() {
     let ours = RoomId::new();
     let theirs = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
-    a.join(ours).await;
+    a.join(ours, Devices::silent()).await;
     while a_rx.try_recv().is_ok() {}
 
     // We are told about every room we can see, not only the one we are in.
@@ -258,7 +271,7 @@ async fn a_state_for_a_room_we_are_not_in_is_ignored() {
 async fn a_candidate_that_arrives_before_the_answer_is_kept() {
     let room = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
-    a.join(room).await;
+    a.join(room, Devices::silent()).await;
     while a_rx.try_recv().is_ok() {}
     a.on_state(room, &peers(&[A, B])).await;
 
@@ -266,10 +279,18 @@ async fn a_candidate_that_arrives_before_the_answer_is_kept() {
     // has been applied here. Dropping them is a call that takes the long way
     // round or never connects — and on a good network you never notice, which
     // is what makes it the kind of bug this project is warned about.
-    a.on_signal(B, VoiceSignalKind::Candidate, "candidate:1 1 udp 1 127.0.0.1 1 typ host")
-        .await;
-    a.on_signal(B, VoiceSignalKind::Candidate, "candidate:2 1 udp 2 127.0.0.1 2 typ host")
-        .await;
+    a.on_signal(
+        B,
+        VoiceSignalKind::Candidate,
+        "candidate:1 1 udp 1 127.0.0.1 1 typ host",
+    )
+    .await;
+    a.on_signal(
+        B,
+        VoiceSignalKind::Candidate,
+        "candidate:2 1 udp 2 127.0.0.1 2 typ host",
+    )
+    .await;
 
     // Nothing has blown up and the peer is still there to answer into.
     assert_eq!(a.peer_count().await, 1);
@@ -280,14 +301,192 @@ async fn a_candidate_that_arrives_before_the_answer_is_kept() {
 async fn a_signal_from_a_stranger_is_harmless() {
     let room = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
-    a.join(room).await;
+    a.join(room, Devices::silent()).await;
     while a_rx.try_recv().is_ok() {}
 
     // An answer or a candidate for a connection we do not have. The server
     // should never route one, so this is about not trusting that.
-    a.on_signal("nobody", VoiceSignalKind::Answer, "v=0 nonsense").await;
-    a.on_signal("nobody", VoiceSignalKind::Candidate, "candidate:1").await;
+    a.on_signal("nobody", VoiceSignalKind::Answer, "v=0 nonsense")
+        .await;
+    a.on_signal("nobody", VoiceSignalKind::Candidate, "candidate:1")
+        .await;
     assert_eq!(a.peer_count().await, 0);
+}
+
+/// A sink that keeps everything it is given, by peer.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<(String, Vec<i16>)>>);
+
+#[async_trait]
+impl Sink for Recorder {
+    async fn play(&self, peer: &str, samples: &[i16]) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((peer.to_string(), samples.to_vec()));
+    }
+}
+
+impl Recorder {
+    fn frames(&self) -> Vec<(String, Vec<i16>)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+fn rms(samples: &[i16]) -> f64 {
+    let sum: f64 = samples.iter().map(|s| f64::from(*s).powi(2)).sum();
+    (sum / samples.len() as f64).sqrt()
+}
+
+fn zero_crossings(samples: &[i16]) -> usize {
+    samples
+        .windows(2)
+        .filter(|w| (w[0] < 0) != (w[1] < 0))
+        .count()
+}
+
+/// The whole path, end to end: a tone goes into one engine's source and comes
+/// out of the other engine's sink, having been Opus-encoded, packetised,
+/// encrypted, sent over a real peer connection, and decoded again.
+///
+/// This is the closest a single machine gets to "somebody heard somebody".
+/// What it cannot say is anything about a microphone, a speaker, or a network
+/// with a NAT in it — the first two are the `#[ignore]` tests in
+/// `voice::device`, and the third is T-1402's acceptance criterion.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tone_crosses_a_peer_connection() {
+    let room = RoomId::new();
+    let (a, mut a_rx, a_log) = engine(A).await;
+    let (b, mut b_rx, b_log) = engine(B).await;
+    let recorder = Arc::new(Recorder::default());
+
+    // A talks, B listens.
+    a.join(
+        room,
+        Devices {
+            source: Arc::new(Tone::default()),
+            sink: Arc::new(Discard),
+        },
+    )
+    .await;
+    b.join(
+        room,
+        Devices {
+            source: Arc::new(Silence),
+            sink: Arc::clone(&recorder) as Arc<dyn Sink>,
+        },
+    )
+    .await;
+    while a_rx.try_recv().is_ok() {}
+    while b_rx.try_recv().is_ok() {}
+
+    let state = peers(&[A, B]);
+    a.on_state(room, &state).await;
+    b.on_state(room, &state).await;
+
+    // Connect, then keep pumping signals while audio flows — late candidates
+    // still need carrying — until B has heard half a second of A.
+    let mut heard = 0;
+    for _ in 0..800 {
+        pump_once(&a, A, &mut a_rx, &b, B, &mut b_rx).await;
+        heard = recorder
+            .frames()
+            .iter()
+            .filter(|(peer, _)| peer == A)
+            .count();
+        if heard >= 25 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        heard >= 25,
+        "B heard {heard} frames from A in twenty seconds.\na: {:?}\nb: {:?}",
+        a_log.states(),
+        b_log.states()
+    );
+
+    let frames = recorder.frames();
+    assert!(
+        frames.iter().all(|(peer, _)| peer == A),
+        "B heard a frame from somebody other than A"
+    );
+    assert!(
+        frames.iter().all(|(_, f)| f.len() == audio::FRAME_SAMPLES),
+        "a frame arrived at the wrong length"
+    );
+
+    // The last ten frames are steady state: loud, and at 440 Hz — which is
+    // about 17 or 18 zero crossings per 20 ms.
+    let recent: Vec<i16> = frames
+        .iter()
+        .rev()
+        .take(10)
+        .flat_map(|(_, f)| f.iter().copied())
+        .collect();
+    assert!(
+        rms(&recent) > 2000.0,
+        "what arrived is too quiet to be the tone: rms {}",
+        rms(&recent)
+    );
+    let per_frame = zero_crossings(&recent) / 10;
+    assert!(
+        (12..=24).contains(&per_frame),
+        "what arrived is not the tone: {per_frame} crossings per frame"
+    );
+}
+
+/// The microphone loop stops when the source does, and says so. Until
+/// T-1405, that is what "the microphone was unplugged" looks like.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_source_that_ends_stops_sending_and_says_so() {
+    /// Three frames, then nothing.
+    struct Brief(std::sync::atomic::AtomicU8);
+
+    #[async_trait]
+    impl audio::Source for Brief {
+        async fn frame(&self) -> Option<Vec<i16>> {
+            let n = self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            (n < 3).then(|| vec![0i16; audio::FRAME_SAMPLES])
+        }
+    }
+
+    #[derive(Default)]
+    struct AudioLog(Mutex<Vec<String>>);
+    impl Watcher for AudioLog {
+        fn peer_state(&self, _peer: &str, _state: &str) {}
+        fn audio_state(&self, state: &str) {
+            self.0.lock().unwrap().push(state.to_string());
+        }
+    }
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let log = Arc::new(AudioLog::default());
+    let engine = Engine::new(Arc::new(Wire(tx)), Arc::clone(&log), Vec::new());
+    engine.set_session(A.to_string()).await;
+    engine
+        .join(
+            RoomId::new(),
+            Devices {
+                source: Arc::new(Brief(std::sync::atomic::AtomicU8::new(0))),
+                sink: Arc::new(Discard),
+            },
+        )
+        .await;
+
+    let mut states = Vec::new();
+    for _ in 0..40 {
+        states = log.0.lock().unwrap().clone();
+        if states.iter().any(|s| s == "stopped") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        states,
+        vec!["sending".to_string(), "stopped".to_string()],
+        "the sending loop did not report starting and stopping"
+    );
 }
 
 #[test]
