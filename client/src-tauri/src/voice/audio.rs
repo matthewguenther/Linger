@@ -1,28 +1,25 @@
 //! The two ends of the audio path: where sound comes from, and where it goes
 //! (SPEC §4.14, ARCHITECTURE §2, T-1402).
 //!
-//! **The microphone and the speakers are not here yet, and this file is the
-//! shape of the hole they go in.** `cpal` needs ALSA's development headers on
-//! Linux and an Opus encoder needs libopus; neither is installable without a
-//! password, so what exists today is the seam plus a source that produces
-//! silence. Everything on the far side of the seam — peer connections, ICE,
-//! RTP, the mesh — is real and runs.
+//! This is the seam between the engine and the hardware. The real ends are in
+//! `device.rs` — a `cpal` microphone and a `cpal` speaker — and the ones here
+//! are the stand-ins the tests use: silence, a tone, and a sink that drops
+//! everything. The engine cannot tell them apart, which is the point.
 //!
 //! The seam is one 20 ms frame in each direction, which is not an invented
-//! boundary: it is the frame size Opus and WebRTC both work in, so `cpal` fills
-//! the same buffer this hands out and there is nothing to redesign when it
-//! arrives.
+//! boundary: it is the frame size Opus and WebRTC both work in, so the
+//! microphone fills the same buffer the encoder reads and nothing in between
+//! has to think about it.
 //!
-//! Two things are deliberately *not* abstracted here, because guessing at them
-//! is how a seam ends up in the wrong place:
+//! Two things are deliberately *not* here:
 //!
 //! - **Device selection** is T-1405's, along with hotplug and the OS default
-//!   changing under a call. A picker on top of a device list nobody has
-//!   enumerated would be a guess about an API this crate has not linked yet.
-//! - **Mixing several peers** happens on the playback side, and where it
-//!   belongs depends on whether `cpal` gives us one output stream or one per
-//!   device. [`Sink::play`] takes the peer it came from so that decision stays
-//!   open.
+//!   changing under a call. Today the default device is the device.
+//! - **Mixing several peers** happens on the playback side, inside the sink.
+//!   [`Sink::play`] takes the peer it came from so the sink can keep one lane
+//!   per person and sum them at the last moment.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -66,6 +63,37 @@ pub trait Source: Send + Sync + 'static {
 #[async_trait]
 pub trait Sink: Send + Sync + 'static {
     async fn play(&self, peer: &str, samples: &[i16]);
+
+    /// The peer has gone; drop whatever was queued for them. A sink that keeps
+    /// no state per peer can ignore this.
+    async fn forget(&self, _peer: &str) {}
+}
+
+/// The two ends, together. What [`crate::voice::Engine::join`] takes: a
+/// microphone (or a stand-in) and somewhere for the far end's audio to go.
+#[derive(Clone)]
+pub struct Devices {
+    pub source: Arc<dyn Source>,
+    pub sink: Arc<dyn Sink>,
+}
+
+impl Devices {
+    /// Silence in, nothing out. For tests of everything that is not audio.
+    #[must_use]
+    pub fn silent() -> Self {
+        Self {
+            source: Arc::new(Silence),
+            sink: Arc::new(Discard),
+        }
+    }
+}
+
+/// A speaker that is not there. Every frame handed to it is dropped.
+pub struct Discard;
+
+#[async_trait]
+impl Sink for Discard {
+    async fn play(&self, _peer: &str, _samples: &[i16]) {}
 }
 
 /// A microphone that is not there.

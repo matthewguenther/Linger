@@ -4,8 +4,8 @@
 
 pub mod gateway;
 mod secrets;
-pub mod voice;
 mod updates;
+pub mod voice;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -171,10 +171,31 @@ impl voice::Watcher for VoiceWatcher {
             },
         );
     }
+
+    fn audio_state(&self, state: &str) {
+        let _ = self.app.emit(
+            VOICE_AUDIO_EVENT,
+            VoiceAudioEvent {
+                server: &self.server,
+                state,
+            },
+        );
+    }
+}
+
+/// Our own microphone's state, on its way to the window: `sending`, or
+/// `stopped` when the device went away mid-call.
+#[derive(Clone, Serialize)]
+struct VoiceAudioEvent<'a> {
+    server: &'a str,
+    state: &'a str,
 }
 
 /// The event a voice peer's state change arrives on.
 pub const VOICE_PEER_EVENT: &str = "voice:peer";
+
+/// The event our own audio's state change arrives on.
+pub const VOICE_AUDIO_EVENT: &str = "voice:audio";
 
 type VoiceEngine = voice::Engine<VoiceWire, VoiceWatcher>;
 
@@ -312,14 +333,29 @@ fn engine_for(app: &AppHandle, base_url: &str) -> std::sync::Arc<VoiceEngine> {
 
 /// Join voice in a room (SPEC §4.14).
 ///
+/// Joining is turning the microphone on, so the default microphone and the
+/// default speakers are opened here, and a machine with neither gets an error
+/// in words rather than a seat in voice it cannot use. Opening a device can
+/// block for a moment, so it happens off the reactor.
+///
 /// The mesh is not built here: it is built when the server answers with a
 /// `voice.state`, which is the same path a peer arriving later takes. One code
 /// path for "I joined" and "somebody joined" is what stops the two drifting.
 #[tauri::command]
-async fn voice_join(app: AppHandle, base_url: String, session_id: String, room_id: RoomId) {
+async fn voice_join(
+    app: AppHandle,
+    base_url: String,
+    session_id: String,
+    room_id: RoomId,
+) -> Result<(), String> {
     let engine = engine_for(&app, &base_url);
     engine.set_session(session_id).await;
-    engine.join(room_id).await;
+    let devices = tokio::task::spawn_blocking(voice::device::open_default)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    engine.join(room_id, devices).await;
+    Ok(())
 }
 
 /// Leave voice, and tear the mesh down whether or not the server answers.

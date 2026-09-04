@@ -59,17 +59,22 @@ tauri-plugin-opener = "2.5.4"
 tauri-plugin-notification = "2"
 
 # Voice (SPEC §4.14, ARCHITECTURE §2, T-1402). Audio lives in Rust rather than
-# in the WebView, and this is the transport half of that: peer connections,
-# offer/answer, ICE and RTP.
+# in the WebView, and these are the whole of it: `webrtc` for the transport
+# (peer connections, offer/answer, ICE, RTP), `cpal` for the microphone and
+# the speakers, `opus` for the codec in between.
 #
-# **It needs nothing installed.** `webrtc` is pure Rust down to the crypto
-# (`ring` via rustls), so it adds no system package to anybody's build — which
-# was the open question before it went in, and the reason the microphone half
-# is not here yet: `cpal` needs ALSA's headers on Linux and an Opus encoder
-# needs libopus. See `voice::audio`.
+# `webrtc` needs nothing installed: it is pure Rust down to the crypto (`ring`
+# via rustls). The other two are where the build box's list comes from —
+# `cpal` needs ALSA's headers on Linux (`libasound2-dev` / `alsa-lib`), and
+# `opus` builds the vendored libopus with `cmake`, so a shipped binary carries
+# its own copy and no user's machine needs a system libopus. See the README's
+# desktop-client section and `voice::device`.
 webrtc = "0.14"
+cpal = "0.18"
+opus = "0.4"
 async-trait = "0.1"
 bytes = "1"
+thiserror = "2"
 
 # Signed in-app updates (T-701). `rustls-tls` for the same reason the gateway
 # picked it: no box needs libssl headers to build the shell. `zip` is what
