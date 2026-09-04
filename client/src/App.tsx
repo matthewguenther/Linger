@@ -41,6 +41,7 @@ import type { MessageId } from "./generated/MessageId";
 import MediaPanel from "./media/MediaPanel";
 import { storageDetail, storageLine } from "./media/media";
 import { useNow } from "./lib/clock";
+import { CogIcon } from "./lib/icons";
 import { applyDensity, type Density, loadDensity } from "./lib/density";
 import { applyNormalize, loadNormalize } from "./lib/normalize";
 import {
@@ -505,10 +506,9 @@ function Console({
                 type="button"
                 className="rail-action meta"
                 aria-pressed={settingsOpen}
-                aria-label="your settings"
                 onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
               >
-                you
+                settings
               </button>
             </div>
           </div>
@@ -670,6 +670,7 @@ function Console({
           onReauthenticated={(auth) => onAddServer(api.baseUrl, auth)}
           onClose={() => setSettingsOpen(false)}
           roster={narrow ? roster : undefined}
+          initialSection={updateWaiting ? "computer" : "you"}
         />
       ) : mediaOpen ? (
         <MediaPanel
@@ -785,14 +786,18 @@ function Console({
           )}
         </span>
         <span className="status-right">
+          {/* Who you are here, then the cog: the one icon every application
+              agrees means settings, and the reason a stranger finds them. */}
+          <span className="status-you">{you.display_name}</span>
           <button
-            className="status-action"
+            className="status-action status-cog"
             type="button"
             aria-pressed={settingsOpen}
-            aria-label="your settings"
+            aria-label="settings"
+            title="settings"
             onClick={() => (settingsOpen ? setSettingsOpen(false) : openSettings())}
           >
-            {you.display_name}
+            <CogIcon />
           </button>
           {updateWaiting && !settingsOpen ? (
             <button

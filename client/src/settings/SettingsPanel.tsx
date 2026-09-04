@@ -48,6 +48,22 @@ import { type VoiceDeviceList, voiceDevices } from "../lib/ipc";
 import { loadVoicePrefs, PUSH_TO_TALK_KEY, saveVoicePrefs, type VoicePrefs } from "../voice/voice";
 import "./settings.css";
 
+/**
+ * The panel's four tabs (T-1404 follow-up, 2026-09-04). One long column of
+ * sixty controls was the thing a first-time user got lost in; the host panel
+ * already answers the same problem with tabs, and the same answer here means
+ * one thing to learn. Grouped by what you are doing rather than by feature:
+ * who you are, how you read, what you hear, and this machine.
+ */
+export type SettingsSection = "you" | "reading" | "sound" | "computer";
+
+const SECTIONS: Array<{ key: SettingsSection; label: string }> = [
+  { key: "you", label: "you" },
+  { key: "reading", label: "reading" },
+  { key: "sound", label: "sound & voice" },
+  { key: "computer", label: "this computer" },
+];
+
 function problemText(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
@@ -67,10 +83,14 @@ export default function SettingsPanel({
   onReauthenticated,
   onClose,
   roster,
+  initialSection = "you",
 }: {
   api: AuthedApi;
   /** `ready` is fresher; the stored session is what we have before it arrives. */
   user: User;
+  /** Which tab to open on. The status bar's "update ready" lands on the one
+   *  with updates in it; everything else starts at the top. */
+  initialSection?: SettingsSection;
   density: Density;
   onDensityChange: (density: Density) => void;
   normalize: boolean;
@@ -85,6 +105,7 @@ export default function SettingsPanel({
   roster?: ReactNode;
 }) {
   const panel = useRef<HTMLElement>(null);
+  const [section, setSection] = useState<SettingsSection>(initialSection);
 
   useEffect(() => {
     const node = panel.current;
@@ -102,24 +123,43 @@ export default function SettingsPanel({
   return (
     <main className="stream settings" ref={panel}>
       <header className="stream-header settings-head">
-        <h2 className="panel-label">you</h2>
+        <h2 className="panel-label">settings</h2>
+        <nav className="settings-tabs" aria-label="settings sections">
+          {SECTIONS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className="settings-tab meta"
+              aria-pressed={tab.key === section}
+              onClick={() => setSection(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
         <button type="button" className="settings-close meta" onClick={onClose}>
           close
         </button>
       </header>
       <div className="settings-body">
-        <NameSection api={api} user={user} />
-        <StylePicker
-          api={api}
-          user={user}
-          normalized={normalize}
-          dense={density !== "comfortable"}
-        />
-        <PasswordSection
-          api={api}
-          username={user.username}
-          onReauthenticated={onReauthenticated}
-        />
+        {section === "you" ? (
+          <>
+            <NameSection api={api} user={user} />
+            <StylePicker
+              api={api}
+              user={user}
+              normalized={normalize}
+              dense={density !== "comfortable"}
+            />
+            <PasswordSection
+              api={api}
+              username={user.username}
+              onReauthenticated={onReauthenticated}
+            />
+          </>
+        ) : null}
+        {section === "reading" ? (
+          <>
         <section className="settings-section">
           <h3 className="panel-label">density</h3>
           <p className="settings-lead">
@@ -182,8 +222,16 @@ export default function SettingsPanel({
             {normalize ? "names normalized" : "normalize everyone"}
           </button>
         </section>
-        <SoundSection />
-        <VoiceSection />
+          </>
+        ) : null}
+        {section === "sound" ? (
+          <>
+            <SoundSection />
+            <VoiceSection />
+          </>
+        ) : null}
+        {section === "computer" ? (
+          <>
         <ExportSection api={api} />
         <UpdatesSection />
         <section className="settings-section">
@@ -200,6 +248,8 @@ export default function SettingsPanel({
             sign out
           </button>
         </section>
+          </>
+        ) : null}
       </div>
       {roster}
     </main>

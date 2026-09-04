@@ -11,6 +11,33 @@
   gap: 14px;
 }
 
+/* The section tabs, the same control the host panel uses (host.css): one thing
+   to learn, drawn once per panel. */
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.settings-tab {
+  background: none;
+  border: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta-size);
+  cursor: pointer;
+}
+
+.settings-tab:hover {
+  color: var(--text-secondary);
+}
+
+.settings-tab[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
 .settings-close {
   margin-left: auto;
   background: none;

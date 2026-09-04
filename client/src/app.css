@@ -358,7 +358,10 @@
   background: none;
   border: 0;
   padding: 0;
-  color: var(--text-faint);
+  /* Was --text-faint, which is about 2.3:1 on the rail: the way into every
+     host control and into settings was the least visible text in the window
+     (2026-09-04 walkthrough). Secondary reads; hover brightens. */
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-meta-size);
   cursor: pointer;
@@ -366,7 +369,7 @@
 
 .rail-action:hover,
 .rail-action[aria-pressed="true"] {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .rail-server {
@@ -570,4 +573,20 @@
 .status-action:hover,
 .status-action[aria-pressed="true"] {
   color: var(--text-primary);
+}
+
+.status-you {
+  color: var(--text-secondary);
+}
+
+/* The cog sits on the text baseline at label size; it is a glyph, not a
+   button face — no square behind it (SPEC §5.1). */
+.status-cog {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.status-cog svg {
+  display: block;
 }
