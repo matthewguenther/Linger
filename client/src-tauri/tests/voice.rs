@@ -122,8 +122,8 @@ async fn two_peers_negotiate_and_connect() {
     let (a, mut a_rx, a_log) = engine(A).await;
     let (b, mut b_rx, b_log) = engine(B).await;
 
-    a.join(room, Devices::silent()).await;
-    b.join(room, Devices::silent()).await;
+    a.join(room, Devices::silent(), Vec::new()).await;
+    b.join(room, Devices::silent(), Vec::new()).await;
     // The join frames themselves go nowhere here — there is no server — so the
     // test plays the part the server plays and tells both sides who is in.
     while a_rx.try_recv().is_ok() {}
@@ -162,8 +162,8 @@ async fn exactly_one_side_offers() {
     let room = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
     let (b, mut b_rx, _) = engine(B).await;
-    a.join(room, Devices::silent()).await;
-    b.join(room, Devices::silent()).await;
+    a.join(room, Devices::silent(), Vec::new()).await;
+    b.join(room, Devices::silent(), Vec::new()).await;
     while a_rx.try_recv().is_ok() {}
     while b_rx.try_recv().is_ok() {}
 
@@ -195,8 +195,8 @@ async fn a_peer_who_reconnects_gets_a_new_connection() {
     let room = RoomId::new();
     let (a, mut a_rx, a_log) = engine(A).await;
     let (b, mut b_rx, _) = engine(B).await;
-    a.join(room, Devices::silent()).await;
-    b.join(room, Devices::silent()).await;
+    a.join(room, Devices::silent(), Vec::new()).await;
+    b.join(room, Devices::silent(), Vec::new()).await;
     while a_rx.try_recv().is_ok() {}
     while b_rx.try_recv().is_ok() {}
 
@@ -235,7 +235,7 @@ async fn a_peer_who_reconnects_gets_a_new_connection() {
 async fn leaving_closes_every_peer() {
     let room = RoomId::new();
     let (a, mut a_rx, a_log) = engine(A).await;
-    a.join(room, Devices::silent()).await;
+    a.join(room, Devices::silent(), Vec::new()).await;
     while a_rx.try_recv().is_ok() {}
     a.on_state(room, &peers(&[A, B, "ccc-session"])).await;
     assert_eq!(a.peer_count().await, 2);
@@ -255,7 +255,7 @@ async fn a_state_for_a_room_we_are_not_in_is_ignored() {
     let ours = RoomId::new();
     let theirs = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
-    a.join(ours, Devices::silent()).await;
+    a.join(ours, Devices::silent(), Vec::new()).await;
     while a_rx.try_recv().is_ok() {}
 
     // We are told about every room we can see, not only the one we are in.
@@ -271,7 +271,7 @@ async fn a_state_for_a_room_we_are_not_in_is_ignored() {
 async fn a_candidate_that_arrives_before_the_answer_is_kept() {
     let room = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
-    a.join(room, Devices::silent()).await;
+    a.join(room, Devices::silent(), Vec::new()).await;
     while a_rx.try_recv().is_ok() {}
     a.on_state(room, &peers(&[A, B])).await;
 
@@ -301,7 +301,7 @@ async fn a_candidate_that_arrives_before_the_answer_is_kept() {
 async fn a_signal_from_a_stranger_is_harmless() {
     let room = RoomId::new();
     let (a, mut a_rx, _) = engine(A).await;
-    a.join(room, Devices::silent()).await;
+    a.join(room, Devices::silent(), Vec::new()).await;
     while a_rx.try_recv().is_ok() {}
 
     // An answer or a candidate for a connection we do not have. The server
@@ -367,6 +367,7 @@ async fn a_tone_crosses_a_peer_connection() {
             source: Arc::new(Tone::default()),
             sink: Arc::new(Discard),
         },
+        Vec::new(),
     )
     .await;
     b.join(
@@ -375,6 +376,7 @@ async fn a_tone_crosses_a_peer_connection() {
             source: Arc::new(Silence),
             sink: Arc::clone(&recorder) as Arc<dyn Sink>,
         },
+        Vec::new(),
     )
     .await;
     while a_rx.try_recv().is_ok() {}
@@ -475,6 +477,7 @@ async fn muting_sends_silence_and_the_mark_follows() {
             source: Arc::new(Tone::default()),
             sink: Arc::new(Discard),
         },
+        Vec::new(),
     )
     .await;
     b.join(
@@ -483,6 +486,7 @@ async fn muting_sends_silence_and_the_mark_follows() {
             source: Arc::new(Silence),
             sink: Arc::clone(&recorder) as Arc<dyn Sink>,
         },
+        Vec::new(),
     )
     .await;
     while a_rx.try_recv().is_ok() {}
@@ -615,6 +619,7 @@ async fn a_source_that_ends_stops_sending_and_says_so() {
                 source: Arc::new(Brief(std::sync::atomic::AtomicU8::new(0))),
                 sink: Arc::new(Discard),
             },
+            Vec::new(),
         )
         .await;
 

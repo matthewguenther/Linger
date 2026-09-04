@@ -41,7 +41,7 @@ use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-use webrtc::ice_transport::ice_server::RTCIceServer;
+pub use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::media::Sample;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -127,6 +127,9 @@ struct Inner {
     devices: Option<Devices>,
     /// The loop that carries microphone frames to every peer.
     pump: Option<JoinHandle<()>>,
+    /// STUN and TURN for this call, fetched from the server at join (T-1403).
+    /// Empty means host candidates only: one network, and nothing beyond it.
+    ice_servers: Vec<RTCIceServer>,
 }
 
 impl<S: Signaller, W: Watcher> Engine<S, W> {
@@ -176,7 +179,8 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
         self.inner.lock().await.me = Some(session_id);
     }
 
-    /// Ask to join voice in a room, with the devices to do it through.
+    /// Ask to join voice in a room, with the devices to do it through and the
+    /// STUN/TURN servers the host's server handed out for it (T-1403).
     ///
     /// The mesh is not built here — it is built when the server answers with
     /// a `voice.state` that has us in it, which is the same path a peer
@@ -184,12 +188,19 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
     /// encodes frames from the moment we join and writes them to whichever
     /// peers exist, so the first word after a connection comes up is not
     /// waiting on anything.
-    pub async fn join(&self, room_id: RoomId, devices: Devices) {
+    pub async fn join(&self, room_id: RoomId, devices: Devices, ice_servers: Vec<RTCIceServer>) {
         let source = Arc::clone(&devices.source);
         let previous = {
             let mut inner = self.inner.lock().await;
             inner.room = Some(room_id);
             inner.devices = Some(devices);
+            // The server's relay for this call, or whatever the engine was built
+            // with when the server offered none.
+            inner.ice_servers = if ice_servers.is_empty() {
+                self.ice_servers.clone()
+            } else {
+                ice_servers
+            };
             inner.pump.take()
         };
         if let Some(previous) = previous {
@@ -390,7 +401,7 @@ impl<S: Signaller, W: Watcher> Engine<S, W> {
 
         let conn = Arc::new(
             api.new_peer_connection(RTCConfiguration {
-                ice_servers: self.ice_servers.clone(),
+                ice_servers: self.inner.lock().await.ice_servers.clone(),
                 ..Default::default()
             })
             .await?,

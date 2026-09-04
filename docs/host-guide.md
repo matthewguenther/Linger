@@ -171,6 +171,8 @@ After a change, run `docker compose up -d` again.
 | `LINGER_MEDIA_DOMAIN` | The name files are served from. Set it if you are using two free names, or want something other than `cdn.` + your domain. It must be different from the main one. | `cdn.<your address>` |
 | `LINGER_STORAGE` | `local` keeps files on the machine. `s3` keeps them in a cloud bucket. | `local` |
 | `LINGER_DATA_DIR` | Where the database and files live inside the container. | `/data` |
+| `LINGER_TURN_SECRET` | Turns on the voice relay (see below). Goes in `.env`, not here. | unset — no relay |
+| `LINGER_TURN_URLS` | Where the relay is, if not `turn:<your address>:3478`. Comma-separated `turn:`/`stun:` addresses. | derived from your address |
 
 One file can be up to 500 MB.
 
@@ -179,6 +181,31 @@ and fill in the five `LINGER_S3_*` lines already written in `compose.yaml` as
 comments. Cloudflare R2 is the one to pick, because it does not charge for data
 going out. The server refuses to start if any of them are missing, so you will
 know straight away.
+
+**Voice between different networks.** Two people on the same wifi can talk
+without any of this. Two people in two houses usually cannot: home routers
+hide the computers behind them, and somebody has to introduce the two — that is
+a *relay*, and it is the third container in `compose.yaml`. It is yours, on your
+machine; what passes through it is scrambled sound it cannot listen to.
+
+1. Copy `.env.example` to `.env` next to `compose.yaml`.
+2. Put a long random secret in it: `openssl rand -hex 32` prints one. This one
+   value is shared between Linger and the relay and is the relay's only lock,
+   so make it long and do not reuse it anywhere.
+3. In `compose.yaml`, change `--realm=linger.example.com` to your address.
+4. Open two more things on your router or firewall: port **3478**, both TCP and
+   UDP, and UDP ports **49160 to 49200**. (If the machine is behind a home
+   router rather than on a public address, also uncomment `--external-ip` and
+   put your public IP there.)
+5. Start with the relay switched on:
+   ```bash
+   docker compose --profile voice up -d
+   ```
+   Without `--profile voice` the relay does not start, which is fine for a
+   server that does not want one.
+
+The server tells you at startup if it has no relay. Voice still works then,
+between machines on one network.
 
 ---
 
@@ -250,6 +277,11 @@ It prints a new password. Send it to them; they can change it in the app under
 
 **Start here:** `docker compose logs linger` and `docker compose logs caddy`.
 
+- **Voice connects on the same wifi but not between houses.** The relay is not
+  running, or its ports are not open. `docker compose ps` should list `coturn`;
+  if it does not, you started without `--profile voice`. If it is running,
+  check port 3478 (TCP and UDP) and UDP 49160–49200 reach the machine, and that
+  `.env` holds the same secret Linger was started with.
 - **The address does not load at all.** Usually DNS has not caught up, or ports
   80 and 443 are not reaching the machine. Caddy's log will say if it could not
   get a certificate.

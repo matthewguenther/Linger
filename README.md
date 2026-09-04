@@ -172,6 +172,8 @@ cd deploy
 # edit compose.yaml and Caddyfile: set both to your domain
 docker compose up -d
 docker compose logs linger   # prints a one-time host-setup URL on first run
+# voice between different networks needs the relay too: put a secret in .env
+# (copy .env.example) and start with `docker compose --profile voice up -d`
 ```
 
 **Two names, and they have to be names.** The desktop client only talks `https`,
@@ -642,10 +644,10 @@ Current work queue lives in [TASKS.md](TASKS.md).
 - **V2** — **knock (M9), search (M10) and DMs (M11) are built.** Voice rooms
   (M12) are most of the way there: the signalling, the audio path (microphone →
   Opus → peer connection → speakers) and the surface (join, mute, push-to-talk,
-  who is talking, per-person volume, a device picker) are built. **It has only
-  ever run on one machine**, and there is no STUN or TURN yet, so two people on
-  different networks cannot connect. Ambient voice is planned and not started;
-  V1 still has to be installed and used by real people.
+  who is talking, per-person volume, a device picker) and the relay a host runs
+  for people on different networks are built. **None of it has crossed two
+  machines yet.** Ambient voice is planned and not started; V1 still has to be
+  installed and used by real people.
 - **Backburner** — a mobile client. Desktop comes first and has to be solid
   before anything else starts.
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji

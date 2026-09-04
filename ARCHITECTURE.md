@@ -580,8 +580,20 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
+  coturn:                # optional, behind `--profile voice` (T-1403)
+    image: coturn/coturn:4
+    network_mode: host
+    command: [ "--use-auth-secret", "--static-auth-secret=${LINGER_TURN_SECRET}", ... ]
 volumes: { caddy_data: {} }
 ```
+
+The third container is the voice relay (SPEC §4.14). It is optional and behind a
+compose profile, so a plain `docker compose up -d` needs no secret and runs no
+relay. Its one secret lives in `.env`, never in the compose file, and is shared
+with `linger` so the server can sign the short-lived relay passwords it hands
+members (`PROTOCOL.md` §7, `GET /voice/ice`). It runs on the host's own network
+because a relay's job is being reachable at its real address on a range of UDP
+ports, and container NAT would get in the way of exactly that.
 
 Caddy is bundled specifically so TLS certificates are automatic. A self-hoster should
 never have to think about certbot. Its Caddyfile has two blocks and the deployment needs
@@ -634,7 +646,7 @@ project. V1's remaining work is still five things a person has to do by hand
 | **M9** | Knock (SPEC §4.9) | A knock crosses two machines, fades on its own, and leaves nothing behind | 1–2 days — **built 2026-08-29; the two-machine half of the check is HC-6** |
 | **M10** | Search | Type a word, get the messages containing it, click one, land on it in its room | 3–4 days — **built: index and endpoint 2026-08-30, surface 2026-08-31. Its check passed in a running app** |
 | **M11** | DMs and group DMs | Two people hold a conversation no other member can see in *any* surface — stream, media, search, export, notifications | 4–6 days — **built 2026-08-31.** Its check passed surface by surface against a running server; the two-machine half is a human check |
-| **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks — **the audio path and the surface landed 2026-09-01 and 2026-09-04 (T-1401, T-1402, T-1404): frames, peer connections, ICE, microphone → Opus → RTP → speakers, and join / mute / push-to-talk / who is talking / per-person volume / a device picker. Proven on one machine only; no STUN or TURN yet (T-1403)** |
+| **M12** | Voice rooms | Four people, four networks, one hour, no drops | 1–2 weeks — **the audio path and the surface landed 2026-09-01 and 2026-09-04 (T-1401, T-1402, T-1404): frames, peer connections, ICE, microphone → Opus → RTP → speakers, and join / mute / push-to-talk / who is talking / per-person volume / a device picker. and a coturn relay in the deploy with short-lived passwords the server signs (T-1403). Proven on one machine only — HC-8 and HC-9** |
 | **M13** | Ambient voice | A room left running all day costs almost no CPU, and nobody joined anything | 3–5 days |
 | **M14** | Custom themes | Somebody makes a colour scheme, it survives a restart, and a file carries it to another computer | **V3, not V2.** Three decisions come first — see `TASKS.md` *Parking lot* |
 

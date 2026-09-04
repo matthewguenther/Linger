@@ -28,6 +28,7 @@ mod server;
 mod setup;
 mod uploads;
 mod users;
+mod voice;
 
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, Method};
@@ -100,6 +101,7 @@ pub fn router(state: AppState) -> Router {
         .merge(search::router())
         .merge(export::router())
         .merge(knock::router())
+        .merge(voice::router())
         .merge(links::router())
         .route("/gateway", any(crate::gateway::ws_route))
         .fallback(api_not_found);

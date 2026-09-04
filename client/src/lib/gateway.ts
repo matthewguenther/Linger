@@ -55,6 +55,7 @@ import {
   voiceMute,
   voiceVolume,
 } from "./ipc";
+import type { IceServers } from "../generated/IceServers";
 import type { VoicePeer } from "../generated/VoicePeer";
 import { playKnock } from "./sound";
 import type { AuthedApi } from "./api";
@@ -1549,7 +1550,16 @@ export async function joinVoice(
   });
   try {
     await voiceMute(server, startMuted);
-    await voiceJoin(server, current.sessionId, roomId, devices);
+    // The host's relay, if there is one (T-1403): STUN and TURN with a
+    // password made for us just now. Asked on every join because the password
+    // expires, and asked *before* the peer connections exist because ICE has
+    // to know its servers when it starts. A server that cannot answer is a
+    // join on one network only, not a refusal — that is a real deployment.
+    const ice = await api
+      .get<IceServers>("/voice/ice")
+      .then((answer) => answer.servers)
+      .catch(() => []);
+    await voiceJoin(server, current.sessionId, roomId, devices, ice);
   } catch (error) {
     publish(server, { ...stateOf(server), myVoice: null });
     throw error;

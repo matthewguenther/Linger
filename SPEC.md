@@ -468,6 +468,14 @@ the server's whole part in voice is introducing two clients to each other. There
 feature here to add later; a room where the microphone might be being recorded is a
 different product.
 
+**Two people behind two home routers need a relay.** Most pairs connect directly once
+each has learned its own public address (STUN); the rest — carrier-grade NAT, a strict
+office network — cannot, and a relay (TURN) carries the packets between them. The host
+runs one beside the server, and it is the host's, not a third party's. What it carries is
+the encrypted stream, which it cannot read, and the server's only part is handing a
+member a short-lived password for it at the moment they join. A host who runs no relay
+has voice that works within one network and nowhere else, and is told so at startup.
+
 **Your microphone is yours.** Push-to-talk and mute are per-person and local; nobody can
 mute anybody else, and nobody can turn anybody's microphone on. A permission that lets
 one person silence another is a role by another name (§2).

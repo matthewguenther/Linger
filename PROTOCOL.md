@@ -602,7 +602,27 @@ DELETE /invites/:code                                       → 204
 POST /export             → { job_id }                        # any member, 1/hour
 GET  /export/:job_id     → { job_id, state, progress, url? } # the asker's own only
 POST /knock              { target_user_id }                 → 204   # 3/hour per target
+GET  /voice/ice          → { servers: IceServer[], ttl_secs } # the voice relay, for you
 ```
+
+```ts
+type IceServer = { urls: string[]; username: string | null; credential: string | null }
+```
+
+**Voice relay** (SPEC §4.14, T-1403). What a client puts in its peer connections'
+ICE configuration before joining voice: the host's STUN and TURN addresses, with a
+password made for the asking member on the spot. The password is coturn's
+time-limited scheme — `username` is `<unix expiry>:<user id>` and `credential` is
+`base64(HMAC-SHA1(shared secret, username))` — so the server stores nothing and
+the relay looks nothing up; both hold the secret and both compute. `ttl_secs` is
+how long the password lasts (a day by default); a client asks again on every
+join, so it only has to outlast one call. Audio never touches this server, and
+what the relay carries is the encrypted stream it cannot read.
+
+A host with no relay answers `{ servers: [], ttl_secs: 0 }`. That is not an
+error: voice then works between machines on one network and nowhere else, and
+the client joins anyway. The endpoint needs a signed-in member and answers the
+same for all of them; there is no host-only view of it.
 
 **Export** (SPEC §4.11, T-801). `state` is `queued | running | complete |
 failed`; `progress` is `0.0`–`1.0`; `url` appears once `state` is `complete`
