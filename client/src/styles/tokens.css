@@ -9,6 +9,10 @@
  */
 
 :root {
+  /* Native controls — <select>, scrollbars, date pickers — are drawn by the
+     WebView, not by these tokens, and without this they come out white on
+     a dark app (seen in the 2026-09-04 walkthrough). */
+  color-scheme: dark;
   /* --- color: cool neutral gray, dark is primary (SPEC §5.3) --- */
   --surface-0: #16181c; /* app bg */
   --surface-1: #1a1d22; /* rails */
@@ -82,6 +86,7 @@
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --surface-0: #f7f8f9;
   --surface-1: #ffffff;
   --surface-2: #ffffff;
