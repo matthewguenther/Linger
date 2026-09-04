@@ -85,7 +85,11 @@ ready by the time you need it.
 mkdir linger && cd linger
 curl -O https://raw.githubusercontent.com/matthewguenther/Linger/main/deploy/compose.yaml
 curl -O https://raw.githubusercontent.com/matthewguenther/Linger/main/deploy/Caddyfile
+curl -O https://raw.githubusercontent.com/matthewguenther/Linger/main/deploy/.env.example
 ```
+
+The third file is only needed if you turn on voice between different networks
+later (see *Settings you might want to change*); it does nothing until then.
 
 ## 3. Put your address in both of them
 
@@ -124,17 +128,25 @@ that means `LINGER_DOMAIN` is not set. Fix that before going further.
 ## 5. Make your account
 
 [Install the app](user-guide.md#installing-linger), open it, and paste the setup
-link into the box that says *server or link*. Pick a username and a password
-(eight characters or more, no silly rules).
+link into the box that says *server or link*. The form that appears asks for
+four things: a **name for the server** (what your friends will see it called),
+your **username** (lowercase, cannot change later), your **display name**, and a
+**password** (eight characters or more, no silly rules).
 
 That account is the host. There is no separate admin login, and there are no
 roles — you are a normal member who also has the host controls.
 
 ## 6. Invite people
 
-In the app, open the host controls from the small control on the left rail, then
-**invites → make a link**. You choose how many times it can be used and when it
-expires. Send the link however you normally talk to your friends.
+In the left rail, next to the word *SERVER*, you have two small controls nobody
+else sees: **manage** and **+ room**. Press **manage**, then **invites → make a
+link**. You choose how many people it is good for and when it expires; the link
+is copied for you the moment it is made. Send it however you normally talk to
+your friends.
+
+Before that, make a room: the empty screen offers **make the first room**, and
+so does **+ room**. A room needs a short name for after the `#` and, if you
+like, a topic.
 
 An invite link is the only way to get an account. There is no public sign-up.
 
@@ -142,7 +154,8 @@ An invite link is the only way to get an account. There is no public sign-up.
 
 ## Running it day to day
 
-Almost everything is done inside the app, not in a config file.
+Almost everything is done inside the app, not in a config file. The host
+controls are behind **manage**, next to *SERVER* in the left rail.
 
 - **Rooms** — host controls → *rooms*. Create, rename, set a topic, reorder,
   archive.

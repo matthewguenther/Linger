@@ -85,22 +85,35 @@ services:
     # up -d` once the secret is in place.
     profiles: ["voice"]
     network_mode: host
+    environment:
+      LINGER_TURN_SECRET: ${LINGER_TURN_SECRET:-}
+    # The secret is checked here, when the relay starts, and not by compose
+    # when the file is read — a `${VAR:?}` in this file would refuse a plain
+    # `docker compose up -d` for a host who never asked for a relay. An empty
+    # secret would be an open relay, so the check is a refusal, not a default.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - --listening-port=3478
-      - --realm=linger.example.com
-      - --use-auth-secret
-      - --static-auth-secret=${LINGER_TURN_SECRET:?set LINGER_TURN_SECRET in .env}
-      - --min-port=49160
-      - --max-port=49200
-      - --fingerprint
-      - --no-cli
-      - --no-tls
-      - --no-dtls
-      - --no-multicast-peers
-      - --log-file=stdout
-      # Behind a home router rather than on a machine with a public address?
-      # Add your public IP so the relay tells clients where it really is:
-      # - --external-ip=203.0.113.7
+      - |
+        if [ -z "$$LINGER_TURN_SECRET" ]; then
+          echo "coturn: LINGER_TURN_SECRET is empty. Copy .env.example to .env and put a long random secret in it." >&2
+          exit 1
+        fi
+        exec turnserver \
+          --listening-port=3478 \
+          --realm=linger.example.com \
+          --use-auth-secret \
+          --static-auth-secret="$$LINGER_TURN_SECRET" \
+          --min-port=49160 \
+          --max-port=49200 \
+          --fingerprint \
+          --no-cli \
+          --no-tls \
+          --no-dtls \
+          --no-multicast-peers \
+          --log-file=stdout
+        # Behind a home router rather than on a machine with a public address?
+        # Add your public IP to the list above so the relay tells clients where
+        # it really is:   --external-ip=203.0.113.7 \
 
 volumes:
   caddy_data: {}

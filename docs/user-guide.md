@@ -57,6 +57,15 @@ Three parts.
 - **The roster**, on the right: everyone on the server and what they are up to.
   On a narrow window it moves to a strip above the box you type in.
 
+## Settings, and where they are
+
+Nothing on screen says "settings". Your own name, bottom right in the status
+bar, opens it — so does **you**, next to *SERVER* in the left rail. The panel is
+headed **YOU**, and everything this guide calls *settings → something* is a
+section of it, top to bottom: who you are, how your name looks, password,
+density, theme, other people's names, sound, voice, take everything with you,
+updates, and this computer. **Close** at the top right puts the room back.
+
 ## Saying things
 
 Type and press **Enter**. **Shift+Enter** starts a new line instead of sending.
@@ -126,7 +135,28 @@ headphones come unplugged mid-sentence, Linger moves to whatever your computer
 now uses within a second or two. If nothing comes back for twenty seconds the
 line under the room's name says the microphone stopped, and you join again.
 
+## Talking to one person
+
+**Direct messages.** Open somebody's name in the roster and press **message**. A
+*direct* section appears in the rail with their name in it, and the conversation
+works exactly like a room — except only the two of you can see it, anywhere:
+not in media, not in search, not in anybody else's export. There is no way to
+add a third person later; a different set of people is a different
+conversation.
+
+**Knocking.** On the same card, **knock** is a tap on the shoulder: the other
+person sees a small card for a few seconds and hears a soft sound, and then it
+is gone. There is no message and nothing for them to answer. Three an hour per
+person, so it stays a tap. Nothing happens between 22:00 and 08:00 on their
+clock unless they have turned quiet hours off.
+
 ## Finding things again
+
+Open **search** from the rail (or press **Ctrl+K**, **Cmd+K** on a Mac). Type a
+word; you get the messages that contain it and the files whose names do, newest
+first, and you can narrow to a room or a person. Pressing a result takes you to
+that message in its room, however far back it is, with a **back to the newest**
+link in the header to come home again.
 
 Open **media** from the rail. It is everything ever shared on the server —
 pictures, video, audio, files and links — newest first, filterable by type and
