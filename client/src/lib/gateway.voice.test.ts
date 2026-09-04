@@ -53,12 +53,13 @@ const {
 const HOME = "https://home.example";
 const WORK = "https://work.example";
 
-function fakeApi(baseUrl: string): AuthedApi {
+function fakeApi(baseUrl: string, get?: (path: string) => unknown): AuthedApi {
   const stub = {
     baseUrl,
     accessToken: async () => ({ token: `token-${baseUrl}`, expiresAt: 0 }),
     get: async (path: string) => {
-      throw new Error(`unexpected GET ${path}`);
+      if (!get) throw new Error(`unexpected GET ${path}`);
+      return get(path);
     },
   };
   return stub as unknown as AuthedApi;
@@ -171,12 +172,40 @@ describe("voice in the store", () => {
       roomId: "r-garage",
       input: "USB Mic",
       output: null,
+      // The fake server has no `/voice/ice`, which is what a host with no
+      // relay looks like: the join goes ahead with no servers.
+      ice: [],
     });
     expect(serverState(HOME).myVoice).toMatchObject({
       roomId: "r-garage",
       muted: true,
       audio: "opening",
     });
+  });
+
+  it("asks the server for its relay and hands it to the core", async () => {
+    const relay = {
+      servers: [
+        {
+          urls: ["stun:linger.example:3478", "turn:linger.example:3478?transport=udp"],
+          username: "1700003600:u-matt",
+          credential: "RsyZfOxxNUxMkeEW3E6QK5TmlsU=",
+        },
+      ],
+      ttl_secs: 3600,
+    };
+    const api = fakeApi(HOME, (path) => {
+      if (path === "/voice/ice") return relay;
+      throw new Error(`unexpected GET ${path}`);
+    });
+    await connect(api);
+    arrive(HOME, ready());
+    invoked.length = 0;
+
+    await joinVoice(api, "r-garage", DEFAULTS, false);
+
+    const join = invoked.find((call) => call.cmd === "voice_join");
+    expect(join?.args.ice).toEqual(relay.servers);
   });
 
   it("refuses to join before the session exists", async () => {

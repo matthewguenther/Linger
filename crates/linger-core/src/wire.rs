@@ -744,6 +744,40 @@ pub struct KnockRequest {
     pub target_user_id: UserId,
 }
 
+// ---------------------------------------------------------------------------
+// Voice relay (SPEC §4.14, PROTOCOL §7, T-1403)
+// ---------------------------------------------------------------------------
+
+/// One STUN or TURN server a client should hand its peer connections.
+///
+/// The shape WebRTC's `RTCIceServer` has, and nothing more. `username` and
+/// `credential` are set for TURN and absent for plain STUN; a TURN credential
+/// is short-lived (see [`IceServers::ttl_secs`]) and computed, never stored,
+/// so there is no account behind it to leak.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct IceServer {
+    pub urls: Vec<String>,
+    pub username: Option<String>,
+    pub credential: Option<String>,
+}
+
+/// The answer to `GET /voice/ice`: what to put in a peer connection's ICE
+/// configuration right now.
+///
+/// Empty when the host runs no relay. That is a real deployment — voice then
+/// works between machines on one network and nowhere else — so the client
+/// joins anyway rather than refusing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct IceServers {
+    pub servers: Vec<IceServer>,
+    /// How long the TURN credentials in `servers` stay valid, in seconds.
+    /// Zero when there are none. A client asks again on every join, so this
+    /// only has to cover one call.
+    pub ttl_secs: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

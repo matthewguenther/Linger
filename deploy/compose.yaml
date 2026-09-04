@@ -16,6 +16,15 @@
 # follows `latest`, which moves when a version is tagged; write `:0.2.0`
 # instead if you would rather pick your moment. Nothing updates on its own.
 # Images are published for x86-64 and ARM64, so a Raspberry Pi works too.
+#
+# Voice (SPEC §4.14): the third container, coturn, is the relay that lets two
+# people on different networks hear each other. It is optional — without it
+# voice works between machines on one network and the server says so at
+# startup. To run it: copy `.env.example` to `.env`, put a long random secret
+# in it (`openssl rand -hex 32`), set the realm to your domain below, open
+# port 3478 (TCP and UDP) and UDP 49160–49200 on your firewall, and start with
+# `docker compose --profile voice up -d`. The secret is read from `.env` so it
+# is never in this file, which people share.
 
 services:
   linger:
@@ -48,6 +57,12 @@ services:
       # LINGER_S3_REGION: auto
       # LINGER_S3_ACCESS_KEY_ID: ...
       # LINGER_S3_SECRET_ACCESS_KEY: ...
+      # The voice relay's shared secret, from .env (see .env.example). Set it
+      # here and in coturn below, or leave it unset for no relay. If you set
+      # this and want the relay somewhere other than turn:<LINGER_DOMAIN>:3478,
+      # list the URIs in LINGER_TURN_URLS, separated by commas.
+      LINGER_TURN_SECRET: ${LINGER_TURN_SECRET:-}
+      # LINGER_TURN_URLS: turn:relay.example.com:3478?transport=udp,stun:relay.example.com:3478
 
   caddy:
     image: caddy:2
@@ -58,6 +73,34 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
+
+  # The voice relay (T-1403). Runs on the host's network directly: a relay's
+  # whole job is being reachable on its real address and a range of UDP ports,
+  # which Docker's own network translation would get in the way of.
+  coturn:
+    image: coturn/coturn:4
+    restart: unless-stopped
+    # Behind a profile so a plain `docker compose up -d` still works with no
+    # `.env` and no relay. Start the relay with `docker compose --profile voice
+    # up -d` once the secret is in place.
+    profiles: ["voice"]
+    network_mode: host
+    command:
+      - --listening-port=3478
+      - --realm=linger.example.com
+      - --use-auth-secret
+      - --static-auth-secret=${LINGER_TURN_SECRET:?set LINGER_TURN_SECRET in .env}
+      - --min-port=49160
+      - --max-port=49200
+      - --fingerprint
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --no-multicast-peers
+      - --log-file=stdout
+      # Behind a home router rather than on a machine with a public address?
+      # Add your public IP so the relay tells clients where it really is:
+      # - --external-ip=203.0.113.7
 
 volumes:
   caddy_data: {}

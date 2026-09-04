@@ -371,6 +371,7 @@ async fn voice_join(
     room_id: RoomId,
     input: Option<String>,
     output: Option<String>,
+    ice: Vec<linger_core::wire::IceServer>,
 ) -> Result<(), String> {
     let engine = engine_for(&app, &base_url);
     engine.set_session(session_id).await;
@@ -380,7 +381,18 @@ async fn voice_join(
     .await
     .map_err(|error| error.to_string())?
     .map_err(|error| error.to_string())?;
-    engine.join(room_id, devices).await;
+    // The server's relay for this call (T-1403), in the shape the peer
+    // connections take. Empty when the host runs none, and then it is host
+    // candidates only — one network.
+    let ice = ice
+        .into_iter()
+        .map(|server| voice::RTCIceServer {
+            urls: server.urls,
+            username: server.username.unwrap_or_default(),
+            credential: server.credential.unwrap_or_default(),
+        })
+        .collect();
+    engine.join(room_id, devices, ice).await;
     Ok(())
 }
 

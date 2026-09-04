@@ -79,7 +79,55 @@ pub struct Config {
     /// takes it, default 365 (SPEC §4.10). `off` (or `0`) means never, and a
     /// starred or pinned file never expires whatever this says.
     pub file_expiry_days: Option<u32>,
+    /// `LINGER_TURN_SECRET` (+ `LINGER_TURN_URLS`) — the voice relay. `None`
+    /// means no relay: voice works between machines on one network and nowhere
+    /// else, and the server says so at startup (SPEC §4.14, T-1403).
+    pub turn: Option<TurnConfig>,
 }
+
+/// The relay that lets two people on different networks hear each other
+/// (SPEC §4.14, T-1403).
+///
+/// Nothing about a call passes through Linger's server, but two clients
+/// behind two home routers cannot find each other without help: a STUN
+/// server tells each its public address, and a TURN server carries the
+/// packets when even that is not enough (carrier-grade NAT, a strict office
+/// network). Both are coturn, run by the host beside this server. The only
+/// thing this server does is hand a member a short-lived password for it,
+/// computed from `secret` — which coturn also holds — so nothing is stored
+/// and nothing is looked up (see `crate::turn`).
+#[derive(Clone, PartialEq, Eq)]
+pub struct TurnConfig {
+    /// Shared with coturn (`static-auth-secret`). Never logged.
+    pub secret: String,
+    /// The `turn:` / `stun:` URIs a client is told to use.
+    pub urls: Vec<String>,
+    /// How long a handed-out password stays valid. It is checked when the
+    /// relay is allocated and on every refresh, so it has to outlast the
+    /// longest call anybody will have.
+    pub ttl_secs: u64,
+}
+
+// Same reason `S3Config` has one: `Config` is logged, and a relay secret in a
+// log file is a relay anybody with the file can use.
+impl std::fmt::Debug for TurnConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TurnConfig")
+            .field("secret", &"<redacted>")
+            .field("urls", &self.urls)
+            .field("ttl_secs", &self.ttl_secs)
+            .finish()
+    }
+}
+
+/// Fewer characters than this is a secret somebody typed rather than
+/// generated, guarding a relay that is open to the internet on a well-known
+/// port. `openssl rand -hex 32` is 64.
+pub const MIN_TURN_SECRET_LEN: usize = 16;
+
+/// A day: longer than any call, short enough that a leaked password is not a
+/// standing key to the host's bandwidth.
+pub const DEFAULT_TURN_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// Where to point a client on first run — see [`Config::setup_origin`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +173,22 @@ pub enum ConfigError {
          if you leave LINGER_MEDIA_DOMAIN unset."
     )]
     MediaDomainIsAppDomain(String),
+    #[error(
+        "LINGER_TURN_SECRET is shorter than {MIN_TURN_SECRET_LEN} characters. The relay is \
+         open to the internet on a well-known port and this is its only lock; generate one \
+         with `openssl rand -hex 32` and give the same value to coturn."
+    )]
+    TurnSecretShort,
+    #[error(
+        "LINGER_TURN_SECRET is set but there is no LINGER_DOMAIN and no LINGER_TURN_URLS, so \
+         there is no address to hand clients for the relay. Set LINGER_DOMAIN (the relay is \
+         `turn:<domain>:3478` by default) or list the URIs in LINGER_TURN_URLS."
+    )]
+    TurnUrlsUnknown,
+    #[error("LINGER_TURN_URLS has an entry that is not a turn:, turns: or stun: URI: {0:?}")]
+    TurnUrl(String),
+    #[error("LINGER_TURN_URLS is set but LINGER_TURN_SECRET is not; a relay needs both")]
+    TurnSecretMissing,
 }
 
 impl Config {
@@ -152,6 +216,12 @@ impl Config {
         let media_domain =
             media_domain(domain.as_deref(), std::env::var("LINGER_MEDIA_DOMAIN").ok())?;
 
+        let turn = turn_config(
+            domain.as_deref(),
+            std::env::var("LINGER_TURN_SECRET").ok(),
+            std::env::var("LINGER_TURN_URLS").ok(),
+        )?;
+
         Ok(Self {
             data_dir,
             bind,
@@ -161,6 +231,7 @@ impl Config {
             s3,
             pool_bytes: pool_bytes(std::env::var("LINGER_POOL_BYTES").ok())?,
             file_expiry_days: file_expiry_days(std::env::var("LINGER_FILE_EXPIRY_DAYS").ok())?,
+            turn,
         })
     }
 
@@ -394,9 +465,148 @@ fn media_domain(
     Ok(Some(media))
 }
 
+/// The relay's addresses when the host has not listed them: coturn on the
+/// server's own name, on the standard port, over UDP and TCP, plus STUN on
+/// the same. TCP is there for the networks that eat UDP; it is slower and
+/// ICE will not pick it unless it has to.
+fn default_turn_urls(domain: &str) -> Vec<String> {
+    vec![
+        format!("stun:{domain}:3478"),
+        format!("turn:{domain}:3478?transport=udp"),
+        format!("turn:{domain}:3478?transport=tcp"),
+    ]
+}
+
+/// `LINGER_TURN_SECRET` and `LINGER_TURN_URLS` into a [`TurnConfig`], or
+/// `None` when neither is set.
+///
+/// Half a relay is refused rather than guessed at: URIs without a secret is a
+/// relay nobody can use, and a secret without any address to hand out is a
+/// lock with no door. A short secret is refused too — see
+/// [`MIN_TURN_SECRET_LEN`].
+fn turn_config(
+    domain: Option<&str>,
+    secret: Option<String>,
+    urls: Option<String>,
+) -> Result<Option<TurnConfig>, ConfigError> {
+    let secret = secret.filter(|value| !value.trim().is_empty());
+    let urls = urls.filter(|value| !value.trim().is_empty());
+    let Some(secret) = secret else {
+        return match urls {
+            Some(_) => Err(ConfigError::TurnSecretMissing),
+            None => Ok(None),
+        };
+    };
+    if secret.chars().count() < MIN_TURN_SECRET_LEN {
+        return Err(ConfigError::TurnSecretShort);
+    }
+    let urls = match urls {
+        Some(list) => {
+            let parsed: Vec<String> = list
+                .split(',')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_string)
+                .collect();
+            if let Some(bad) = parsed.iter().find(|entry| {
+                !(entry.starts_with("turn:")
+                    || entry.starts_with("turns:")
+                    || entry.starts_with("stun:"))
+            }) {
+                return Err(ConfigError::TurnUrl(bad.clone()));
+            }
+            if parsed.is_empty() {
+                return Err(ConfigError::TurnUrlsUnknown);
+            }
+            parsed
+        }
+        None => match domain {
+            Some(domain) => default_turn_urls(domain),
+            None => return Err(ConfigError::TurnUrlsUnknown),
+        },
+    };
+    Ok(Some(TurnConfig {
+        secret,
+        urls,
+        ttl_secs: DEFAULT_TURN_TTL_SECS,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SECRET: &str = "correct horse battery staple";
+
+    #[test]
+    fn no_relay_is_none_and_half_a_relay_is_refused() {
+        assert_eq!(
+            turn_config(Some("linger.example"), None, None).unwrap(),
+            None
+        );
+        assert!(matches!(
+            turn_config(Some("linger.example"), None, Some("turn:x:3478".into())),
+            Err(ConfigError::TurnSecretMissing)
+        ));
+        assert!(matches!(
+            turn_config(None, Some(SECRET.into()), None),
+            Err(ConfigError::TurnUrlsUnknown)
+        ));
+        assert!(matches!(
+            turn_config(Some("linger.example"), Some("short".into()), None),
+            Err(ConfigError::TurnSecretShort)
+        ));
+    }
+
+    #[test]
+    fn a_domain_alone_gives_the_standard_relay_addresses() {
+        let turn = turn_config(Some("linger.example"), Some(SECRET.into()), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            turn.urls,
+            vec![
+                "stun:linger.example:3478",
+                "turn:linger.example:3478?transport=udp",
+                "turn:linger.example:3478?transport=tcp",
+            ]
+        );
+        assert_eq!(turn.ttl_secs, DEFAULT_TURN_TTL_SECS);
+        assert_eq!(turn.secret, SECRET);
+    }
+
+    #[test]
+    fn listed_urls_win_and_are_checked() {
+        let turn = turn_config(
+            Some("linger.example"),
+            Some(SECRET.into()),
+            Some(" turns:relay.example:5349 , stun:relay.example:3478 ".into()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            turn.urls,
+            vec!["turns:relay.example:5349", "stun:relay.example:3478"]
+        );
+        assert!(matches!(
+            turn_config(
+                None,
+                Some(SECRET.into()),
+                Some("https://relay.example".into())
+            ),
+            Err(ConfigError::TurnUrl(_))
+        ));
+    }
+
+    #[test]
+    fn the_secret_never_reaches_a_log_line() {
+        let turn = turn_config(Some("linger.example"), Some(SECRET.into()), None)
+            .unwrap()
+            .unwrap();
+        let shown = format!("{turn:?}");
+        assert!(!shown.contains(SECRET));
+        assert!(shown.contains("<redacted>"));
+    }
 
     fn config(domain: Option<&str>, media: Option<&str>) -> Config {
         Config {
@@ -408,6 +618,7 @@ mod tests {
             s3: None,
             pool_bytes: DEFAULT_POOL_BYTES,
             file_expiry_days: Some(DEFAULT_FILE_EXPIRY_DAYS),
+            turn: None,
         }
     }
 

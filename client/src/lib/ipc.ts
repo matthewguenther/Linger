@@ -16,6 +16,7 @@
  */
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
+import type { IceServer } from "../generated/IceServer";
 import type { RoomId } from "../generated/RoomId";
 import type { ServerFrame } from "../generated/ServerFrame";
 
@@ -83,6 +84,7 @@ export async function voiceJoin(
   sessionId: string,
   roomId: RoomId,
   devices: VoiceDeviceChoice,
+  ice: IceServer[],
 ): Promise<void> {
   if (!isTauri()) throw new Error("Voice only works in the desktop app.");
   await invoke("voice_join", {
@@ -91,6 +93,7 @@ export async function voiceJoin(
     roomId,
     input: devices.input,
     output: devices.output,
+    ice,
   });
 }
 

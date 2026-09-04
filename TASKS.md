@@ -115,10 +115,10 @@ environment variables) are in [`docs/decisions.md`](docs/decisions.md).
 
 **Everything a person still has to do by hand lives in one place now:
 [Human checks](#human-checks--things-only-you-can-do), at the bottom of this
-file.** Eight of them: five left over from closed V1 milestones, one from M9
+file.** Nine of them: five left over from closed V1 milestones, one from M9
 (hearing a knock on a second computer), one from M11 (holding a DM across
-two, with a third person looking for it) and one from M12 (hearing somebody
-talk from a second computer). They are not optional and they are not tasks an
+two, with a third person looking for it) and two from M12 (hearing somebody
+talk from a second computer, then from a different network). They are not optional and they are not tasks an
 agent can take — each one needs somebody sitting in front of a real computer.
 
 **The one thing that bit us in T-301:** a webview page is a cross-origin caller,
@@ -374,7 +374,7 @@ Build order, cheapest and safest first:
 
 ```
 M9 knock (built) → M10 search (built) → M11 DMs (built)
-  → M12 voice (audio path + surface built; no STUN/TURN yet) → M13 ambient voice
+  → M12 voice (built; its four-network check is HC-9) → M13 ambient voice
 ```
 
 **Mobile is not in this sequence** (Matt, 2026-08-28). It was going to be M14;
@@ -612,7 +612,8 @@ them, and cmake installs fine in user space.
   carrier-grade NAT — and TASKS says it in fewer words: *do not test this on one
   machine*. `Engine::new` takes an ICE server list and it is **empty**, so today
   there is not even STUN: host candidates reach another machine on the same
-  network and nothing beyond it. That is T-1403, and it is the next thing.
+  network and nothing beyond it. T-1403 filled that in the same day; whether
+  it works against a real NAT is HC-9.
 
   **Three things are known to be missing and are not bugs:**
 
@@ -630,12 +631,76 @@ them, and cmake installs fine in user space.
   that is not evidence. **Unchanged, and not met** — see HC-8 for the first
   half of it, which can be done today on one network.
 
-- ⬜ **T-1403 · A TURN server in the deploy** — effort: **high**
+- ✅ **T-1403 · A TURN server in the deploy** — effort: **high** — Matt, 2026-09-04
   coturn in `deploy/`, credentials that are not shared secrets in a compose
   file, and the host guide updated. Without this, anybody behind a phone network
   or a corporate router cannot connect at all — and it will look like a bug in
   the app rather than missing infrastructure.
   *Accept:* two clients connect where at least one is behind carrier-grade NAT.
+  **Built; the acceptance is HC-9.** Nothing here has met a real NAT — the
+  relay itself could not even be started on the dev box (no usable Docker), so
+  what is proven is everything up to the relay's door.
+
+  ### The shape
+
+  Three pieces and one rule between them: **the server stores nothing and the
+  relay looks nothing up.** coturn and `linger-server` share one secret; a
+  member who joins voice asks `GET /voice/ice` and gets the relay's addresses
+  with a password computed for them on the spot — coturn's time-limited
+  scheme, `username = <expiry>:<user id>`, `credential = base64(HMAC-SHA1(
+  secret, username))` — which coturn recomputes and checks against its clock.
+  A day's TTL: longer than a call, short enough that a leaked one is a day of
+  bandwidth and not a key. The client fetches it on every join, before its
+  peer connections exist, because ICE needs its servers at the start.
+
+  **No relay is an empty list, not an error.** A host who runs none has voice
+  that works within one network, the server says so at startup, and the
+  client joins anyway. `LINGER_TURN_SECRET` alone (with a domain) means
+  `stun:`/`turn:<domain>:3478` over UDP and TCP; `LINGER_TURN_URLS` overrides.
+  Half a relay is refused at startup: URIs without a secret, a secret with
+  nowhere to point, or a secret under 16 characters.
+
+  **"Not shared secrets in a compose file."** The one secret lives in `.env`
+  (`deploy/.env.example`), which compose reads and nobody commits; the compose
+  file references it and holds nothing. Per-member passwords are derived, so
+  there is no list of them anywhere.
+
+  **Behind a profile.** coturn is `profiles: ["voice"]`, so a plain `docker
+  compose up -d` still works with no `.env` and runs no relay — the
+  fifteen-minute host has not been made to generate a secret for a feature
+  they may not want. `--profile voice` starts it. It runs `network_mode:
+  host` because a relay's whole job is being reachable at its real address on
+  a range of UDP ports, which container NAT gets in the way of. Ports: 3478
+  TCP+UDP and UDP 49160–49200, in the host guide with the `--external-ip`
+  note for a box behind a home router.
+
+  ### Where it lands in the code
+
+  - `linger-core::wire::{IceServer, IceServers}` — the shape `RTCIceServer`
+    has and nothing more; exported to TS like every wire type.
+  - `linger-server::turn` — `username`, `password`, `ice_servers`, pure and
+    tested against a **known answer computed independently** (python's
+    `hmac`), because if this HMAC ever disagrees with coturn's, every call
+    fails and nothing in Rust would notice.
+  - `config::TurnConfig`, redacted in `Debug` like `S3Config`, with the
+    startup checks in `turn_config` and its own unit tests.
+  - `routes/voice.rs` — one authed GET. `tests/voice_ice.rs`: no relay is an
+    empty list; a relay hands out a dated password for *this* member that
+    verifies against the secret; two members never share one; a stranger gets
+    401.
+  - Client: `joinVoice` fetches `/voice/ice` and passes `servers` to
+    `voice_join`; a server that cannot answer means an empty list, not a
+    failed join. The shell turns them into `RTCIceServer`s and `Engine::join`
+    now takes them per call (the constructor's list is the fallback), so the
+    same engine can join with a fresh password every time.
+
+  ### What none of this proves
+
+  The acceptance criterion is a real NAT and this box has no way to put one
+  in the path. The whole chain from "member asks" to "peer connection is
+  configured with a dated password" is tested; the chain from there through
+  a real coturn to a machine on a phone network is HC-9, and it is the thing
+  AGENTS §"Where you will be wrong" was written about.
 
 - ✅ **T-1404 · The voice surface** — effort: **medium** — Matt, 2026-09-04
   Join and leave, who is speaking, per-person volume, push-to-talk, a device
@@ -867,8 +932,8 @@ them.** They are repeated in the *Parking lot*.
 
 ## Human checks — things only you can do
 
-Eight things are built, tested, and **never once used by a person** — or, in
-HC-6, HC-7 and HC-8's case, never used across two of them. Automated tests
+Nine things are built, tested, and **never once used by a person** — or, in
+HC-6 through HC-9's case, never used across two of them. Automated tests
 prove the code does what it says. They cannot prove that a window opens, that a
 400 MB upload survives a real network, or that a sound is one you would want to
 hear. That is this list.
@@ -1086,8 +1151,8 @@ it in four places and not found it.
 ### HC-8 · Hear somebody talk, from a second computer
 
 *The first half of M12's milestone check (T-1402), and T-1404's "usable by
-somebody who has not read anything". The other half — four networks — cannot
-be done until T-1403 puts STUN and TURN in the deploy.*
+somebody who has not read anything". The other half — different networks —
+is HC-9, and needs the relay from T-1403 running.*
 
 The audio path has run end to end in one process (a tone in one engine comes
 out of the other's speaker, over a real peer connection), the microphone and
@@ -1095,9 +1160,10 @@ speaker code has opened a real sound card, and there is a button. What it has
 never done is carry a voice between two machines, or been pressed by anybody
 who did not build it.
 
-1. Two computers **on the same network** — the same wifi is fine. Different
-   networks will not connect yet (no STUN, no TURN: T-1403). Both signed into
-   the same server as different people, both in the same room.
+1. Two computers **on the same network** — the same wifi is fine. Start
+   here even if the relay is running: it takes the network out of the
+   question. Both signed into the same server as different people, both in
+   the same room.
 2. On each, press **join voice** under the room's name. Nothing else; if you
    had to look anything up, T-1404 has not met its criterion — say what.
 3. Talk. The other machine should play it within a fraction of a second, and
@@ -1118,6 +1184,39 @@ who did not build it.
 **Done when:** you have heard the other person, in the room, from a second
 computer, without reading anything first. Write down the delay you noticed
 and whether it grew.
+
+---
+
+### HC-9 · Talk across two networks, with the relay running
+
+*The second half of M12's milestone check (T-1402), and T-1403's acceptance:
+"two clients connect where at least one is behind carrier-grade NAT". This is
+the one AGENTS §"Where you will be wrong" was written about, and nothing on a
+dev box can stand in for it — the relay could not even be started there.*
+
+Do HC-8 first; it takes the network out of the question.
+
+1. On your real server, follow the host guide's *Voice between different
+   networks*: a secret in `.env`, your address as the realm, the four ports
+   open, `docker compose --profile voice up -d`. `docker compose ps` should
+   list `coturn`, and `docker compose logs linger` should **not** say there
+   is no relay.
+2. Two computers on **different networks**: one at home, one on a phone's
+   hotspot is the honest test, because a phone network is carrier-grade NAT
+   and is exactly what a direct connection cannot cross.
+3. Both press **join voice** in the same room. Within a few seconds the other
+   person's name should be on your line without `connecting…` or `can't
+   reach` beside it, and you should hear them.
+4. Talk for **ten minutes**. Listen for dropouts and for a delay that grows.
+5. Turn the relay off (`docker compose stop coturn`) and join again from the
+   hotspot. **Expect it to fail** — `can't reach` beside the name — because
+   that is the failure the relay exists to prevent, and seeing it once is how
+   you will recognise it if it ever comes back.
+6. Then the real one: **four people, four networks, one hour.** That is M12's
+   milestone check and the only evidence that counts.
+
+**Done when:** you have heard somebody on a phone network, through your own
+relay, and the four-person hour has happened once. Write down what dropped.
 
 ---
 

@@ -130,6 +130,19 @@ async fn serve() -> anyhow::Result<()> {
         );
     }
 
+    // Same idea for the relay: a server without one is fine and voice on it
+    // works between machines on one network — and fails, looking exactly like
+    // a bug in the app, the first time two people on different networks try.
+    // Said at startup so the host hears it before their friends do.
+    if config.turn.is_none() {
+        tracing::warn!(
+            "LINGER_TURN_SECRET is not set, so there is no voice relay. People on the same \
+             network can talk; people on different networks cannot connect at all. Run the \
+             coturn container from deploy/compose.yaml and set the same secret in both — see \
+             docs/host-guide.md."
+        );
+    }
+
     let db = db::init(&config.db_path()).await?;
     tokio::fs::create_dir_all(config.objects_dir()).await?;
 
