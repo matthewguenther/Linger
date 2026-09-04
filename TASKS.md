@@ -717,6 +717,21 @@ them, and cmake installs fine in user space.
     two sessions of one person as two seats), the microphone line, volume
     labels and clamping, preferences round-tripping.
   - The device listing test ran on real hardware and named the defaults.
+  - **Pressed in a running app, on one machine** (2026-09-04): a local
+    server, the desktop app signed in as the host, one room. `join voice`
+    opened the real microphone and speakers through the core, the server
+    answered, and the line read `VOICE  Matt you  mute  leave voice` with
+    `in #garage · voice` on the roster card; `mute` flipped to `muted`;
+    `leave voice` put the line back to `join voice` and the roster word went.
+    The picture is [`docs/t1404-voice-line.png`](docs/t1404-voice-line.png).
+    Nothing crossed a network and nobody was on the other end — HC-8 is
+    still the check that matters.
+
+  **A dev-box note that will bite the next person**: on Hyprland with an
+  Nvidia card the app dies at launch with a Wayland protocol error from
+  WebKitGTK; `WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm tauri dev` fixes it.
+  That is a machine quirk, not a Linger bug, so it lives in a home-directory
+  note and not in the README.
 
   ### Not done, on purpose
 
