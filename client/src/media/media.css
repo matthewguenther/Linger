@@ -400,14 +400,17 @@
   padding: 0 6px;
   border: 0;
   background: none;
-  color: var(--text-muted);
+  /* Secondary, not muted: this is the way to share a file and it was the
+     faintest thing on the composer row. Hover brightens rather than taking the
+     accent — SPEC §5.3 spends that on four things and this is not one. */
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-meta-size);
   cursor: pointer;
 }
 
 .composer-attach:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 .composer[data-dropping="true"] {

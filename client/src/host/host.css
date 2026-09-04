@@ -21,7 +21,7 @@
   border: 0;
   padding: 2px 8px;
   border-radius: var(--radius-control);
-  color: var(--text-faint);
+  color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-meta-size);
   cursor: pointer;

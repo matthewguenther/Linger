@@ -32,12 +32,13 @@
   background: none;
   border: 0;
   padding: 0;
-  color: var(--text-faint);
+  /* Secondary like the rail's controls: a way in has to be seen to be used. */
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .roster-switch:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .roster-list {

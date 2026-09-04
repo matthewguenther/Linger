@@ -221,6 +221,26 @@ with its note written here rather than in an archive.
   **SPEC did not have to change.** §5.6 lists the three modes; it never said
   where the control lives.
 
+- ✅ **T-905 · Settings has a name, a cog, and four tabs** — effort: **low** —
+  Matt, 2026-09-04
+  From the first-time walkthrough: the panel was headed *you*, nothing on
+  screen said *settings*, and it was one column of about sixty controls.
+  Now: the heading is **settings**; the status bar shows your name as text
+  with a **cog** beside it (the one icon every application agrees on, drawn
+  inline in `currentColor` — no icon square, SPEC §5.1); the rail's `you`
+  says `settings`; and the panel has four tabs, the same control the host
+  panel uses — *you*, *reading*, *sound & voice*, *this computer*. "Update
+  ready" in the status bar opens straight to the last one.
+
+  Two legibility fixes went with it, both from staring at screenshots: the
+  rail's `+ add` / `manage` / `+ room` / `settings`, the roster's `notify`,
+  and the composer's `+ file` were `--text-faint` — about 2.3:1 against the
+  rail, the least visible text in the window and also the way into most of
+  the app. They are `--text-secondary` now, brightening to primary on hover.
+  `+ file` no longer takes the accent on hover; SPEC §5.3 spends that on four
+  things and this is not one. Native form controls follow the theme
+  (`color-scheme`), so the device pickers and filters stopped rendering white.
+
 ---
 
 ## Backburner — later, not the next thing

@@ -59,12 +59,17 @@ Three parts.
 
 ## Settings, and where they are
 
-Nothing on screen says "settings". Your own name, bottom right in the status
-bar, opens it — so does **you**, next to *SERVER* in the left rail. The panel is
-headed **YOU**, and everything this guide calls *settings → something* is a
-section of it, top to bottom: who you are, how your name looks, password,
-density, theme, other people's names, sound, voice, take everything with you,
-updates, and this computer. **Close** at the top right puts the room back.
+The cog at the bottom right of the window opens settings; so does **settings**
+next to *SERVER* in the left rail. The panel has four tabs along the top:
+
+- **you** — your display name, how your name looks, your password
+- **reading** — density, theme, evening warmth, normalizing other people's names
+- **sound & voice** — the knock sound and quiet hours; microphone, speakers,
+  push to talk
+- **this computer** — take everything with you, updates, sign out
+
+Everything this guide calls *settings → something* is on one of those. **Close**
+at the top right puts the room back.
 
 ## Saying things
 
