@@ -35,6 +35,12 @@ export interface RosterEntry {
   seenAt: number | null;
   /** You. The roster includes you, because your own status is a thing to see. */
   isMe: boolean;
+  /**
+   * Their microphone is on somewhere we can see (SPEC §4.14). The same
+   * weight of signal as being in a room, drawn the same quiet way: a word on
+   * the card, not a badge.
+   */
+  inVoice: boolean;
 }
 
 /**
@@ -65,8 +71,11 @@ export function buildRoster(input: {
   meId: string | null;
   offlineAt: Readonly<Record<string, number>>;
   now: number;
+  /** User ids with a microphone on anywhere we can see. Nobody, if absent. */
+  inVoice?: ReadonlySet<string>;
 }): RosterEntry[] {
   const { users, presence, rooms, meId, offlineAt, now } = input;
+  const inVoice = input.inVoice ?? new Set<string>();
   const byUser = new Map(presence.map((entry) => [entry.user_id, entry]));
   const roomsById = new Map(rooms.map((room) => [room.id, room]));
 
@@ -88,6 +97,7 @@ export function buildRoster(input: {
       awayMessage: entry?.away_message ?? (here && state !== "idle" ? null : kept),
       seenAt: here ? now : (offlineAt[user.id] ?? user.last_seen_at),
       isMe: user.id === meId,
+      inVoice: inVoice.has(user.id),
     };
   });
 

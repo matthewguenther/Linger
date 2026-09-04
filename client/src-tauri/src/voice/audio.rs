@@ -67,6 +67,11 @@ pub trait Sink: Send + Sync + 'static {
     /// The peer has gone; drop whatever was queued for them. A sink that keeps
     /// no state per peer can ignore this.
     async fn forget(&self, _peer: &str) {}
+
+    /// How loud one peer plays *for you*, 1.0 being as sent. Local and only
+    /// ever yours: SPEC §4.14 says nobody can turn anybody else down, and a
+    /// gain that lives in your own sink cannot be anything but your own.
+    async fn set_volume(&self, _peer: &str, _volume: f32) {}
 }
 
 /// The two ends, together. What [`crate::voice::Engine::join`] takes: a

@@ -640,10 +640,12 @@ Current work queue lives in [TASKS.md](TASKS.md).
 - **Later (still V1, not on the critical path)** — entrance sounds (T-901…T-903).
   In the spec, not next. See [TASKS.md](TASKS.md) *Backburner*.
 - **V2** — **knock (M9), search (M10) and DMs (M11) are built.** Voice rooms
-  (M12) are started: the signalling that introduces two clients to each other is
-  in, and **there is no audio yet**, so nothing about voice is usable. Ambient
-  voice is planned and not started; V1 still has to be installed and used by
-  real people.
+  (M12) are most of the way there: the signalling, the audio path (microphone →
+  Opus → peer connection → speakers) and the surface (join, mute, push-to-talk,
+  who is talking, per-person volume, a device picker) are built. **It has only
+  ever run on one machine**, and there is no STUN or TURN yet, so two people on
+  different networks cannot connect. Ambient voice is planned and not started;
+  V1 still has to be installed and used by real people.
 - **Backburner** — a mobile client. Desktop comes first and has to be solid
   before anything else starts.
 - **V3 or never** — opt-in directory, sandboxed client scripting, custom emoji

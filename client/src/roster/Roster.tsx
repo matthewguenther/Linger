@@ -42,6 +42,7 @@ import {
   shortAgo,
   stateWord,
 } from "./roster";
+import { usersInVoice } from "../voice/voice";
 import "./roster.css";
 
 /** Down the right-hand side, or along the top of the composer. */
@@ -98,8 +99,9 @@ export default function Roster({
         meId: me?.id ?? null,
         offlineAt,
         now,
+        inVoice: usersInVoice(gateway.voice),
       }),
-    [users, presence, allRooms, me?.id, offlineAt, now],
+    [users, presence, allRooms, me?.id, offlineAt, now, gateway.voice],
   );
 
   // `me` is null until the first `ready`, and goes null again if the connection
@@ -488,8 +490,17 @@ function PersonLines({
 
   return (
     <div className="person-lines">
-      {where !== null || stateLine !== null ? (
-        <p className="person-where">{where ?? stateLine}</p>
+      {where !== null || stateLine !== null || entry.inVoice ? (
+        <p className="person-where">
+          {where ?? stateLine}
+          {/* A microphone on is said in a word, at the weight of "in a
+              room" (SPEC §4.14): no badge, no icon, no colour. */}
+          {entry.inVoice ? (
+            <span className="person-voice meta">
+              {where !== null || stateLine !== null ? " · " : ""}voice
+            </span>
+          ) : null}
+        </p>
       ) : null}
       {/* Gone, and what they left behind: SPEC §3 draws these on one line. */}
       {state === "offline" ? (

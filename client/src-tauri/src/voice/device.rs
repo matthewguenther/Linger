@@ -56,12 +56,79 @@ pub enum DeviceError {
 /// Both or neither: joining voice with no way to hear anybody is not a
 /// conversation, and joining with no microphone is what mute is for.
 pub fn open_default() -> Result<Devices, DeviceError> {
-    let source = Microphone::open()?;
-    let sink = Speaker::open()?;
+    open(None, None)
+}
+
+/// Open a microphone and speakers by name, or the defaults for `None`.
+///
+/// A name that is no longer there — headphones chosen last week and not
+/// plugged in today — falls back to the default rather than failing, because
+/// the person asked to talk, not to talk through one particular thing. The
+/// picker shows what is actually present, so the mismatch is visible there.
+pub fn open(input: Option<&str>, output: Option<&str>) -> Result<Devices, DeviceError> {
+    let source = Microphone::open(input)?;
+    let sink = Speaker::open(output)?;
     Ok(Devices {
         source: Arc::new(source),
         sink: Arc::new(sink),
     })
+}
+
+/// What the picker draws (T-1404): every device by name, and which two are
+/// the defaults.
+///
+/// Crosses to the window over Tauri IPC, not the server's wire — so it is
+/// serialised here rather than exported from `linger-core`, the same way the
+/// stored-session shape is.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeviceList {
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub default_input: Option<String>,
+    pub default_output: Option<String>,
+}
+
+/// Enumerate the sound devices. Blocks briefly, like the opens.
+pub fn list() -> Result<DeviceList, DeviceError> {
+    let host = cpal::default_host();
+    Ok(DeviceList {
+        inputs: names(host.input_devices()?),
+        outputs: names(host.output_devices()?),
+        default_input: host.default_input_device().and_then(|d| name_of(&d)),
+        default_output: host.default_output_device().and_then(|d| name_of(&d)),
+    })
+}
+
+/// A device's name, which is what the picker shows and what a preference
+/// remembers. A device that will not say its name is left out rather than
+/// shown as a blank.
+fn name_of(device: &cpal::Device) -> Option<String> {
+    device
+        .description()
+        .ok()
+        .map(|description| description.name().to_owned())
+}
+
+fn names(devices: impl Iterator<Item = cpal::Device>) -> Vec<String> {
+    devices.filter_map(|device| name_of(&device)).collect()
+}
+
+/// The named device from a list, or the default when there is no name or
+/// the name is not there any more.
+fn find(
+    wanted: Option<&str>,
+    devices: impl Iterator<Item = cpal::Device>,
+    default: Option<cpal::Device>,
+    kind: &'static str,
+) -> Result<cpal::Device, DeviceError> {
+    if let Some(name) = wanted {
+        for device in devices {
+            if name_of(&device).as_deref() == Some(name) {
+                return Ok(device);
+            }
+        }
+    }
+    default.ok_or(DeviceError::NoDevice(kind))
 }
 
 /// The frames a microphone produces, and a way to stop it.
@@ -71,19 +138,24 @@ pub struct Microphone {
 }
 
 impl Microphone {
-    /// Open the default input device.
+    /// Open an input device by name, or the default for `None`.
     ///
     /// Blocks while the device is opened, which on some hosts is tens of
     /// milliseconds — call it from a blocking task, not from the reactor.
-    pub fn open() -> Result<Self, DeviceError> {
+    pub fn open(name: Option<&str>) -> Result<Self, DeviceError> {
+        let wanted = name.map(str::to_owned);
         // Sixteen frames is a third of a second. The callback drops frames if
         // the engine falls further behind than that, because a queue that
         // grows is latency nobody asked for.
         let (tx, rx) = mpsc::channel::<Vec<i16>>(16);
         let worker = Worker::start(move || {
-            let device = cpal::default_host()
-                .default_input_device()
-                .ok_or(DeviceError::NoDevice("input"))?;
+            let host = cpal::default_host();
+            let device = find(
+                wanted.as_deref(),
+                host.input_devices()?,
+                host.default_input_device(),
+                "input",
+            )?;
             let config = match pick(device.supported_input_configs()?) {
                 Some(config) => config,
                 None => device.default_input_config()?,
@@ -147,17 +219,36 @@ pub struct Speaker {
 struct Lane {
     queue: VecDeque<i16>,
     resampler: Option<Linear>,
+    /// Your volume for them. Applied on the way in, so the callback only
+    /// ever sums.
+    gain: f32,
+}
+
+impl Lane {
+    fn new(rate: u32) -> Self {
+        Self {
+            queue: VecDeque::new(),
+            resampler: (rate != SAMPLE_RATE).then(|| Linear::new(SAMPLE_RATE, rate)),
+            gain: 1.0,
+        }
+    }
 }
 
 impl Speaker {
-    /// Open the default output device. Blocks like [`Microphone::open`].
-    pub fn open() -> Result<Self, DeviceError> {
+    /// Open an output device by name, or the default for `None`. Blocks like
+    /// [`Microphone::open`].
+    pub fn open(name: Option<&str>) -> Result<Self, DeviceError> {
+        let wanted = name.map(str::to_owned);
         let lanes: Arc<Mutex<HashMap<String, Lane>>> = Arc::new(Mutex::new(HashMap::new()));
         let shared = Arc::clone(&lanes);
         let worker = Worker::start(move || {
-            let device = cpal::default_host()
-                .default_output_device()
-                .ok_or(DeviceError::NoDevice("output"))?;
+            let host = cpal::default_host();
+            let device = find(
+                wanted.as_deref(),
+                host.output_devices()?,
+                host.default_output_device(),
+                "output",
+            )?;
             let config = match pick(device.supported_output_configs()?) {
                 Some(config) => config,
                 None => device.default_output_config()?,
@@ -206,10 +297,16 @@ impl Sink for Speaker {
     async fn play(&self, peer: &str, samples: &[i16]) {
         let cap = (self.rate / 1000 * MAX_QUEUED_MS) as usize;
         let mut lanes = lock(&self.lanes);
-        let lane = lanes.entry(peer.to_string()).or_insert_with(|| Lane {
-            queue: VecDeque::new(),
-            resampler: (self.rate != SAMPLE_RATE).then(|| Linear::new(SAMPLE_RATE, self.rate)),
-        });
+        let lane = lanes
+            .entry(peer.to_string())
+            .or_insert_with(|| Lane::new(self.rate));
+        let scaled;
+        let samples = if (lane.gain - 1.0).abs() < f32::EPSILON {
+            samples
+        } else {
+            scaled = scale(samples, lane.gain);
+            &scaled
+        };
         match lane.resampler.as_mut() {
             Some(resampler) => {
                 let mut out = Vec::with_capacity(samples.len());
@@ -226,6 +323,32 @@ impl Sink for Speaker {
     async fn forget(&self, peer: &str) {
         lock(&self.lanes).remove(peer);
     }
+
+    async fn set_volume(&self, peer: &str, volume: f32) {
+        // The lane is made if it is not there yet, so a volume set before the
+        // first frame arrives is not lost.
+        lock(&self.lanes)
+            .entry(peer.to_string())
+            .or_insert_with(|| Lane::new(self.rate))
+            .gain = volume.clamp(0.0, MAX_GAIN);
+    }
+}
+
+/// Twice as loud as sent is as far as the control goes. Past that a quiet
+/// microphone becomes a loud hiss, and a clamp on every sample is doing the
+/// work a limiter should.
+pub const MAX_GAIN: f32 = 2.0;
+
+/// Multiply a frame by a gain, clamped to the sample range.
+fn scale(samples: &[i16], gain: f32) -> Vec<i16> {
+    samples
+        .iter()
+        .map(|s| {
+            #[allow(clippy::cast_possible_truncation)]
+            let v = (f32::from(*s) * gain).clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
+            v
+        })
+        .collect()
 }
 
 /// The output callback: one sample from every lane, summed, into every
@@ -541,6 +664,7 @@ mod tests {
                 Lane {
                     queue: VecDeque::from(vec![level, -level, 100]),
                     resampler: None,
+                    gain: 1.0,
                 },
             );
         }
@@ -558,7 +682,36 @@ mod tests {
         assert_eq!(out[7], 0);
     }
 
-    // The two below need a real audio device and are run by hand
+    /// Your volume for somebody is a multiply with a ceiling, not a way to
+    /// make a click.
+    #[test]
+    fn scaling_multiplies_and_clamps() {
+        assert_eq!(scale(&[100, -100], 0.5), vec![50, -50]);
+        assert_eq!(scale(&[20_000, -20_000], 2.0), vec![i16::MAX, i16::MIN]);
+        assert_eq!(scale(&[1234], 0.0), vec![0]);
+    }
+
+    /// The picker draws names; the enumeration has to come back with the
+    /// defaults among them, or the picker cannot say which is which.
+    #[test]
+    #[ignore = "needs real audio devices"]
+    fn listing_devices_names_the_defaults() {
+        let devices = list().expect("enumerate devices");
+        assert!(!devices.inputs.is_empty(), "no input devices at all");
+        assert!(!devices.outputs.is_empty(), "no output devices at all");
+        let input = devices.default_input.expect("a default input");
+        let output = devices.default_output.expect("a default output");
+        assert!(
+            devices.inputs.contains(&input),
+            "default input {input} is not in the list"
+        );
+        assert!(
+            devices.outputs.contains(&output),
+            "default output {output} is not in the list"
+        );
+    }
+
+    // The tests below need a real audio device and are run by hand
     // (`cargo test -- --ignored`). CI has no sound card, and a test that skips
     // itself quietly on a runner is not the same as one that passed.
 
@@ -568,7 +721,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a real input device"]
     async fn the_microphone_produces_frames_in_real_time() {
-        let microphone = Microphone::open().expect("open the default microphone");
+        let microphone = Microphone::open(None).expect("open the default microphone");
         let started = std::time::Instant::now();
         for _ in 0..25 {
             let frame = tokio::time::timeout(std::time::Duration::from_secs(2), microphone.frame())
@@ -589,7 +742,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs a real output device, and makes a sound"]
     async fn the_speaker_plays_a_tone_and_closes() {
-        let speaker = Speaker::open().expect("open the default speakers");
+        let speaker = Speaker::open(None).expect("open the default speakers");
         let tone = crate::voice::audio::Tone::default();
         for _ in 0..25 {
             let frame = tone.frame().await.expect("a frame");

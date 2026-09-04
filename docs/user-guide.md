@@ -92,6 +92,38 @@ or paste one from your clipboard.
 - Files may be deleted after a while — a year, unless whoever runs the server
   chose differently. **Starring a file keeps it forever.**
 
+## Talking
+
+Voice happens in a room, not in a call. There is nothing to ring and nobody to
+invite: you are already in the room, and **join voice** under the room's name
+turns your microphone on there. The line under the header then says who is in
+voice, and a name comes up to full weight while that person is talking.
+
+While you are in:
+
+- **mute** stops sending, instantly, and nobody else can change it. Nobody can
+  mute you either, and nobody can turn your microphone on.
+- The small slider beside each name is **how loud they are for you**. It never
+  leaves your computer.
+- **leave voice** turns the microphone off. Closing the app does too.
+
+**Push to talk** is in settings → voice. With it on, every call starts muted and
+the microphone is open only while you hold `ctrl`. It is off by default because
+a room you leave running is the point, and a key you have to hold is the
+opposite of that.
+
+Which microphone and speakers to use is also in settings → voice. A change
+applies the next time you join. If a device you picked is not plugged in, the
+system default is used and the picker says so.
+
+**Nothing is recorded.** Not by the server, not by anybody's app, not "for
+transcription". Audio goes between the people in the room, and the server's
+whole part is introducing them.
+
+Two things to know today: voice only works between computers **on the same
+network** until the host runs a relay (that is coming), and if your headphones
+come unplugged mid-sentence the microphone stops and you join again.
+
 ## Finding things again
 
 Open **media** from the rail. It is everything ever shared on the server —

@@ -181,7 +181,29 @@ impl voice::Watcher for VoiceWatcher {
             },
         );
     }
+
+    fn speaking(&self, peer: Option<&str>, speaking: bool) {
+        let _ = self.app.emit(
+            VOICE_SPEAKING_EVENT,
+            VoiceSpeakingEvent {
+                server: &self.server,
+                peer,
+                speaking,
+            },
+        );
+    }
 }
+
+/// Somebody started or stopped talking. `peer` is null for you.
+#[derive(Clone, Serialize)]
+struct VoiceSpeakingEvent<'a> {
+    server: &'a str,
+    peer: Option<&'a str>,
+    speaking: bool,
+}
+
+/// The event a change in who is talking arrives on.
+pub const VOICE_SPEAKING_EVENT: &str = "voice:speaking";
 
 /// Our own microphone's state, on its way to the window: `sending`, or
 /// `stopped` when the device went away mid-call.
@@ -347,15 +369,42 @@ async fn voice_join(
     base_url: String,
     session_id: String,
     room_id: RoomId,
+    input: Option<String>,
+    output: Option<String>,
 ) -> Result<(), String> {
     let engine = engine_for(&app, &base_url);
     engine.set_session(session_id).await;
-    let devices = tokio::task::spawn_blocking(voice::device::open_default)
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
+    let devices = tokio::task::spawn_blocking(move || {
+        voice::device::open(input.as_deref(), output.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
     engine.join(room_id, devices).await;
     Ok(())
+}
+
+/// Stop or resume sending the microphone. Yours alone (SPEC §4.14); the
+/// surface's mute button and its push-to-talk key both land here.
+#[tauri::command]
+async fn voice_mute(app: AppHandle, base_url: String, muted: bool) {
+    engine_for(&app, &base_url).set_muted(muted);
+}
+
+/// How loud one peer plays for you, 1.0 being as sent.
+#[tauri::command]
+async fn voice_volume(app: AppHandle, base_url: String, peer: String, volume: f32) {
+    engine_for(&app, &base_url).set_volume(&peer, volume).await;
+}
+
+/// The sound devices on this machine, for the picker. Enumeration can block
+/// for a moment, so it is done off the reactor.
+#[tauri::command]
+async fn voice_devices() -> Result<voice::device::DeviceList, String> {
+    tokio::task::spawn_blocking(voice::device::list)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 /// Leave voice, and tear the mesh down whether or not the server answers.
@@ -417,6 +466,9 @@ pub fn run() {
             voice_join,
             voice_leave,
             voice_frame,
+            voice_mute,
+            voice_volume,
+            voice_devices,
             updates::app_version,
             updates::update_check,
             updates::update_install
